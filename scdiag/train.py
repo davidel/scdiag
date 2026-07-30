@@ -16,6 +16,7 @@ from transformers import (
     TrainingArguments,
 )
 
+from scdiag.gpu_callback import GPUStatsCallback
 from scdiag.logging_utils import setup_logging
 
 
@@ -287,6 +288,7 @@ def main(argv=None):
       train_dataset=dataset["train"],
       eval_dataset=dataset["test"],
       compute_metrics=compute_metrics,
+      callbacks=[GPUStatsCallback(device)],
   )
 
   log.info("Starting training pipeline...")
