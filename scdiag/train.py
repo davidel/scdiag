@@ -266,7 +266,11 @@ def main(argv=None):
   )
 
   log.info("Starting training pipeline...")
-  trainer.train()
+  try:
+    trainer.train()
+  except KeyboardInterrupt:
+    trainer.save_model(args.output_dir)
+    log.info("Interrupted — checkpoint saved.")
 
 
 if __name__ == "__main__":
