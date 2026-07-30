@@ -115,6 +115,21 @@ def parse_args(argv=None):
   return parser.parse_args(argv)
 
 
+def _detect_column(dataset, candidates, *, feature_types=None, col_name):
+  """Return the first column in *candidates* that exists in *dataset*.
+
+  *feature_types* optionally restricts the check to specific feature types.
+  Raises ``ValueError`` if nothing matches.
+  """
+  for name, feat in dataset.features.items():
+    if name.lower() in candidates:
+      if feature_types is None or isinstance(feat, feature_types):
+        return name
+  raise ValueError(
+      f"No {col_name} column found in dataset. "
+      f"Available features: {list(dataset.features.keys())}")
+
+
 def _detect_label_column(dataset):
   """Return the name of the label column in *dataset*.
 
@@ -123,30 +138,59 @@ def _detect_label_column(dataset):
   label conventions (``label``, ``dx``, ``diagnosis``, ``class``,
   ``category``).
   """
+  try:
+    return _detect_column(
+        dataset,
+        {"label", "dx", "diagnosis", "class", "category"},
+        feature_types=(datasets.ClassLabel,),
+        col_name="label",
+    )
+  except ValueError:
+    return _detect_column(
+        dataset,
+        {"label", "dx", "diagnosis", "class", "category"},
+        feature_types=(datasets.Value,),
+        col_name="label",
+    )
+
+
+def _detect_image_column(dataset):
+  """Return the name of the image column in *dataset*.
+
+  Checks for common names (``image``, ``img``, ``pixel_values``,
+  ``pixel_values_float``) and verifies the feature is an ``Image`` type.
+  """
+  _IMAGE_CANDIDATES = {"image", "img", "pixel_values", "pixel_values_float"}
   for name, feat in dataset.features.items():
-    if isinstance(feat, datasets.ClassLabel):
+    if name.lower() in _IMAGE_CANDIDATES and isinstance(feat, datasets.Image):
       return name
-  # Common string-column names that carry the classification target.
-  _LABEL_CANDIDATES = {"label", "dx", "diagnosis", "class", "category"}
+  # Fall back: any column that is an Image feature.
   for name, feat in dataset.features.items():
-    if isinstance(feat, datasets.Value) and feat.dtype == "string":
-      if name.lower() in _LABEL_CANDIDATES:
-        return name
+    if isinstance(feat, datasets.Image):
+      return name
   raise ValueError(
-      f"No label column found in dataset. "
+      f"No image column found in dataset. "
       f"Available features: {list(dataset.features.keys())}")
 
 
 def load_and_split_dataset(dataset_id, test_size=0.2, seed=42, cache_dir=None):
-  """Load a dataset with a single train split and split it into train/test."""
+  """Load a dataset with a single train split and split it into train/test.
+
+  Returns ``(dataset_dict, image_col)`` where *image_col* is the name of
+  the column containing the PIL images.
+  """
   raw = load_dataset(dataset_id, split="train", trust_remote_code=True, cache_dir=cache_dir)
+
+  image_col = _detect_image_column(raw)
+
   label_col = _detect_label_column(raw)
   # Cast to ClassLabel if needed so the rest of the pipeline works.
   if not isinstance(raw.features[label_col], datasets.ClassLabel):
     raw = raw.class_encode_column(label_col)
   if label_col != "label":
     raw = raw.rename_column(label_col, "label")
-  return raw.train_test_split(test_size=test_size, seed=seed)
+
+  return raw.train_test_split(test_size=test_size, seed=seed), image_col
 
 
 def compute_class_weights(dataset, num_labels):
@@ -195,10 +239,11 @@ def compute_metrics(eval_pred):
   return {"accuracy": acc, "macro_f1": f1_score}
 
 
-def build_datasets(ds, model_name, image_size, cache_dir=None):
+def build_datasets(ds, model_name, image_size, image_col="image", cache_dir=None):
   """Attach preprocessing transforms to *ds* and return ``(ds, processor)``.
 
   *ds* is a ``DatasetDict`` with train/test splits already loaded.
+  *image_col* is the name of the column holding the PIL images.
   """
   processor = AutoImageProcessor.from_pretrained(
       model_name, size={"height": image_size, "width": image_size},
@@ -214,13 +259,13 @@ def build_datasets(ds, model_name, image_size, cache_dir=None):
   ])
 
   def train_transform(examples):
-    images = [augmentations(img.convert("RGB")) for img in examples["image"]]
+    images = [augmentations(img.convert("RGB")) for img in examples[image_col]]
     inputs = processor(images, return_tensors="pt")
     inputs["labels"] = examples["label"]
     return inputs
 
   def val_transform(examples):
-    inputs = processor([img.convert("RGB") for img in examples["image"]],
+    inputs = processor([img.convert("RGB") for img in examples[image_col]],
                        return_tensors="pt")
     inputs["labels"] = examples["label"]
     return inputs
@@ -242,7 +287,7 @@ def main(argv=None):
 
   # Load the raw dataset first so we can inspect features and compute class
   # weights before any transforms are attached.
-  raw = load_and_split_dataset(args.dataset, cache_dir=args.cache_dir)
+  raw, image_col = load_and_split_dataset(args.dataset, cache_dir=args.cache_dir)
 
   labels = raw["train"].features["label"].names
   num_labels = len(labels) if args.num_labels is None else args.num_labels
@@ -254,7 +299,8 @@ def main(argv=None):
   logging.info(f"Class weights: {class_weights.tolist()}")
 
   # Now attach preprocessing transforms.
-  dataset, processor = build_datasets(raw, args.model, args.image_size)
+  dataset, processor = build_datasets(raw, args.model, args.image_size,
+                                      image_col=image_col)
 
   model = AutoModelForImageClassification.from_pretrained(
       args.model,
