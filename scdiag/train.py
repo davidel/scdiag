@@ -96,6 +96,9 @@ def parse_args(argv=None):
   parser.add_argument("--output_dir",
                       default="./results",
                       help="Where to save checkpoints and logs (default: %(default)s)")
+  parser.add_argument("--cache_dir",
+                      default=None,
+                      help="HuggingFace cache directory for models and datasets (default: system default)")
   parser.add_argument("--tb_logdir",
                       default=None,
                       help="TensorBoard log directory. Enables TensorBoard if set.")
@@ -106,9 +109,9 @@ def parse_args(argv=None):
   return parser.parse_args(argv)
 
 
-def load_and_split_dataset(dataset_id, test_size=0.2, seed=42):
+def load_and_split_dataset(dataset_id, test_size=0.2, seed=42, cache_dir=None):
   """Load a dataset with a single train split and split it into train/test."""
-  raw = load_dataset(dataset_id, split="train", trust_remote_code=True)
+  raw = load_dataset(dataset_id, split="train", trust_remote_code=True, cache_dir=cache_dir)
   return raw.train_test_split(test_size=test_size, seed=seed)
 
 
@@ -158,9 +161,9 @@ def compute_metrics(eval_pred):
   return {"accuracy": acc, "macro_f1": f1_score}
 
 
-def build_datasets(dataset_id, image_size):
+def build_datasets(dataset_id, image_size, cache_dir=None):
   """Load a HuggingFace image dataset, preprocess, and return splits."""
-  ds = load_and_split_dataset(dataset_id)
+  ds = load_and_split_dataset(dataset_id, cache_dir=cache_dir)
 
   processor = AutoImageProcessor.from_pretrained(
       "facebook/resnext50_32x4d", size={"height": image_size, "width": image_size})
@@ -203,7 +206,7 @@ def main(argv=None):
   if torch.cuda.is_available():
     torch.set_float32_matmul_precision("high")
 
-  dataset = build_datasets(args.dataset, args.image_size)
+  dataset = build_datasets(args.dataset, args.image_size, cache_dir=args.cache_dir)
 
   labels = dataset["train"].features["label"].names
   num_labels = len(labels) if args.num_labels is None else args.num_labels
@@ -220,6 +223,7 @@ def main(argv=None):
       id2label=id2label,
       label2id=label2id,
       ignore_mismatched_sizes=True,
+      cache_dir=args.cache_dir,
   )
   model.to(device)
 
