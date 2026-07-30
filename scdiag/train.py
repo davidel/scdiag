@@ -103,10 +103,6 @@ def parse_args(argv=None):
                       default="INFO",
                       choices=["DEBUG", "INFO", "WARNING", "ERROR"],
                       help="Python logging level (default: %(default)s)")
-  parser.add_argument("--dry_run",
-                      action="store_true",
-                      help="Prepare dataset & model but skip training.")
-
   return parser.parse_args(argv)
 
 
@@ -258,10 +254,6 @@ def main(argv=None):
 
   if args.tb_logdir:
     log.info(f"TensorBoard logging to: {args.tb_logdir}")
-
-  if args.dry_run:
-    log.info("Dry run - model and dataset prepared, skipping training.")
-    return
 
   trainer = WeightedTrainer(
       class_weights=class_weights.tolist(),
