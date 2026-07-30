@@ -149,16 +149,14 @@ class WeightedTrainer(Trainer):
     return (loss, outputs) if return_outputs else loss
 
 
-_accuracy_metric = evaluate.load("accuracy")
-_f1_metric = evaluate.load("f1")
-
-
 def compute_metrics(eval_pred):
   logits, labels = eval_pred
   preds = np.argmax(logits, axis=-1)
-  acc = _accuracy_metric.compute(predictions=preds, references=labels)["accuracy"]
-  f1 = _f1_metric.compute(predictions=preds, references=labels, average="macro")["f1"]
-  return {"accuracy": acc, "macro_f1": f1}
+  accuracy = evaluate.load("accuracy")
+  f1 = evaluate.load("f1")
+  acc = accuracy.compute(predictions=preds, references=labels)["accuracy"]
+  f1_score = f1.compute(predictions=preds, references=labels, average="macro")["f1"]
+  return {"accuracy": acc, "macro_f1": f1_score}
 
 
 def build_datasets(dataset_id, image_size):
