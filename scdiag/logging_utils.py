@@ -31,9 +31,14 @@ class GlogFormatter(logging.Formatter):
 
 
 def setup_logging(level="INFO"):
-  """Configure root logger with glog-style formatting."""
+  """Configure root logger with glog-style formatting.
+
+  Safe to call more than once — the handler is only added when not already
+  present.
+  """
   root = logging.getLogger()
   root.setLevel(getattr(logging, level))
-  handler = logging.StreamHandler()
-  handler.setFormatter(GlogFormatter())
-  root.addHandler(handler)
+  if not any(isinstance(h, logging.StreamHandler) for h in root.handlers):
+    handler = logging.StreamHandler()
+    handler.setFormatter(GlogFormatter())
+    root.addHandler(handler)

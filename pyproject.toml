@@ -25,7 +25,7 @@ gcs = ["google-cloud-storage"]
 dev = ["pytest", "ruff"]
 
 [project.scripts]
-skin-train = "scdiag.train:main"
+scdiag-train = "scdiag.train:main"
 
 [tool.setuptools.packages.find]
 include = ["scdiag*"]

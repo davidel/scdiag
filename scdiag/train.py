@@ -21,7 +21,12 @@ from scdiag.logging_utils import setup_logging
 
 
 def parse_args(argv=None):
-  """Parse command-line arguments. *argv* defaults to ``sys.argv[1:]``."""
+  """Configure the CLI for fine-tuning an image-classification model.
+
+  Accepted flags select the pretrained backbone, dataset, image resolution,
+  optimiser settings, and output directory.  *argv* defaults to
+  ``sys.argv[1:]`` when not provided (i.e. when called from ``main()``).
+"""
   parser = argparse.ArgumentParser(
       description="Fine-tune a HuggingFace vision model for image classification.")
 
@@ -120,14 +125,14 @@ def get_num_labels_from_dataset(dataset):
   return dataset["train"].features["label"].num_classes
 
 
-def compute_class_weights(dataset, num_labels, device):
-  """Compute inverse-frequency weights and return as tensor on *device*."""
+def compute_class_weights(dataset, num_labels):
+  """Compute inverse-frequency class weights as a CPU tensor."""
   labels = np.array(dataset["train"]["label"])
   counts = np.bincount(labels, minlength=num_labels).astype(np.float64)
   counts = np.maximum(counts, 1.0)
   total = counts.sum()
   weights = total / (num_labels * counts)
-  return torch.tensor(weights, dtype=torch.float32).to(device)
+  return torch.tensor(weights, dtype=torch.float32)
 
 
 class WeightedTrainer(Trainer):
@@ -136,28 +141,28 @@ class WeightedTrainer(Trainer):
     super().__init__(**kwargs)
     self.class_weights = class_weights
 
-  def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
-    labels = inputs.pop("labels")
+  def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+    labels = inputs["labels"]
     outputs = model(**inputs)
     logits = outputs.logits
     if self.class_weights is not None:
-      weight = torch.tensor(self.class_weights,
-                            device=logits.device,
-                            dtype=logits.dtype)
-      loss_fn = nn.CrossEntropyLoss(weight=weight)
+      loss_fn = nn.CrossEntropyLoss(
+          weight=self.class_weights.to(device=logits.device, dtype=logits.dtype))
     else:
       loss_fn = nn.CrossEntropyLoss()
     loss = loss_fn(logits, labels)
     return (loss, outputs) if return_outputs else loss
 
 
+_metric_accuracy = evaluate.load("accuracy")
+_metric_f1 = evaluate.load("f1")
+
+
 def compute_metrics(eval_pred):
   logits, labels = eval_pred
   preds = np.argmax(logits, axis=-1)
-  accuracy = evaluate.load("accuracy")
-  f1 = evaluate.load("f1")
-  acc = accuracy.compute(predictions=preds, references=labels)["accuracy"]
-  f1_score = f1.compute(predictions=preds, references=labels, average="macro")["f1"]
+  acc = _metric_accuracy.compute(predictions=preds, references=labels)["accuracy"]
+  f1_score = _metric_f1.compute(predictions=preds, references=labels, average="macro")["f1"]
   return {"accuracy": acc, "macro_f1": f1_score}
 
 
@@ -213,7 +218,7 @@ def main(argv=None):
   id2label = {str(i): label for i, label in enumerate(labels)}
   logging.info(f"num_labels: {num_labels}")
 
-  class_weights = compute_class_weights(dataset, num_labels, device)
+  class_weights = compute_class_weights(dataset, num_labels).to(device)
   logging.info(f"Class weights: {class_weights.tolist()}")
 
   model = AutoModelForImageClassification.from_pretrained(
