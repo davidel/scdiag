@@ -29,14 +29,14 @@ def parse_args(argv=None):
       "--model",
       required=True,
       help="HuggingFace model id or local path (e.g. facebook/resnext50_32x4d)")
-  parser.add_argument("--num-labels",
+  parser.add_argument("--num_labels",
                       type=int,
                       default=None,
                       help="Number of classes. If omitted, inferred from the dataset.")
   parser.add_argument("--dataset",
                       default="mrtg/ham10000",
                       help="HuggingFace dataset id (default: %(default)s)")
-  parser.add_argument("--image-size",
+  parser.add_argument("--image_size",
                       type=int,
                       default=448,
                       help="Resize images to this square size (default: %(default)s)")
@@ -44,7 +44,7 @@ def parse_args(argv=None):
                       type=int,
                       default=5,
                       help="Number of training epochs (default: %(default)s)")
-  parser.add_argument("--batch-size",
+  parser.add_argument("--batch_size",
                       type=int,
                       default=32,
                       help="Per-device batch size (default: %(default)s)")
@@ -52,55 +52,58 @@ def parse_args(argv=None):
                       type=float,
                       default=4e-5,
                       help="Peak learning rate (default: %(default)s)")
-  parser.add_argument("--weight-decay",
+  parser.add_argument("--weight_decay",
                       type=float,
                       default=0.01,
                       help="Weight decay (default: %(default)s)")
-  parser.add_argument("--lr-scheduler-type",
+  parser.add_argument("--lr_scheduler_type",
                       default="cosine",
                       help="Learning-rate scheduler type (default: %(default)s)")
-  parser.add_argument("--warmup-ratio",
+  parser.add_argument("--warmup_ratio",
                       type=float,
                       default=0.1,
                       help="Fraction of steps used for linear warmup (default: %(default)s)")
-  parser.add_argument("--max-grad-norm",
+  parser.add_argument("--max_grad_norm",
                       type=float,
                       default=1.0,
                       help="Max gradient norm for clipping (default: %(default)s)")
-  parser.add_argument("--eval-every",
+  parser.add_argument("--eval_every",
                       default="epoch",
                       choices=["epoch", "step"],
                       help="Run evaluation every epoch or step (default: %(default)s)")
-  parser.add_argument("--save-every",
+  parser.add_argument("--save_every",
                       default="epoch",
                       choices=["epoch", "step"],
                       help="Save checkpoint every epoch or step (default: %(default)s)")
   parser.add_argument(
-      "--eval-steps",
+      "--eval_steps",
       type=int,
       default=500,
-      help="Evaluate every N steps when --eval-every=step (default: %(default)s)")
+      help="Evaluate every N steps when --eval_every=step (default: %(default)s)")
   parser.add_argument(
-      "--save-steps",
+      "--save_steps",
       type=int,
       default=500,
-      help="Save every N steps when --save-every=step (default: %(default)s)")
-  parser.add_argument("--logging-steps",
+      help="Save every N steps when --save_every=step (default: %(default)s)")
+  parser.add_argument("--logging_steps",
                       type=int,
                       default=20,
                       help="Log every N steps (default: %(default)s)")
-  parser.add_argument("--dataloader-num-workers",
+  parser.add_argument("--dataloader_num_workers",
                       type=int,
                       default=2,
                       help="DataLoader worker processes (default: %(default)s)")
-  parser.add_argument("--output-dir",
+  parser.add_argument("--output_dir",
                       default="./results",
                       help="Where to save checkpoints and logs (default: %(default)s)")
-  parser.add_argument("--logging-level",
+  parser.add_argument("--tb_logdir",
+                      default=None,
+                      help="TensorBoard log directory. Enables TensorBoard if set.")
+  parser.add_argument("--logging_level",
                       default="INFO",
                       choices=["DEBUG", "INFO", "WARNING", "ERROR"],
                       help="Python logging level (default: %(default)s)")
-  parser.add_argument("--dry-run",
+  parser.add_argument("--dry_run",
                       action="store_true",
                       help="Prepare dataset & model but skip training.")
 
@@ -228,6 +231,8 @@ def main(argv=None):
   trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
   log.info(f"Model params: {total_params:,} total, {trainable:,} trainable")
 
+  report_to = ["tensorboard"] if args.tb_logdir else ["none"]
+
   training_args = TrainingArguments(
       output_dir=args.output_dir,
       num_train_epochs=args.epochs,
@@ -247,8 +252,12 @@ def main(argv=None):
       metric_for_best_model="macro_f1",
       bf16=torch.cuda.is_available(),
       dataloader_num_workers=args.dataloader_num_workers,
-      report_to="none",
+      report_to=report_to,
+      **({"logging_dir": args.tb_logdir} if args.tb_logdir else {}),
   )
+
+  if args.tb_logdir:
+    log.info(f"TensorBoard logging to: {args.tb_logdir}")
 
   if args.dry_run:
     log.info("Dry run - model and dataset prepared, skipping training.")
