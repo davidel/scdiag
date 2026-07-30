@@ -200,7 +200,17 @@ def compute_class_weights(dataset, num_labels):
   applied) so that column access does not trigger any registered
   transforms.
   """
-  labels = np.array(dataset["train"]["label"])
+  feat = dataset["train"].features["label"]
+  raw_labels = dataset["train"]["label"]
+  if isinstance(feat, datasets.ClassLabel):
+    labels = np.array(feat.str2int(raw_labels) if isinstance(raw_labels[0], str)
+                      else raw_labels, dtype=np.int64)
+  else:
+    # Fallback: encode arbitrary values to 0..N-1.
+    unique = sorted(set(raw_labels))
+    mapping = {v: i for i, v in enumerate(unique)}
+    labels = np.array([mapping[v] for v in raw_labels], dtype=np.int64)
+    num_labels = len(unique)
   counts = np.bincount(labels, minlength=num_labels).astype(np.float64)
   counts = np.maximum(counts, 1.0)
   total = counts.sum()
@@ -244,31 +254,45 @@ def build_datasets(ds, model_name, image_size, image_col="image", cache_dir=None
 
   *ds* is a ``DatasetDict`` with train/test splits already loaded.
   *image_col* is the name of the column holding the PIL images.
-  """
-  processor = AutoImageProcessor.from_pretrained(
-      model_name, size={"height": image_size, "width": image_size},
-      cache_dir=cache_dir)
 
-  augmentations = v2.Compose([
+  The processor is loaded only to obtain its normalization constants;
+  all spatial transforms (resize, flip, jitter) and normalization are
+  performed by a single ``torchvision.transforms.v2`` pipeline so there
+  is no double-processing overhead.
+  """
+  processor = AutoImageProcessor.from_pretrained(model_name, cache_dir=cache_dir)
+  mean, std = processor.image_mean, processor.image_std
+
+  train_augmentations = v2.Compose([
       v2.RandomResizedCrop(size=(image_size, image_size), scale=(0.85, 1.0), antialias=True),
       v2.RandomHorizontalFlip(p=0.5),
       v2.RandomVerticalFlip(p=0.5),
       v2.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.1),
       v2.ToImage(),
       v2.ToDtype(torch.float32, scale=True),
+      v2.Normalize(mean=mean, std=std),
+  ])
+
+  val_augmentations = v2.Compose([
+      v2.Resize(size=(image_size, image_size), antialias=True),
+      v2.ToImage(),
+      v2.ToDtype(torch.float32, scale=True),
+      v2.Normalize(mean=mean, std=std),
   ])
 
   def train_transform(examples):
-    images = [augmentations(img.convert("RGB")) for img in examples[image_col]]
-    inputs = processor(images, return_tensors="pt")
-    inputs["labels"] = examples["label"]
-    return inputs
+    return {
+        "pixel_values": torch.stack(
+            [train_augmentations(img.convert("RGB")) for img in examples[image_col]]),
+        "labels": torch.tensor(examples["label"]),
+    }
 
   def val_transform(examples):
-    inputs = processor([img.convert("RGB") for img in examples[image_col]],
-                       return_tensors="pt")
-    inputs["labels"] = examples["label"]
-    return inputs
+    return {
+        "pixel_values": torch.stack(
+            [val_augmentations(img.convert("RGB")) for img in examples[image_col]]),
+        "labels": torch.tensor(examples["label"]),
+    }
 
   ds["train"].set_transform(train_transform)
   ds["test"].set_transform(val_transform)
