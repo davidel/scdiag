@@ -229,8 +229,28 @@ class WeightedTrainer(Trainer):
   # Keys we format with special handling.
   _GPU_KEYS = {"gpu_mem_used_mb", "gpu_mem_reserved_mb", "gpu_util_pct"}
 
+  # Metric name -> format spec.  Unlisted metrics fall back to type-based
+  # formatting (.3e for float, as-is for int/str).
+  _METRIC_FORMATS = {
+      "loss": ".3f",
+      "eval_loss": ".3f",
+      "grad_norm": ".3f",
+      "learning_rate": ".3e",
+      "epoch": ".4f",
+      "accuracy": ".2%",
+      "eval_accuracy": ".2%",
+      "macro_f1": ".2%",
+      "eval_macro_f1": ".2%",
+      "eval_runtime": ".1f",
+      "eval_samples_per_second": ".1f",
+      "eval_steps_per_second": ".1f",
+  }
+
   def _format_value(self, key, value):
     """Format a single metric value for display."""
+    fmt = self._METRIC_FORMATS.get(key)
+    if fmt is not None:
+      return f"{key}={value:{fmt}}"
     if isinstance(value, (int, np.integer)):
       return f"{key}={value}"
     if isinstance(value, float):
