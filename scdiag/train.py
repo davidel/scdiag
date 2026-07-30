@@ -116,12 +116,24 @@ def parse_args(argv=None):
 
 
 def _detect_label_column(dataset):
-  """Return the name of the label (ClassLabel) column in *dataset*."""
+  """Return the name of the label column in *dataset*.
+
+  Looks for an existing ``ClassLabel`` column first.  If none is found,
+  falls back to a ``Value("string")`` column whose name matches common
+  label conventions (``label``, ``dx``, ``diagnosis``, ``class``,
+  ``category``).
+  """
   for name, feat in dataset.features.items():
     if isinstance(feat, datasets.ClassLabel):
       return name
+  # Common string-column names that carry the classification target.
+  _LABEL_CANDIDATES = {"label", "dx", "diagnosis", "class", "category"}
+  for name, feat in dataset.features.items():
+    if isinstance(feat, datasets.Value) and feat.dtype == "string":
+      if name.lower() in _LABEL_CANDIDATES:
+        return name
   raise ValueError(
-      f"No ClassLabel feature found in dataset. "
+      f"No label column found in dataset. "
       f"Available features: {list(dataset.features.keys())}")
 
 
@@ -129,6 +141,9 @@ def load_and_split_dataset(dataset_id, test_size=0.2, seed=42, cache_dir=None):
   """Load a dataset with a single train split and split it into train/test."""
   raw = load_dataset(dataset_id, split="train", trust_remote_code=True, cache_dir=cache_dir)
   label_col = _detect_label_column(raw)
+  # Cast to ClassLabel if needed so the rest of the pipeline works.
+  if not isinstance(raw.features[label_col], datasets.ClassLabel):
+    raw = raw.class_encode_column(label_col)
   if label_col != "label":
     raw = raw.rename_column(label_col, "label")
   return raw.train_test_split(test_size=test_size, seed=seed)
