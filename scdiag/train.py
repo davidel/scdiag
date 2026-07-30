@@ -28,21 +28,21 @@ def parse_args(argv=None):
   parser.add_argument(
       "--model",
       required=True,
-      help="HuggingFace model id or local path (e.g. google/vit-base-patch16-224)")
+      help="HuggingFace model id or local path (e.g. facebook/resnext50_32x4d)")
   parser.add_argument("--num-labels",
                       type=int,
                       default=None,
                       help="Number of classes. If omitted, inferred from the dataset.")
   parser.add_argument("--dataset",
-                      default="bentrevett/ham10k",
+                      default="mrtg/ham10000",
                       help="HuggingFace dataset id (default: %(default)s)")
   parser.add_argument("--image-size",
                       type=int,
-                      default=224,
+                      default=448,
                       help="Resize images to this square size (default: %(default)s)")
   parser.add_argument("--epochs",
                       type=int,
-                      default=10,
+                      default=5,
                       help="Number of training epochs (default: %(default)s)")
   parser.add_argument("--batch-size",
                       type=int,
@@ -50,7 +50,7 @@ def parse_args(argv=None):
                       help="Per-device batch size (default: %(default)s)")
   parser.add_argument("--lr",
                       type=float,
-                      default=5e-5,
+                      default=4e-5,
                       help="Peak learning rate (default: %(default)s)")
   parser.add_argument("--weight-decay",
                       type=float,
@@ -87,7 +87,7 @@ def parse_args(argv=None):
       help="Save every N steps when --save-every=step (default: %(default)s)")
   parser.add_argument("--logging-steps",
                       type=int,
-                      default=10,
+                      default=20,
                       help="Log every N steps (default: %(default)s)")
   parser.add_argument("--dataloader-num-workers",
                       type=int,
@@ -107,19 +107,25 @@ def parse_args(argv=None):
   return parser.parse_args(argv)
 
 
+def load_and_split_dataset(dataset_id, test_size=0.2, seed=42):
+  """Load a dataset with a single train split and split it into train/test."""
+  raw = load_dataset(dataset_id, split="train", trust_remote_code=True)
+  return raw.train_test_split(test_size=test_size, seed=seed)
+
+
 def get_num_labels_from_dataset(dataset):
   """Infer the number of classes from the dataset's ClassLabel feature."""
   return dataset["train"].features["label"].num_classes
 
 
-def compute_class_weights(dataset, num_labels):
-  """Compute inverse-frequency weights for imbalanced classes."""
+def compute_class_weights(dataset, num_labels, device):
+  """Compute inverse-frequency weights and return as tensor on *device*."""
   labels = np.array(dataset["train"]["label"])
   counts = np.bincount(labels, minlength=num_labels).astype(np.float64)
   counts = np.maximum(counts, 1.0)
   total = counts.sum()
   weights = total / (num_labels * counts)
-  return weights.astype(np.float32)
+  return torch.tensor(weights, dtype=torch.float32).to(device)
 
 
 class WeightedTrainer(Trainer):
@@ -144,64 +150,47 @@ class WeightedTrainer(Trainer):
 
 
 _accuracy_metric = evaluate.load("accuracy")
+_f1_metric = evaluate.load("f1")
 
 
 def compute_metrics(eval_pred):
   logits, labels = eval_pred
   preds = np.argmax(logits, axis=-1)
-  return _accuracy_metric.compute(predictions=preds, references=labels)
+  acc = _accuracy_metric.compute(predictions=preds, references=labels)["accuracy"]
+  f1 = _f1_metric.compute(predictions=preds, references=labels, average="macro")["f1"]
+  return {"accuracy": acc, "macro_f1": f1}
 
 
-def build_datasets(dataset_id, image_size, pixel_mean, pixel_std):
+def build_datasets(dataset_id, image_size):
   """Load a HuggingFace image dataset, preprocess, and return splits."""
-  ds = load_dataset(dataset_id, trust_remote_code=True)
+  ds = load_and_split_dataset(dataset_id)
 
-  train_img_transform = v2.Compose([
-      v2.Resize((image_size, image_size)),
-      v2.RandomHorizontalFlip(),
-      v2.RandomVerticalFlip(),
-      v2.RandomRotation(30),
-      v2.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+  processor = AutoImageProcessor.from_pretrained(
+      "facebook/resnext50_32x4d", size={"height": image_size, "width": image_size})
+
+  augmentations = v2.Compose([
+      v2.RandomResizedCrop(size=(image_size, image_size), scale=(0.85, 1.0), antialias=True),
+      v2.RandomHorizontalFlip(p=0.5),
+      v2.RandomVerticalFlip(p=0.5),
+      v2.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.1),
       v2.ToImage(),
       v2.ToDtype(torch.float32, scale=True),
-      v2.Normalize(mean=pixel_mean.tolist(), std=pixel_std.tolist()),
   ])
 
-  eval_img_transform = v2.Compose([
-      v2.Resize((image_size, image_size)),
-      v2.ToImage(),
-      v2.ToDtype(torch.float32, scale=True),
-      v2.Normalize(mean=pixel_mean.tolist(), std=pixel_std.tolist()),
-  ])
+  def train_transform(examples):
+    images = [augmentations(img.convert("RGB")) for img in examples["image"]]
+    inputs = processor(images, return_tensors="pt")
+    inputs["labels"] = examples["label"]
+    return inputs
 
-  def preprocess_train(examples):
-    images = [img.convert("RGB") for img in examples["image"]]
-    pixel_values = torch.stack([train_img_transform(img) for img in images])
-    return {
-        "pixel_values": pixel_values,
-        "labels": torch.tensor(examples["label"], dtype=torch.long),
-    }
+  def val_transform(examples):
+    inputs = processor([img.convert("RGB") for img in examples["image"]],
+                       return_tensors="pt")
+    inputs["labels"] = examples["label"]
+    return inputs
 
-  def preprocess_eval(examples):
-    images = [img.convert("RGB") for img in examples["image"]]
-    pixel_values = torch.stack([eval_img_transform(img) for img in images])
-    return {
-        "pixel_values": pixel_values,
-        "labels": torch.tensor(examples["label"], dtype=torch.long),
-    }
-
-  ds["train"] = ds["train"].map(
-      preprocess_train,
-      batched=True,
-      batch_size=256,
-      remove_columns=ds["train"].column_names,
-  )
-  ds["test"] = ds["test"].map(
-      preprocess_eval,
-      batched=True,
-      batch_size=256,
-      remove_columns=ds["test"].column_names,
-  )
+  ds["train"].set_transform(train_transform)
+  ds["test"].set_transform(val_transform)
 
   return ds
 
@@ -214,34 +203,20 @@ def main(argv=None):
   device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
   log.info(f"Using device: {device}")
 
-  processor = AutoImageProcessor.from_pretrained(args.model)
-  log.info(f"Image processor type: {processor.__class__.__name__}")
+  if torch.cuda.is_available():
+    torch.set_float32_matmul_precision("high")
 
-  ds_raw = load_dataset(args.dataset, trust_remote_code=True)
-  small = ds_raw["train"].select(range(min(200, len(ds_raw["train"]))))
-  tmp = torch.stack([
-      v2.ToTensor()(v2.Resize((args.image_size, args.image_size))(img.convert("RGB")))
-      for img in small["image"]
-  ])
-  pixel_mean = tmp.mean(dim=[0, 2, 3])
-  pixel_std = tmp.std(dim=[0, 2, 3]).clamp(min=1e-6)
-  log.info(f"Pixel mean: {pixel_mean}")
-  log.info(f"Pixel std:  {pixel_std}")
-  del ds_raw, small, tmp
+  dataset = build_datasets(args.dataset, args.image_size)
 
-  dataset = build_datasets(args.dataset, args.image_size, pixel_mean, pixel_std)
+  labels = dataset["train"].features["label"].names
+  num_labels = len(labels) if args.num_labels is None else args.num_labels
+  label2id = {label: str(i) for i, label in enumerate(labels)}
+  id2label = {str(i): label for i, label in enumerate(labels)}
+  log.info(f"num_labels: {num_labels}")
 
-  if args.num_labels is None:
-    num_labels = get_num_labels_from_dataset(dataset)
-    log.info(f"Inferred num_labels from dataset: {num_labels}")
-  else:
-    num_labels = args.num_labels
+  class_weights = compute_class_weights(dataset, num_labels, device)
+  log.info(f"Class weights: {class_weights.tolist()}")
 
-  class_weights = compute_class_weights(dataset, num_labels=num_labels)
-  log.info(f"Class weights: {class_weights}")
-
-  id2label = {i: str(i) for i in range(num_labels)}
-  label2id = {str(i): i for i in range(num_labels)}
   model = AutoModelForImageClassification.from_pretrained(
       args.model,
       num_labels=num_labels,
@@ -271,8 +246,8 @@ def main(argv=None):
       save_steps=args.save_steps if args.save_every == "step" else None,
       logging_steps=args.logging_steps,
       load_best_model_at_end=True,
-      metric_for_best_model="accuracy",
-      fp16=torch.cuda.is_available(),
+      metric_for_best_model="macro_f1",
+      bf16=torch.cuda.is_available(),
       dataloader_num_workers=args.dataloader_num_workers,
       report_to="none",
   )
