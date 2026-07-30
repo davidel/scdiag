@@ -7,6 +7,7 @@ import evaluate
 import numpy as np
 import torch
 import torch.nn as nn
+import datasets
 from datasets import load_dataset
 from torchvision.transforms import v2
 from transformers import (
@@ -32,14 +33,14 @@ def parse_args(argv=None):
 
   parser.add_argument(
       "--model",
-      default="facebook/resnext50_32x4d",
+      default="facebook/convnextv2-base-22k-224",
       help="HuggingFace model id or local path (default: %(default)s)")
   parser.add_argument("--num_labels",
                       type=int,
                       default=None,
                       help="Number of classes. If omitted, inferred from the dataset.")
   parser.add_argument("--dataset",
-                      default="mrtg/ham10000",
+                      default="marmal88/skin_cancer",
                       help="HuggingFace dataset id (default: %(default)s)")
   parser.add_argument("--image_size",
                       type=int,
@@ -114,9 +115,22 @@ def parse_args(argv=None):
   return parser.parse_args(argv)
 
 
+def _detect_label_column(dataset):
+  """Return the name of the label (ClassLabel) column in *dataset*."""
+  for name, feat in dataset.features.items():
+    if isinstance(feat, datasets.ClassLabel):
+      return name
+  raise ValueError(
+      f"No ClassLabel feature found in dataset. "
+      f"Available features: {list(dataset.features.keys())}")
+
+
 def load_and_split_dataset(dataset_id, test_size=0.2, seed=42, cache_dir=None):
   """Load a dataset with a single train split and split it into train/test."""
   raw = load_dataset(dataset_id, split="train", trust_remote_code=True, cache_dir=cache_dir)
+  label_col = _detect_label_column(raw)
+  if label_col != "label":
+    raw = raw.rename_column(label_col, "label")
   return raw.train_test_split(test_size=test_size, seed=seed)
 
 
