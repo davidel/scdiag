@@ -227,7 +227,7 @@ class WeightedTrainer(Trainer):
     self.class_weights = class_weights
 
   # Keys we format with special handling.
-  _GPU_KEYS = {"gpu_mem_used_mb", "gpu_mem_reserved_mb"}
+  _GPU_KEYS = {"gpu_mem_used_mb", "gpu_mem_reserved_mb", "gpu_util_pct"}
 
   def _format_value(self, key, value):
     """Format a single metric value for display."""
@@ -268,6 +268,10 @@ class WeightedTrainer(Trainer):
     mem_reserved = logs.get("gpu_mem_reserved_mb")
     if mem_used is not None and mem_reserved is not None:
       parts.append(f"gpu_mem={mem_used:.0f}/{mem_reserved:.0f} MB")
+
+    gpu_util = logs.get("gpu_util_pct")
+    if gpu_util is not None:
+      parts.append(f"gpu_util={gpu_util:.0f}%")
 
     logging.info(" | ".join(parts))
 

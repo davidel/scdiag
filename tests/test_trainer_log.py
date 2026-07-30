@@ -89,17 +89,18 @@ def test_log_no_gpu_keys_without_callback(caplog):
 
 
 class _GPUInjectorCallback(_FakeCallback):
-    """Mimics GPUStatsCallback: injects gpu_mem keys into logs."""
+    """Mimics GPUStatsCallback: injects gpu_mem and gpu_util keys into logs."""
 
     def on_log(self, args, state, control, logs=None, **kwargs):
         if logs is not None:
             logs["gpu_mem_used_mb"] = 1060.0
             logs["gpu_mem_reserved_mb"] = 16200.0
+            logs["gpu_util_pct"] = 85.0
         return control
 
 
 def test_log_includes_gpu_mem_when_callback_injects(caplog):
-    """GPUStatsCallback injects gpu_mem keys; log() should pick them up."""
+    """GPUStatsCallback injects gpu_mem and gpu_util; log() should pick them up."""
     wt = _make_weighted_trainer()
     wt.callback_handler.callbacks = [_GPUInjectorCallback()]
 
@@ -112,6 +113,7 @@ def test_log_includes_gpu_mem_when_callback_injects(caplog):
 
     msg = caplog.records[0].message
     assert "gpu_mem=1060/16200 MB" in msg
+    assert "gpu_util=85%" in msg
 
 
 def test_progress_and_printer_callbacks_not_called():
@@ -338,5 +340,6 @@ def test_all_metric_types_in_log_line(caplog):
     assert "step=100" in msg
     # Str: as-is
     assert "status=running" in msg
-    # GPU pair
+    # GPU pair + utilization
     assert "gpu_mem=1060/16200 MB" in msg
+    assert "gpu_util=85%" in msg

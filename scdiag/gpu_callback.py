@@ -22,6 +22,8 @@ class GPUStatsCallback(TrainerCallback):
       mem_reserved = torch.cuda.memory_reserved(self.device) / 1024**2
       logs["gpu_mem_used_mb"] = round(mem_used, 1)
       logs["gpu_mem_reserved_mb"] = round(mem_reserved, 1)
+      if hasattr(torch.cuda, "utilization"):
+        logs["gpu_util_pct"] = round(torch.cuda.utilization(self.device), 1)
 
   def on_epoch_end(self, args, state, control, **kwargs):
     if self.device.type != "cuda":
