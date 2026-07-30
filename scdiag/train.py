@@ -224,6 +224,24 @@ class WeightedTrainer(Trainer):
     super().__init__(**kwargs)
     self.class_weights = class_weights
 
+  def log(self, logs, start_time=None):
+    loss = logs.get("loss")
+    lr = logs.get("learning_rate")
+    epoch = logs.get("epoch")
+    mem_used = logs.get("gpu_mem_used_mb")
+    mem_reserved = logs.get("gpu_mem_reserved_mb")
+    parts = []
+    if loss is not None:
+      parts.append(f"loss={loss:.3f}")
+    if lr is not None:
+      parts.append(f"lr={lr:.2e}")
+    if epoch is not None:
+      parts.append(f"epoch={epoch:.4f}")
+    if mem_used is not None and mem_reserved is not None:
+      parts.append(f"gpu_mem={mem_used:.0f}/{mem_reserved:.0f} MB")
+    logging.info(" | ".join(parts))
+    super().log(logs, start_time)
+
   def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
     labels = inputs["labels"]
     outputs = model(**inputs)
