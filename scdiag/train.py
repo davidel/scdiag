@@ -236,7 +236,9 @@ class WeightedTrainer(Trainer):
     # Let other callbacks inject their data (e.g. GPUStatsCallback).
     for cb in self.callback_handler.callbacks:
       if type(cb).__name__ not in ("PrinterCallback", "ProgressCallback"):
-        self.control = cb.on_log(self.args, self.state, self.control, logs=logs)
+        result = cb.on_log(self.args, self.state, self.control, logs=logs)
+        if result is not None:
+          self.control = result
 
     loss = logs.get("loss")
     lr = logs.get("learning_rate")

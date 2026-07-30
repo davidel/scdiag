@@ -244,3 +244,28 @@ def test_logs_passed_as_keyword_not_positional():
     # This would raise TypeError if logs is passed positionally.
     wt._weighted_log(logs)
     assert strict_cb.seen_logs is logs
+
+
+class _ReturningNoneCallback:
+    """Callback whose on_log returns None — some real callbacks do this."""
+
+    def on_log(self, args, state, control, **kwargs):
+        return None
+
+
+def test_control_not_nulled_by_callback_returning_none():
+    """Regression: a callback returning None must not overwrite self.control."""
+    train = _import_train()
+    wt = _FakeTrainer()
+    wt._weighted_log = MethodType(train.WeightedTrainer.log, wt)
+
+    original_control = wt.control
+    wt.callback_handler.callbacks = [_ReturningNoneCallback()]
+
+    logs = {"loss": 1.0}
+    wt.state.global_step = 1
+    wt.state.epoch = None
+
+    wt._weighted_log(logs)
+    # self.control must survive — not overwritten to None.
+    assert wt.control is original_control
