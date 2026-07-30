@@ -231,8 +231,6 @@ class WeightedTrainer(Trainer):
 
   def _format_value(self, key, value):
     """Format a single metric value for display."""
-    if key in self._GPU_KEYS:
-      return None  # handled separately as a pair.
     if isinstance(value, (int, np.integer)):
       return f"{key}={value}"
     if isinstance(value, float):
