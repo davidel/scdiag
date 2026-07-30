@@ -199,10 +199,8 @@ def build_datasets(dataset_id, model_name, image_size, cache_dir=None):
 def main(argv=None):
   args = parse_args(argv)
   setup_logging(level=args.logging_level)
-  log = logging.getLogger(__name__)
-
   device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-  log.info(f"Using device: {device}")
+  logging.info(f"Using device: {device}")
 
   if torch.cuda.is_available():
     torch.set_float32_matmul_precision("high")
@@ -213,10 +211,10 @@ def main(argv=None):
   num_labels = len(labels) if args.num_labels is None else args.num_labels
   label2id = {label: str(i) for i, label in enumerate(labels)}
   id2label = {str(i): label for i, label in enumerate(labels)}
-  log.info(f"num_labels: {num_labels}")
+  logging.info(f"num_labels: {num_labels}")
 
   class_weights = compute_class_weights(dataset, num_labels, device)
-  log.info(f"Class weights: {class_weights.tolist()}")
+  logging.info(f"Class weights: {class_weights.tolist()}")
 
   model = AutoModelForImageClassification.from_pretrained(
       args.model,
@@ -230,7 +228,7 @@ def main(argv=None):
 
   total_params = sum(p.numel() for p in model.parameters())
   trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-  log.info(f"Model params: {total_params:,} total, {trainable:,} trainable")
+  logging.info(f"Model params: {total_params:,} total, {trainable:,} trainable")
 
   report_to = ["tensorboard"] if args.tb_logdir else ["none"]
 
@@ -258,7 +256,7 @@ def main(argv=None):
   )
 
   if args.tb_logdir:
-    log.info(f"TensorBoard logging to: {args.tb_logdir}")
+    logging.info(f"TensorBoard logging to: {args.tb_logdir}")
 
   trainer = WeightedTrainer(
       class_weights=class_weights.tolist(),
@@ -270,12 +268,12 @@ def main(argv=None):
       callbacks=[GPUStatsCallback(device)],
   )
 
-  log.info("Starting training pipeline...")
+  logging.info("Starting training pipeline...")
   try:
     trainer.train()
   except KeyboardInterrupt:
     trainer.save_model(args.output_dir)
-    log.info("Interrupted — checkpoint saved.")
+    logging.info("Interrupted — checkpoint saved.")
 
 
 if __name__ == "__main__":

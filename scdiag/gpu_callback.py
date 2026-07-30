@@ -28,11 +28,11 @@ class GPUStatsCallback(TrainerCallback):
       return
     stats = gpu_stats_str(self.device)
     if stats:
-      logging.getLogger(__name__).info(f"GPU stats at epoch {state.epoch:.0f}{stats}")
+      logging.info(f"GPU stats at epoch {state.epoch:.0f}{stats}")
 
   def on_train_end(self, args, state, control, **kwargs):
     if self.device.type != "cuda":
       return
     stats = gpu_stats_str(self.device)
     if stats:
-      logging.getLogger(__name__).info(f"Training complete.{stats}")
+      logging.info(f"Training complete.{stats}")
