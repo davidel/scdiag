@@ -1,7 +1,9 @@
 """Fine-tune a HuggingFace image-classification model."""
 
 import argparse
+import glob
 import logging
+import os
 
 import evaluate
 import numpy as np
@@ -225,6 +227,17 @@ class WeightedTrainer(Trainer):
     self.class_weights = class_weights
 
   def log(self, logs, start_time=None):
+    if self.state.epoch is not None:
+      logs["epoch"] = self.state.epoch
+
+    output = {**logs, "step": self.state.global_step}
+    self.state.log_history.append(output)
+
+    # Let other callbacks inject their data (e.g. GPUStatsCallback).
+    for cb in self.callback_handler.callbacks:
+      if type(cb).__name__ not in ("PrinterCallback", "ProgressCallback"):
+        self.control = cb.on_log(self.args, self.state, self.control, logs)
+
     loss = logs.get("loss")
     lr = logs.get("learning_rate")
     epoch = logs.get("epoch")
@@ -240,7 +253,6 @@ class WeightedTrainer(Trainer):
     if mem_used is not None and mem_reserved is not None:
       parts.append(f"gpu_mem={mem_used:.0f}/{mem_reserved:.0f} MB")
     logging.info(" | ".join(parts))
-    super().log(logs, start_time)
 
   def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
     labels = inputs["labels"]
@@ -398,8 +410,22 @@ def main(argv=None):
   )
 
   logging.info("Starting training pipeline...")
+
+  # Auto-detect latest checkpoint for resume.
+  resume_checkpoint = None
+  checkpoint_dirs = []
+  for p in glob.glob(os.path.join(args.output_dir, "checkpoint-*")):
+    try:
+      checkpoint_dirs.append((int(os.path.basename(p).split("-")[-1]), p))
+    except ValueError:
+      continue
+  checkpoint_dirs.sort(key=lambda x: x[0])
+  if checkpoint_dirs:
+    resume_checkpoint = checkpoint_dirs[-1][1]
+    logging.info(f"Resuming from checkpoint: {resume_checkpoint}")
+
   try:
-    trainer.train()
+    trainer.train(resume_from_checkpoint=resume_checkpoint)
   except KeyboardInterrupt:
     trainer.save_model(args.output_dir)
     logging.info("Interrupted — checkpoint saved.")
