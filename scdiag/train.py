@@ -166,7 +166,8 @@ def build_datasets(dataset_id, image_size, cache_dir=None):
   ds = load_and_split_dataset(dataset_id, cache_dir=cache_dir)
 
   processor = AutoImageProcessor.from_pretrained(
-      "facebook/resnext50_32x4d", size={"height": image_size, "width": image_size})
+      "facebook/resnext50_32x4d", size={"height": image_size, "width": image_size},
+      cache_dir=cache_dir)
 
   augmentations = v2.Compose([
       v2.RandomResizedCrop(size=(image_size, image_size), scale=(0.85, 1.0), antialias=True),
