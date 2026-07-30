@@ -216,3 +216,31 @@ def test_gpu_callback_controls_log_order(caplog):
     # Loss present + GPU memory present = injection happened before formatting
     assert "loss=1.000" in msg
     assert "gpu_mem=" in msg
+
+
+class _StrictCallback:
+    """Callback that rejects positional logs arg — mirrors real TrainerCallback."""
+
+    def on_log(self, args, state, control, **kwargs):
+        logs = kwargs.get("logs")
+        assert logs is not None, "logs must be passed as keyword argument"
+        self.seen_logs = logs
+        return control
+
+
+def test_logs_passed_as_keyword_not_positional():
+    """Regression: logs must be passed as keyword arg, not positional."""
+    train = _import_train()
+    wt = _FakeTrainer()
+    wt._weighted_log = MethodType(train.WeightedTrainer.log, wt)
+
+    strict_cb = _StrictCallback()
+    wt.callback_handler.callbacks = [strict_cb]
+
+    logs = {"loss": 1.0}
+    wt.state.global_step = 1
+    wt.state.epoch = None
+
+    # This would raise TypeError if logs is passed positionally.
+    wt._weighted_log(logs)
+    assert strict_cb.seen_logs is logs
