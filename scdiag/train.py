@@ -66,13 +66,6 @@ def compute_class_weights(dataset, num_labels=NUM_LABELS):
 # ──────────────────────────────────────────────
 #  Custom Trainer with weighted loss
 # ──────────────────────────────────────────────
-class WeightedTrainer:
-    """Placeholder class; the real ``WeightedTrainer`` is built inside
-    ``main()`` so that ``transformers`` is only imported when needed."""
-
-    pass
-
-
 def _build_weighted_trainer_class():
     """Return the real ``WeightedTrainer`` (a ``transformers.Trainer``
     subclass) after ``transformers`` has been imported."""
