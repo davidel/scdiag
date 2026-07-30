@@ -67,10 +67,10 @@ def parse_args(argv=None):
   parser.add_argument("--lr_scheduler_type",
                       default="cosine",
                       help="Learning-rate scheduler type (default: %(default)s)")
-  parser.add_argument("--warmup_ratio",
-                      type=float,
-                      default=0.1,
-                      help="Fraction of steps used for linear warmup (default: %(default)s)")
+  parser.add_argument("--warmup_steps",
+                      type=int,
+                      default=0,
+                      help="Number of warmup steps for LR scheduler (default: %(default)s)")
   parser.add_argument("--max_grad_norm",
                       type=float,
                       default=1.0,
@@ -393,6 +393,9 @@ def main(argv=None):
 
   report_to = ["tensorboard"] if args.tb_logdir else ["none"]
 
+  if args.tb_logdir:
+    os.environ["TENSORBOARD_LOGGING_DIR"] = args.tb_logdir
+
   training_args = TrainingArguments(
       output_dir=args.output_dir,
       num_train_epochs=args.epochs,
@@ -401,7 +404,7 @@ def main(argv=None):
       learning_rate=args.lr,
       weight_decay=args.weight_decay,
       lr_scheduler_type=args.lr_scheduler_type,
-      warmup_ratio=args.warmup_ratio,
+      warmup_steps=args.warmup_steps,
       max_grad_norm=args.max_grad_norm,
       eval_strategy=args.eval_every,
       save_strategy=args.save_every,
@@ -415,7 +418,6 @@ def main(argv=None):
       dataloader_num_workers=args.dataloader_num_workers,
       remove_unused_columns=False,
       report_to=report_to,
-      **({"logging_dir": args.tb_logdir} if args.tb_logdir else {}),
   )
 
   if args.tb_logdir:
