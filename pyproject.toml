@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "scdiag"
+version = "0.1.0"
+description = "Fine-tune HuggingFace vision models for skin-lesion classification."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+dependencies = [
+    "numpy",
+    "torch",
+    "torchvision",
+    "transformers",
+    "datasets",
+    "evaluate",
+    "accelerate",
+    "scikit-learn",
+]
+
+[project.optional-dependencies]
+gcs = ["google-cloud-storage"]
+dev = ["pytest", "ruff"]
+
+[project.scripts]
+skin-train = "scdiag.train:main"
+
+[tool.setuptools.packages.find]
+include = ["scdiag*"]
