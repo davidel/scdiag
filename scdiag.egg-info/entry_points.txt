@@ -1,2 +1,0 @@
-[console_scripts]
-skin-train = scdiag.train:main

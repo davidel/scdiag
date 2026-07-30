@@ -1,2 +1,7 @@
 # Chatty backups
 .chatty/
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
