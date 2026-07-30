@@ -27,8 +27,8 @@ def parse_args(argv=None):
 
   parser.add_argument(
       "--model",
-      required=True,
-      help="HuggingFace model id or local path (e.g. facebook/resnext50_32x4d)")
+      default="facebook/resnext50_32x4d",
+      help="HuggingFace model id or local path (default: %(default)s)")
   parser.add_argument("--num_labels",
                       type=int,
                       default=None,
