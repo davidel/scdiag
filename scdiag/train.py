@@ -6,86 +6,71 @@ import logging
 from scdiag.logging_utils import setup_logging
 
 
-DEFAULT_IMAGE_SIZE = 224
-DEFAULT_EPOCHS = 10
-DEFAULT_BATCH_SIZE = 32
-DEFAULT_LR = 5e-5
-DEFAULT_WEIGHT_DECAY = 0.01
-DEFAULT_LR_SCHEDULER_TYPE = "cosine"
-DEFAULT_WARMUP_RATIO = 0.1
-DEFAULT_MAX_GRAD_NORM = 1.0
-DEFAULT_DATALOADER_WORKERS = 2
-DEFAULT_EVAL_EVERY = "epoch"
-DEFAULT_SAVE_EVERY = "epoch"
-DEFAULT_DATASET = "bentrevett/ham10k"
-
-
 # ──────────────────────────────────────────────
 #  Argument parsing
 # ──────────────────────────────────────────────
 def parse_args(argv=None):
     """Parse command-line arguments. *argv* defaults to ``sys.argv[1:]``."""
-    p = argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         description="Fine-tune a HuggingFace vision model for image classification."
     )
 
     # ── Model ──────────────────────────────────────────────
-    p.add_argument("--model", required=True,
-                    help="HuggingFace model id or local path (e.g. google/vit-base-patch16-224)")
-    p.add_argument("--num-labels", type=int, default=None,
-                    help="Number of classes. If omitted, inferred from the dataset.")
+    parser.add_argument("--model", required=True,
+                        help="HuggingFace model id or local path (e.g. google/vit-base-patch16-224)")
+    parser.add_argument("--num-labels", type=int, default=None,
+                        help="Number of classes. If omitted, inferred from the dataset.")
 
     # ── Dataset ────────────────────────────────────────────
-    p.add_argument("--dataset", default=DEFAULT_DATASET,
-                    help="HuggingFace dataset id (default: %(default)s)")
+    parser.add_argument("--dataset", default="bentrevett/ham10k",
+                        help="HuggingFace dataset id (default: %(default)s)")
 
     # ── Image ──────────────────────────────────────────────
-    p.add_argument("--image-size", type=int, default=DEFAULT_IMAGE_SIZE,
-                    help="Resize images to this square size (default: %(default)s)")
+    parser.add_argument("--image-size", type=int, default=224,
+                        help="Resize images to this square size (default: %(default)s)")
 
     # ── Optimiser / schedule ───────────────────────────────
-    p.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS,
-                    help="Number of training epochs (default: %(default)s)")
-    p.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE,
-                    help="Per-device batch size (default: %(default)s)")
-    p.add_argument("--lr", type=float, default=DEFAULT_LR,
-                    help="Peak learning rate (default: %(default)s)")
-    p.add_argument("--weight-decay", type=float, default=DEFAULT_WEIGHT_DECAY,
-                    help="Weight decay (default: %(default)s)")
-    p.add_argument("--lr-scheduler-type", default=DEFAULT_LR_SCHEDULER_TYPE,
-                    help="Learning-rate scheduler type (default: %(default)s)")
-    p.add_argument("--warmup-ratio", type=float, default=DEFAULT_WARMUP_RATIO,
-                    help="Fraction of steps used for linear warmup (default: %(default)s)")
-    p.add_argument("--max-grad-norm", type=float, default=DEFAULT_MAX_GRAD_NORM,
-                    help="Max gradient norm for clipping (default: %(default)s)")
+    parser.add_argument("--epochs", type=int, default=10,
+                        help="Number of training epochs (default: %(default)s)")
+    parser.add_argument("--batch-size", type=int, default=32,
+                        help="Per-device batch size (default: %(default)s)")
+    parser.add_argument("--lr", type=float, default=5e-5,
+                        help="Peak learning rate (default: %(default)s)")
+    parser.add_argument("--weight-decay", type=float, default=0.01,
+                        help="Weight decay (default: %(default)s)")
+    parser.add_argument("--lr-scheduler-type", default="cosine",
+                        help="Learning-rate scheduler type (default: %(default)s)")
+    parser.add_argument("--warmup-ratio", type=float, default=0.1,
+                        help="Fraction of steps used for linear warmup (default: %(default)s)")
+    parser.add_argument("--max-grad-norm", type=float, default=1.0,
+                        help="Max gradient norm for clipping (default: %(default)s)")
 
     # ── Evaluation / checkpointing ─────────────────────────
-    p.add_argument("--eval-every", default=DEFAULT_EVAL_EVERY,
-                    choices=["epoch", "step"],
-                    help="Run evaluation every epoch or step (default: %(default)s)")
-    p.add_argument("--save-every", default=DEFAULT_SAVE_EVERY,
-                    choices=["epoch", "step"],
-                    help="Save checkpoint every epoch or step (default: %(default)s)")
-    p.add_argument("--eval-steps", type=int, default=500,
-                    help="Evaluate every N steps when --eval-every=step (default: %(default)s)")
-    p.add_argument("--save-steps", type=int, default=500,
-                    help="Save every N steps when --save-every=step (default: %(default)s)")
-    p.add_argument("--logging-steps", type=int, default=10,
-                    help="Log every N steps (default: %(default)s)")
+    parser.add_argument("--eval-every", default="epoch",
+                        choices=["epoch", "step"],
+                        help="Run evaluation every epoch or step (default: %(default)s)")
+    parser.add_argument("--save-every", default="epoch",
+                        choices=["epoch", "step"],
+                        help="Save checkpoint every epoch or step (default: %(default)s)")
+    parser.add_argument("--eval-steps", type=int, default=500,
+                        help="Evaluate every N steps when --eval-every=step (default: %(default)s)")
+    parser.add_argument("--save-steps", type=int, default=500,
+                        help="Save every N steps when --save-every=step (default: %(default)s)")
+    parser.add_argument("--logging-steps", type=int, default=10,
+                        help="Log every N steps (default: %(default)s)")
 
     # ── Data-loading / misc ────────────────────────────────
-    p.add_argument("--dataloader-num-workers", type=int,
-                    default=DEFAULT_DATALOADER_WORKERS,
-                    help="DataLoader worker processes (default: %(default)s)")
-    p.add_argument("--output-dir", default="./results",
-                    help="Where to save checkpoints and logs (default: %(default)s)")
-    p.add_argument("--logging-level", default="INFO",
-                    choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-                    help="Python logging level (default: %(default)s)")
-    p.add_argument("--dry-run", action="store_true",
-                    help="Prepare dataset & model but skip training.")
+    parser.add_argument("--dataloader-num-workers", type=int, default=2,
+                        help="DataLoader worker processes (default: %(default)s)")
+    parser.add_argument("--output-dir", default="./results",
+                        help="Where to save checkpoints and logs (default: %(default)s)")
+    parser.add_argument("--logging-level", default="INFO",
+                        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+                        help="Python logging level (default: %(default)s)")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Prepare dataset & model but skip training.")
 
-    return p.parse_args(argv)
+    return parser.parse_args(argv)
 
 
 # ──────────────────────────────────────────────
