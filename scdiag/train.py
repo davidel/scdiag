@@ -150,7 +150,12 @@ def load_and_split_dataset(dataset_id, test_size=0.2, seed=42, cache_dir=None):
 
 
 def compute_class_weights(dataset, num_labels):
-  """Compute inverse-frequency class weights as a CPU tensor."""
+  """Compute inverse-frequency class weights as a CPU tensor.
+
+  *dataset* is a raw HF ``DatasetDict`` (before ``set_transform`` is
+  applied) so that column access does not trigger any registered
+  transforms.
+  """
   labels = np.array(dataset["train"]["label"])
   counts = np.bincount(labels, minlength=num_labels).astype(np.float64)
   counts = np.maximum(counts, 1.0)
@@ -190,10 +195,11 @@ def compute_metrics(eval_pred):
   return {"accuracy": acc, "macro_f1": f1_score}
 
 
-def build_datasets(dataset_id, model_name, image_size, cache_dir=None):
-  """Load a HuggingFace image dataset, preprocess, and return splits."""
-  ds = load_and_split_dataset(dataset_id, cache_dir=cache_dir)
+def build_datasets(ds, model_name, image_size, cache_dir=None):
+  """Attach preprocessing transforms to *ds* and return ``(ds, processor)``.
 
+  *ds* is a ``DatasetDict`` with train/test splits already loaded.
+  """
   processor = AutoImageProcessor.from_pretrained(
       model_name, size={"height": image_size, "width": image_size},
       cache_dir=cache_dir)
@@ -222,7 +228,7 @@ def build_datasets(dataset_id, model_name, image_size, cache_dir=None):
   ds["train"].set_transform(train_transform)
   ds["test"].set_transform(val_transform)
 
-  return ds
+  return ds, processor
 
 
 def main(argv=None):
@@ -234,16 +240,21 @@ def main(argv=None):
   if torch.cuda.is_available():
     torch.set_float32_matmul_precision("high")
 
-  dataset = build_datasets(args.dataset, args.model, args.image_size, cache_dir=args.cache_dir)
+  # Load the raw dataset first so we can inspect features and compute class
+  # weights before any transforms are attached.
+  raw = load_and_split_dataset(args.dataset, cache_dir=args.cache_dir)
 
-  labels = dataset["train"].features["label"].names
+  labels = raw["train"].features["label"].names
   num_labels = len(labels) if args.num_labels is None else args.num_labels
   label2id = {label: str(i) for i, label in enumerate(labels)}
   id2label = {str(i): label for i, label in enumerate(labels)}
   logging.info(f"num_labels: {num_labels}")
 
-  class_weights = compute_class_weights(dataset, num_labels).to(device)
+  class_weights = compute_class_weights(raw, num_labels).to(device)
   logging.info(f"Class weights: {class_weights.tolist()}")
+
+  # Now attach preprocessing transforms.
+  dataset, processor = build_datasets(raw, args.model, args.image_size)
 
   model = AutoModelForImageClassification.from_pretrained(
       args.model,
