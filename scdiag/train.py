@@ -1,9 +1,7 @@
 """Fine-tune a HuggingFace image-classification model."""
 
 import argparse
-import glob
 import logging
-import os
 
 import evaluate
 import numpy as np
@@ -452,24 +450,10 @@ def main(argv=None):
   )
 
   logging.info("Starting training pipeline...")
-
-  # Auto-detect latest checkpoint for resume.
-  resume_checkpoint = None
-  checkpoint_dirs = []
-  for p in glob.glob(os.path.join(args.output_dir, "checkpoint-*")):
-    try:
-      checkpoint_dirs.append((int(os.path.basename(p).split("-")[-1]), p))
-    except ValueError:
-      continue
-  checkpoint_dirs.sort(key=lambda x: x[0])
-  if checkpoint_dirs:
-    resume_checkpoint = checkpoint_dirs[-1][1]
-    logging.info(f"Resuming from checkpoint: {resume_checkpoint}")
-
   try:
-    trainer.train(resume_from_checkpoint=resume_checkpoint)
+    trainer.train(resume_from_checkpoint=True)
   except KeyboardInterrupt:
-    trainer.save_model(args.output_dir)
+    trainer._save_checkpoint(trainer.model, trial=None)
     logging.info("Interrupted — checkpoint saved.")
 
 
