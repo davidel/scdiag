@@ -161,12 +161,12 @@ def compute_metrics(eval_pred):
   return {"accuracy": acc, "macro_f1": f1_score}
 
 
-def build_datasets(dataset_id, image_size, cache_dir=None):
+def build_datasets(dataset_id, model_name, image_size, cache_dir=None):
   """Load a HuggingFace image dataset, preprocess, and return splits."""
   ds = load_and_split_dataset(dataset_id, cache_dir=cache_dir)
 
   processor = AutoImageProcessor.from_pretrained(
-      "facebook/resnext50_32x4d", size={"height": image_size, "width": image_size},
+      model_name, size={"height": image_size, "width": image_size},
       cache_dir=cache_dir)
 
   augmentations = v2.Compose([
@@ -207,7 +207,7 @@ def main(argv=None):
   if torch.cuda.is_available():
     torch.set_float32_matmul_precision("high")
 
-  dataset = build_datasets(args.dataset, args.image_size, cache_dir=args.cache_dir)
+  dataset = build_datasets(args.dataset, args.model, args.image_size, cache_dir=args.cache_dir)
 
   labels = dataset["train"].features["label"].names
   num_labels = len(labels) if args.num_labels is None else args.num_labels
