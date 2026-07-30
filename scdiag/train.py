@@ -237,15 +237,15 @@ class WeightedTrainer(Trainer):
     return (loss, outputs) if return_outputs else loss
 
 
-_metric_accuracy = evaluate.load("accuracy")
-_metric_f1 = evaluate.load("f1")
+_METRIC_ACCURACY = evaluate.load("accuracy")
+_METRIC_F1 = evaluate.load("f1")
 
 
 def compute_metrics(eval_pred):
   logits, labels = eval_pred
   preds = np.argmax(logits, axis=-1)
-  acc = _metric_accuracy.compute(predictions=preds, references=labels)["accuracy"]
-  f1_score = _metric_f1.compute(predictions=preds, references=labels, average="macro")["f1"]
+  acc = _METRIC_ACCURACY.compute(predictions=preds, references=labels)["accuracy"]
+  f1_score = _METRIC_F1.compute(predictions=preds, references=labels, average="macro")["f1"]
   return {"accuracy": acc, "macro_f1": f1_score}
 
 
@@ -370,7 +370,7 @@ def main(argv=None):
     logging.info(f"TensorBoard logging to: {args.tb_logdir}")
 
   trainer = WeightedTrainer(
-      class_weights=class_weights.tolist(),
+      class_weights=class_weights,
       model=model,
       args=training_args,
       train_dataset=dataset["train"],
