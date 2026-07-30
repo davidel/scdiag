@@ -337,6 +337,7 @@ def main(argv=None):
       metric_for_best_model="macro_f1",
       bf16=torch.cuda.is_available(),
       dataloader_num_workers=args.dataloader_num_workers,
+      remove_unused_columns=False,
       report_to=report_to,
       **({"logging_dir": args.tb_logdir} if args.tb_logdir else {}),
   )
