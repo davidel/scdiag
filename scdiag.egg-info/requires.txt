@@ -1,0 +1,15 @@
+numpy
+torch
+torchvision
+transformers
+datasets
+evaluate
+accelerate
+scikit-learn
+
+[dev]
+pytest
+ruff
+
+[gcs]
+google-cloud-storage

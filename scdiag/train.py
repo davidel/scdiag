@@ -1,7 +1,20 @@
-"""Fine-tune a HuggingFace image-classification model for skin lesions."""
+"""Fine-tune a HuggingFace image-classification model."""
 
 import argparse
 import logging
+
+import evaluate
+import numpy as np
+import torch
+import torch.nn as nn
+from datasets import load_dataset
+from torchvision.transforms import v2
+from transformers import (
+    AutoImageProcessor,
+    AutoModelForImageClassification,
+    Trainer,
+    TrainingArguments,
+)
 
 from scdiag.logging_utils import setup_logging
 
@@ -45,11 +58,10 @@ def parse_args(argv=None):
   parser.add_argument("--lr-scheduler-type",
                       default="cosine",
                       help="Learning-rate scheduler type (default: %(default)s)")
-  parser.add_argument(
-      "--warmup-ratio",
-      type=float,
-      default=0.1,
-      help="Fraction of steps used for linear warmup (default: %(default)s)")
+  parser.add_argument("--warmup-ratio",
+                      type=float,
+                      default=0.1,
+                      help="Fraction of steps used for linear warmup (default: %(default)s)")
   parser.add_argument("--max-grad-norm",
                       type=float,
                       default=1.0,
@@ -101,8 +113,6 @@ def get_num_labels_from_dataset(dataset):
 
 def compute_class_weights(dataset, num_labels):
   """Compute inverse-frequency weights for imbalanced classes."""
-  import numpy as np
-
   labels = np.array(dataset["train"]["label"])
   counts = np.bincount(labels, minlength=num_labels).astype(np.float64)
   counts = np.maximum(counts, 1.0)
@@ -111,43 +121,38 @@ def compute_class_weights(dataset, num_labels):
   return weights.astype(np.float32)
 
 
-def build_trainer_class():
-  """Return the real ``WeightedTrainer`` (a ``transformers.Trainer``
-    subclass) after ``transformers`` has been imported."""
-  import torch.nn as nn
-  from transformers import Trainer
+class WeightedTrainer(Trainer):
 
-  class WeightedTrainer(Trainer):
+  def __init__(self, class_weights=None, **kwargs):
+    super().__init__(**kwargs)
+    self.class_weights = class_weights
 
-    def __init__(self, class_weights=None, **kwargs):
-      super().__init__(**kwargs)
-      self.class_weights = class_weights
+  def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+    labels = inputs.pop("labels")
+    outputs = model(**inputs)
+    logits = outputs.logits
+    if self.class_weights is not None:
+      weight = torch.tensor(self.class_weights,
+                            device=logits.device,
+                            dtype=logits.dtype)
+      loss_fn = nn.CrossEntropyLoss(weight=weight)
+    else:
+      loss_fn = nn.CrossEntropyLoss()
+    loss = loss_fn(logits, labels)
+    return (loss, outputs) if return_outputs else loss
 
-    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
-      import torch
 
-      labels = inputs.pop("labels")
-      outputs = model(**inputs)
-      logits = outputs.logits
-      if self.class_weights is not None:
-        weight = torch.tensor(self.class_weights,
-                              device=logits.device,
-                              dtype=logits.dtype)
-        loss_fn = nn.CrossEntropyLoss(weight=weight)
-      else:
-        loss_fn = nn.CrossEntropyLoss()
-      loss = loss_fn(logits, labels)
-      return (loss, outputs) if return_outputs else loss
+_accuracy_metric = evaluate.load("accuracy")
 
-  return WeightedTrainer
+
+def compute_metrics(eval_pred):
+  logits, labels = eval_pred
+  preds = np.argmax(logits, axis=-1)
+  return _accuracy_metric.compute(predictions=preds, references=labels)
 
 
 def build_datasets(dataset_id, image_size, pixel_mean, pixel_std):
   """Load a HuggingFace image dataset, preprocess, and return splits."""
-  import torch
-  from datasets import load_dataset
-  from torchvision.transforms import v2
-
   ds = load_dataset(dataset_id, trust_remote_code=True)
 
   train_img_transform = v2.Compose([
@@ -200,32 +205,7 @@ def build_datasets(dataset_id, image_size, pixel_mean, pixel_std):
   return ds
 
 
-def build_compute_metrics():
-  """Return ``compute_metrics`` after ``evaluate`` has been imported."""
-  import evaluate
-  import numpy as np
-
-  _accuracy_metric = evaluate.load("accuracy")
-
-  def compute_metrics(eval_pred):
-    logits, labels = eval_pred
-    preds = np.argmax(logits, axis=-1)
-    return _accuracy_metric.compute(predictions=preds, references=labels)
-
-  return compute_metrics
-
-
 def main(argv=None):
-  import numpy as np
-  import torch
-  from datasets import load_dataset
-  from torchvision.transforms import v2
-  from transformers import (
-      AutoImageProcessor,
-      AutoModelForImageClassification,
-      TrainingArguments,
-  )
-
   args = parse_args(argv)
   setup_logging(level=args.logging_level)
   log = logging.getLogger(__name__)
@@ -300,10 +280,7 @@ def main(argv=None):
     log.info("Dry run - model and dataset prepared, skipping training.")
     return
 
-  weighted_trainer_cls = build_trainer_class()
-  compute_metrics = build_compute_metrics()
-
-  trainer = weighted_trainer_cls(
+  trainer = WeightedTrainer(
       class_weights=class_weights.tolist(),
       model=model,
       args=training_args,

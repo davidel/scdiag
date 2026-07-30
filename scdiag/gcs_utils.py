@@ -3,6 +3,8 @@
 import logging
 import os
 
+import torch
+
 
 def parse_gcs_uri(gcs_uri):
   """Parse a ``gs://BUCKET/PREFIX`` URI into ``(bucket, prefix)``."""
@@ -36,8 +38,6 @@ def save_checkpoint(save_dict, path, gcs_uri=None):
   dirname = os.path.dirname(path)
   if dirname:
     os.makedirs(dirname, exist_ok=True)
-  import torch
-
   torch.save(save_dict, path)
   if gcs_uri:
     bucket, prefix = parse_gcs_uri(gcs_uri)

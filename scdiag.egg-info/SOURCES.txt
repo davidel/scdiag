@@ -1,0 +1,13 @@
+pyproject.toml
+scdiag/__init__.py
+scdiag/__main__.py
+scdiag/gcs_utils.py
+scdiag/gpu_utils.py
+scdiag/logging_utils.py
+scdiag/train.py
+scdiag.egg-info/PKG-INFO
+scdiag.egg-info/SOURCES.txt
+scdiag.egg-info/dependency_links.txt
+scdiag.egg-info/entry_points.txt
+scdiag.egg-info/requires.txt
+scdiag.egg-info/top_level.txt
