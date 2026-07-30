@@ -17,6 +17,7 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
+from transformers.trainer_utils import speed_metrics
 
 from scdiag.gpu_callback import GPUStatsCallback
 from scdiag.logging_utils import setup_logging
@@ -228,28 +229,33 @@ class WeightedTrainer(Trainer):
   # Keys we format with special handling.
   _GPU_KEYS = {"gpu_mem_used_mb", "gpu_mem_reserved_mb", "gpu_util_pct"}
 
-  # Metric name -> format spec.  Unlisted metrics fall back to type-based
-  # formatting (.3e for float, as-is for int/str).
+  # Metric name -> (short display name, format spec).
+  # Unlisted metrics fall back to type-based formatting (.3e for float,
+  # as-is for int/str).
   _METRIC_FORMATS = {
-      "loss": ".3f",
-      "eval_loss": ".3f",
-      "grad_norm": ".3f",
-      "learning_rate": ".3e",
-      "epoch": ".4f",
-      "accuracy": ".2%",
-      "eval_accuracy": ".2%",
-      "macro_f1": ".2%",
-      "eval_macro_f1": ".2%",
-      "eval_runtime": ".1f",
-      "eval_samples_per_second": ".1f",
-      "eval_steps_per_second": ".1f",
+      "loss":                     ("loss",           ".3f"),
+      "eval_loss":                ("eval",           ".3f"),
+      "grad_norm":                ("grad",           ".3f"),
+      "learning_rate":            ("lr",             ".3e"),
+      "epoch":                    ("ep",             ".4f"),
+      "accuracy":                 ("acc",            ".2%"),
+      "eval_accuracy":            ("eval_acc",       ".2%"),
+      "macro_f1":                 ("f1",             ".2%"),
+      "eval_macro_f1":            ("eval_f1",        ".2%"),
+      "eval_runtime":             ("eval_t",         ".1f"),
+      "eval_samples_per_second":  ("eval_samp/s",    ".1f"),
+      "eval_steps_per_second":    ("eval_step/s",    ".1f"),
+      "train_runtime":            ("train_t",        ".1f"),
+      "train_samples_per_second": ("samp/s",         ".1f"),
+      "train_steps_per_second":   ("step/s",         ".1f"),
   }
 
   def _format_value(self, key, value):
     """Format a single metric value for display."""
-    fmt = self._METRIC_FORMATS.get(key)
-    if fmt is not None:
-      return f"{key}={value:{fmt}}"
+    entry = self._METRIC_FORMATS.get(key)
+    if entry is not None:
+      short, fmt = entry
+      return f"{short}={value:{fmt}}"
     if isinstance(value, (int, np.integer)):
       return f"{key}={value}"
     if isinstance(value, float):
@@ -261,6 +267,15 @@ class WeightedTrainer(Trainer):
   def log(self, logs, start_time=None):
     if self.state.epoch is not None:
       logs["epoch"] = self.state.epoch
+
+    if start_time is not None:
+      current_session_num_tokens = (
+          self.state.num_input_tokens_seen
+          - self._initial_num_input_tokens_seen
+      )
+      logs.update(speed_metrics(
+          "train", start_time, num_tokens=current_session_num_tokens,
+      ))
 
     output = {**logs, "step": self.state.global_step}
     self.state.log_history.append(output)
