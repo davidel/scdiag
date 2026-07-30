@@ -120,11 +120,6 @@ def load_and_split_dataset(dataset_id, test_size=0.2, seed=42, cache_dir=None):
   return raw.train_test_split(test_size=test_size, seed=seed)
 
 
-def get_num_labels_from_dataset(dataset):
-  """Infer the number of classes from the dataset's ClassLabel feature."""
-  return dataset["train"].features["label"].num_classes
-
-
 def compute_class_weights(dataset, num_labels):
   """Compute inverse-frequency class weights as a CPU tensor."""
   labels = np.array(dataset["train"]["label"])
