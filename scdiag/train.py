@@ -226,6 +226,21 @@ class WeightedTrainer(Trainer):
     super().__init__(**kwargs)
     self.class_weights = class_weights
 
+  # Keys we format with special handling.
+  _GPU_KEYS = {"gpu_mem_used_mb", "gpu_mem_reserved_mb"}
+
+  def _format_value(self, key, value):
+    """Format a single metric value for display."""
+    if key in self._GPU_KEYS:
+      return None  # handled separately as a pair.
+    if isinstance(value, (int, np.integer)):
+      return f"{key}={value}"
+    if isinstance(value, float):
+      return f"{key}={value:.3e}"
+    if isinstance(value, str):
+      return f"{key}={value}"
+    return f"{key}={value}"
+
   def log(self, logs, start_time=None):
     if self.state.epoch is not None:
       logs["epoch"] = self.state.epoch
@@ -240,20 +255,20 @@ class WeightedTrainer(Trainer):
         if result is not None:
           self.control = result
 
-    loss = logs.get("loss")
-    lr = logs.get("learning_rate")
-    epoch = logs.get("epoch")
+    parts = []
+    for key, value in logs.items():
+      if key in self._GPU_KEYS:
+        continue
+      formatted = self._format_value(key, value)
+      if formatted is not None:
+        parts.append(formatted)
+
+    # Render GPU memory as a combined pair if both present.
     mem_used = logs.get("gpu_mem_used_mb")
     mem_reserved = logs.get("gpu_mem_reserved_mb")
-    parts = []
-    if loss is not None:
-      parts.append(f"loss={loss:.3f}")
-    if lr is not None:
-      parts.append(f"lr={lr:.2e}")
-    if epoch is not None:
-      parts.append(f"epoch={epoch:.4f}")
     if mem_used is not None and mem_reserved is not None:
       parts.append(f"gpu_mem={mem_used:.0f}/{mem_reserved:.0f} MB")
+
     logging.info(" | ".join(parts))
 
   def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
@@ -392,6 +407,7 @@ def main(argv=None):
       load_best_model_at_end=True,
       metric_for_best_model="macro_f1",
       bf16=torch.cuda.is_available(),
+      disable_tqdm=True,
       dataloader_num_workers=args.dataloader_num_workers,
       remove_unused_columns=False,
       report_to=report_to,

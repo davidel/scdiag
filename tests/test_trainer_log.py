@@ -10,6 +10,7 @@ import logging
 from types import MethodType
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 
 
@@ -22,6 +23,8 @@ def _import_train():
 
 class _FakeTrainer:
     """Bare minimum stand-in with the attributes log() needs."""
+
+    _GPU_KEYS = {"gpu_mem_used_mb", "gpu_mem_reserved_mb"}
 
     def __init__(self):
         self.args = MagicMock()
@@ -51,6 +54,7 @@ def _make_weighted_trainer():
     train = _import_train()
     wt = _FakeTrainer()
     wt._weighted_log = MethodType(train.WeightedTrainer.log, wt)
+    wt._format_value = MethodType(train.WeightedTrainer._format_value, wt)
     return wt
 
 
@@ -65,9 +69,9 @@ def test_log_calls_logging_info(caplog):
 
     assert len(caplog.records) == 1
     msg = caplog.records[0].message
-    assert "loss=1.500" in msg
-    assert "lr=5.00e-05" in msg
-    assert "epoch=0.1000" in msg
+    assert "loss=1.500e+00" in msg
+    assert "learning_rate=5.000e-05" in msg
+    assert "epoch=1.000e-01" in msg
 
 
 def test_log_no_gpu_keys_without_callback(caplog):
@@ -117,7 +121,6 @@ def test_progress_and_printer_callbacks_not_called():
     progress_cb = ProgressCallback()
     printer_cb = PrinterCallback()
 
-    # Mock on_log so we can assert it wasn't called.
     progress_cb.on_log = MagicMock()
     printer_cb.on_log = MagicMock()
 
@@ -176,9 +179,8 @@ def test_log_minimal_keys_no_crash(caplog):
         wt._weighted_log(logs)
 
     msg = caplog.records[0].message
-    assert "loss=1.000" in msg
-    assert "lr=" not in msg
-    assert "epoch=" not in msg
+    assert "loss=1.000e+00" in msg
+    # No gpu_mem
     assert "gpu_mem=" not in msg
 
 
@@ -193,10 +195,8 @@ def test_log_output_format_is_clean(caplog):
         wt._weighted_log(logs)
 
     msg = caplog.records[0].message
-    # Should NOT look like a dict
     assert not msg.startswith("{")
     assert not msg.endswith("}")
-    # Should be pipe-delimited
     assert " | " in msg
 
 
@@ -213,8 +213,7 @@ def test_gpu_callback_controls_log_order(caplog):
         wt._weighted_log(logs)
 
     msg = caplog.records[0].message
-    # Loss present + GPU memory present = injection happened before formatting
-    assert "loss=1.000" in msg
+    assert "loss=1.000e+00" in msg
     assert "gpu_mem=" in msg
 
 
@@ -233,6 +232,7 @@ def test_logs_passed_as_keyword_not_positional():
     train = _import_train()
     wt = _FakeTrainer()
     wt._weighted_log = MethodType(train.WeightedTrainer.log, wt)
+    wt._format_value = MethodType(train.WeightedTrainer._format_value, wt)
 
     strict_cb = _StrictCallback()
     wt.callback_handler.callbacks = [strict_cb]
@@ -241,7 +241,6 @@ def test_logs_passed_as_keyword_not_positional():
     wt.state.global_step = 1
     wt.state.epoch = None
 
-    # This would raise TypeError if logs is passed positionally.
     wt._weighted_log(logs)
     assert strict_cb.seen_logs is logs
 
@@ -258,6 +257,7 @@ def test_control_not_nulled_by_callback_returning_none():
     train = _import_train()
     wt = _FakeTrainer()
     wt._weighted_log = MethodType(train.WeightedTrainer.log, wt)
+    wt._format_value = MethodType(train.WeightedTrainer._format_value, wt)
 
     original_control = wt.control
     wt.callback_handler.callbacks = [_ReturningNoneCallback()]
@@ -267,5 +267,76 @@ def test_control_not_nulled_by_callback_returning_none():
     wt.state.epoch = None
 
     wt._weighted_log(logs)
-    # self.control must survive — not overwritten to None.
     assert wt.control is original_control
+
+
+def test_integer_values_emitted_as_is(caplog):
+    wt = _make_weighted_trainer()
+    logs = {"loss": 1.0, "global_step": 42}
+    wt.state.global_step = 42
+    wt.state.epoch = None
+
+    with caplog.at_level(logging.INFO):
+        wt._weighted_log(logs)
+
+    msg = caplog.records[0].message
+    assert "global_step=42" in msg
+
+
+def test_numpy_integer_emitted_as_is(caplog):
+    wt = _make_weighted_trainer()
+    logs = {"loss": 1.0, "num_items": np.int64(128)}
+    wt.state.global_step = 1
+    wt.state.epoch = None
+
+    with caplog.at_level(logging.INFO):
+        wt._weighted_log(logs)
+
+    msg = caplog.records[0].message
+    assert "num_items=128" in msg
+
+
+def test_string_values_emitted_as_is(caplog):
+    wt = _make_weighted_trainer()
+    logs = {"loss": 1.0, "status": "training"}
+    wt.state.global_step = 1
+    wt.state.epoch = None
+
+    with caplog.at_level(logging.INFO):
+        wt._weighted_log(logs)
+
+    msg = caplog.records[0].message
+    assert "status=training" in msg
+
+
+def test_all_metric_types_in_log_line(caplog):
+    """Verify a log dict with int, float, str, and GPU keys all render."""
+    wt = _make_weighted_trainer()
+    wt.callback_handler.callbacks = [_GPUInjectorCallback()]
+
+    logs = {
+        "loss": 0.54321,
+        "grad_norm": 12.34,
+        "learning_rate": 3e-5,
+        "epoch": 0.75,
+        "step": 100,
+        "status": "running",
+    }
+    wt.state.global_step = 100
+    wt.state.epoch = 0.75
+
+    with caplog.at_level(logging.INFO):
+        wt._weighted_log(logs)
+
+    msg = caplog.records[0].message
+    # Floats: .3e format
+    assert "loss=5.432e-01" in msg
+    assert "grad_norm=1.234e+01" in msg
+    assert "learning_rate=3.000e-05" in msg
+    assert "epoch=7.500e-01" in msg
+    # Int: as-is
+    assert "step=100" in msg
+    # Str: as-is
+    assert "status=running" in msg
+    # GPU pair
+    assert "gpu_mem=1060/16200 MB" in msg
