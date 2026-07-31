@@ -59,13 +59,12 @@ scdiag-train --model google/vit-base-patch16-224 \
 | `--model` | `google/vit-base-patch16-224` | HuggingFace model name or local path |
 | `--dataset` | `marmal88/skin_cancer` | HuggingFace dataset name |
 | `--image_size` | `448` | Augmentation crop size (processor handles final resize) |
-| `--num_labels` | `None` | Override number of labels (auto-detected) |
 | `--epochs` | `5` | Number of training epochs |
 | `--batch_size` | `32` | Batch size |
 | `--lr` | `3e-5` | Peak learning rate |
 | `--weight_decay` | `0.01` | Weight decay |
 | `--warmup_epochs` | `2` | Linear warmup epochs |
-| `--label_smoothing` | `0.1` | Label smoothing factor |
+| `--label_smoothing` | `0.0` | Label smoothing factor |
 | `--grad_accum_steps` | `1` | Gradient accumulation steps |
 | `--amp_dtype` | `None` | Mixed precision: `float16` or `bfloat16` |
 | `--checkpoint` | `scdiag` | Checkpoint base path (`_latest.pt` / `_best.pt` appended) |
