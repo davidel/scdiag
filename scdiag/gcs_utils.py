@@ -53,6 +53,7 @@ def checkpoint_dict(model, optimizer, scheduler, epoch, extra=None):
       "optimizer_state_dict": optimizer.state_dict(),
       "scheduler_state_dict": scheduler.state_dict(),
       "epoch": epoch,
+      "id2label": model.config.id2label,
   }
   if extra:
     d.update(extra)

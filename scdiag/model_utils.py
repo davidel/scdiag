@@ -67,5 +67,11 @@ def load_model_for_inference(
       f"Loaded weights from {checkpoint_path}: "
       f"{len(missing)} missing, {len(unexpected)} unexpected keys"
   )
+
+  # Use checkpoint's id2label if available (new checkpoints), otherwise
+  # keep the pretrained model's default id2label (generic LABEL_0..N).
+  if "id2label" in ckpt:
+    model.config.id2label = ckpt["id2label"]
+    model.config.label2id = {v: k for k, v in ckpt["id2label"].items()}
   model.to(device).eval()
   return model, processor
