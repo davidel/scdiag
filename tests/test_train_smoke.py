@@ -24,16 +24,29 @@ class TinyModel(torch.nn.Module):
     self.fc = torch.nn.Linear(3 * 64 * 64, num_labels)
 
   def forward(self, pixel_values, **kwargs):
-    b = pixel_values.shape[0]
-    flat = pixel_values.view(b, -1)
-    return LogitsOutput(logits=self.fc(flat))
+    return LogitsOutput(logits=self.fc(pixel_values.flatten(1)))
 
 
 class TinyProcessor:
-  """Mimics AutoImageProcessor with .image_mean / .image_std."""
+  """Mimics AutoImageProcessor."""
 
   image_mean = [0.5, 0.5, 0.5]
   image_std = [0.5, 0.5, 0.5]
+  size = {"height": 64, "width": 64}
+
+  def __call__(self, image, size=None, return_tensors="pt"):
+    import torchvision.transforms.functional as F
+    import numpy as np
+    from PIL import Image as PILImage
+    s = size or self.size
+    h, w = s["height"], s["width"]
+    if isinstance(image, torch.Tensor):
+      image = PILImage.fromarray(
+          (image.permute(1, 2, 0).numpy() * 255).astype(np.uint8))
+    image = F.resize(image, [h, w])
+    image = F.to_tensor(image)
+    image = F.normalize(image, mean=self.image_mean, std=self.image_std)
+    return {"pixel_values": image}
 
 
 def _make_dataset(n_total=12, num_classes=3, size=64):

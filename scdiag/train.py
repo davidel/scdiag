@@ -24,9 +24,11 @@ from scdiag.hf_proxy import HFDatasetProxy
 
 
 def build_transforms(processor, image_size):
-  """Create train / val augmentation pipelines using processor stats."""
-  mean, std = processor.image_mean, processor.image_std
+  """Create train / val augmentation pipelines.
 
+    Stochastic augmentations only.  The processor handles deterministic
+    resize-to-model-size and normalization.
+    """
   train_augmentations = v2.Compose([
       v2.RandomResizedCrop(size=(image_size, image_size),
                            scale=(0.85, 1.0),
@@ -36,14 +38,11 @@ def build_transforms(processor, image_size):
       v2.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.1),
       v2.ToImage(),
       v2.ToDtype(torch.float32, scale=True),
-      v2.Normalize(mean=mean, std=std),
   ])
 
   val_augmentations = v2.Compose([
-      v2.Resize(size=(image_size, image_size), antialias=True),
       v2.ToImage(),
       v2.ToDtype(torch.float32, scale=True),
-      v2.Normalize(mean=mean, std=std),
   ])
 
   return train_augmentations, val_augmentations
@@ -424,8 +423,12 @@ def main():
   class_weights = compute_class_weights(train_proxy.dataset, num_labels).to(device)
   logging.info(f"Class weights: {class_weights.tolist()}")
 
+  processor_size = {"height": args.image_size, "width": args.image_size}
   train_proxy.transform = train_transforms
-  val_proxy.transform = val_transforms
+  train_proxy.processor = processor
+  train_proxy.processor_size = processor_size
+  val_proxy.processor = processor
+  val_proxy.processor_size = processor_size
 
   if len(train_proxy) < args.batch_size:
     raise ValueError(f"Training set ({len(train_proxy)} samples) is smaller than "
