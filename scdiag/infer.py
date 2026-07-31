@@ -117,11 +117,11 @@ def main(argv=None):
   transform = build_val_transform(processor, args.image_size)
 
   # Load XGBoost if requested
-  xgb_clf = None
+  xgb_model = None
   if args.xgboost_model:
     from xgboost import XGBClassifier
-    xgb_clf = XGBClassifier()
-    xgb_clf.load_model(args.xgboost_model)
+    xgb_model = XGBClassifier()
+    xgb_model.load_model(args.xgboost_model)
     logging.info(f"Loaded XGBoost model: {args.xgboost_model}")
 
   # Classify each image
@@ -151,12 +151,12 @@ def main(argv=None):
     }
 
     # XGBoost inference
-    if xgb_clf is not None:
+    if xgb_model is not None:
       from scdiag.model_utils import extract_features
       with torch.no_grad():
         backbone_out = model.convnextv2(pixel_values)
         features = extract_features(backbone_out)
-      xgb_probs = xgb_clf.predict_proba(features.cpu().numpy())[0]
+      xgb_probs = xgb_model.predict_proba(features.cpu().numpy())[0]
       xgb_predictions = []
       for idx in np.argsort(xgb_probs)[::-1].tolist():
         xgb_predictions.append({

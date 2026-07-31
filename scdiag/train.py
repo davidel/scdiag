@@ -382,16 +382,16 @@ def train_xgboost_on_backbone(args, train_ds, val_ds, device):
   torch.cuda.empty_cache()
 
   # 5. Train XGBoost
-  clf = train_xgboost(train_features, train_labels, args)
+  xgb_model = train_xgboost(train_features, train_labels, args)
 
   # 6. Evaluate on val set
-  val_metrics = eval_xgboost(clf, val_features, val_labels)
+  val_metrics = eval_xgboost(xgb_model, val_features, val_labels)
   logging.info(f"XGBoost val accuracy: {val_metrics['accuracy']:.2%}")
   for cls, acc in val_metrics["per_class_accuracy"].items():
     logging.info(f"  {cls}: {acc:.2%}")
 
   # 7. Save the XGBoost model
-  clf.save_model(args.xgboost_model)
+  xgb_model.save_model(args.xgboost_model)
   logging.info(f"XGBoost model saved: {args.xgboost_model}")
 
 
