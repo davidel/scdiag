@@ -21,6 +21,9 @@ Fine-tune HuggingFace image-classification models for skin-lesion classification
 - **Auto-resume** — automatically resumes from an existing checkpoint if found.
   Supports **cross-dataset resume** (backbone weights transfer, classifier
   head reinitialised).
+- **XGBoost classifier** — optionally train an XGBoost model on backbone features
+  after PyTorch training completes (`--train_xgboost`). Compare linear head vs
+  tree-based classifier performance.
 - **TensorBoard** logging.
 - **GCS sync** — optional checkpoint upload to Google Cloud Storage.
 
@@ -79,6 +82,16 @@ scdiag-train --model google/vit-base-patch16-224 \
 | `--ignore_optimizer_ckpt` | `False` | Skip restoring optimizer state on resume |
 | `--ignore_scheduler_ckpt` | `False` | Skip restoring scheduler state on resume |
 | `--ignore_scaler_ckpt` | `False` | Skip restoring GradScaler state on resume |
+| `--train_xgboost` | `False` | Train XGBoost on backbone features after training |
+| `--xgboost_model` | `xgboost_model.json` | Output path for XGBoost model |
+| `--xgb_max_depth` | `6` | XGBoost max tree depth |
+| `--xgb_n_estimators` | `200` | XGBoost number of trees |
+| `--xgb_learning_rate` | `0.1` | XGBoost learning rate |
+| `--xgb_subsample` | `0.8` | XGBoost row sampling ratio |
+| `--xgb_colsample_bytree` | `0.8` | XGBoost column sampling ratio |
+| `--xgb_min_child_weight` | `1` | XGBoost min child weight |
+| `--xgb_gamma` | `0.0` | XGBoost min split loss |
+| `--xgb_reg_alpha` | `0.0` | XGBoost L1 regularization |
 
 Training automatically resumes from an existing `_latest.pt` or `_best.pt`
 checkpoint if one exists at the `--checkpoint` path.
@@ -107,6 +120,40 @@ The checkpoint's backbone weights are loaded (`strict=False`), while the
 classifier head (different `num_classes`) is reinitialised and trained from
 scratch.  All three `--ignore_*` flags are recommended so the optimizer
 momentum, LR schedule, and scaler history from the old run don't interfere.
+
+## Inference
+
+```bash
+scdiag-infer --model facebook/convnextv2-base-22k-224 \
+             --checkpoint scdiag_best.pt \
+             path/to/image.jpg path/to/other_image.png
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--model` | (required) | HuggingFace model name |
+| `--checkpoint` | (required) | Path to `_best.pt` checkpoint |
+| `--top_k` | `5` | Show top-K predictions |
+| `--output` | `None` | Write JSON results to file |
+| `--device` | `None` | Force device (`cuda`, `cpu`, `mps`). Auto-detected if omitted. |
+| `--cache_dir` | `None` | HuggingFace cache directory |
+| `--xgboost_model` | `None` | XGBoost model path. If provided, run XGBoost alongside PyTorch. |
+
+### XGBoost Inference
+
+When `--xgboost_model` is provided, the output includes both PyTorch and XGBoost predictions:
+
+```json
+{
+  "source": "image.jpg",
+  "predictions": [
+    {"label": "melanoma", "probability": 0.435}
+  ],
+  "xgboost_predictions": [
+    {"label": "melanoma", "probability": 0.612}
+  ]
+}
+```
 
 ## Development
 
