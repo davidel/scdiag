@@ -267,6 +267,12 @@ def parse_args(argv=None):
       default=False,
       help="Skip restoring the scheduler from checkpoint",
   )
+  parser.add_argument(
+      "--ignore_scaler_ckpt",
+      action=argparse.BooleanOptionalAction,
+      default=False,
+      help="Skip restoring the GradScaler state from checkpoint",
+  )
 
   parser.add_argument(
       "--mixup_alpha",
@@ -594,8 +600,11 @@ def main():
     else:
       logging.info("  Skipped scheduler state")
     if scaler is not None and "scaler_state_dict" in ckpt:
-      scaler.load_state_dict(ckpt["scaler_state_dict"])
-      logging.info("  Restored GradScaler state")
+      if not args.ignore_scaler_ckpt:
+        scaler.load_state_dict(ckpt["scaler_state_dict"])
+        logging.info("  Restored GradScaler state")
+      else:
+        logging.info("  Skipped GradScaler state")
     start_epoch = ckpt.get("epoch", -1) + 1
     best_top1 = ckpt.get("best_top1", 0.0)
     logging.info(f"  Resumed at epoch {start_epoch}, best_top1={best_top1:.2f}%")
