@@ -155,14 +155,6 @@ def parse_args(argv=None):
       help="Resize images to this size (default: %(default)s)",
   )
   parser.add_argument(
-      "--num_labels",
-      type=int,
-      default=None,
-      help="Override number of labels (auto-detected by "
-      "default)",
-  )
-
-  parser.add_argument(
       "--epochs",
       type=int,
       default=5,
@@ -500,7 +492,7 @@ def main():
       val_transform=val_transforms,
   )
 
-  num_labels = args.num_labels or train_proxy.num_labels
+  num_labels = train_proxy.num_labels
   logging.info(f"num_labels: {num_labels}")
 
   class_weights = compute_class_weights(train_proxy.dataset, num_labels).to(device)
