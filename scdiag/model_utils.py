@@ -70,11 +70,19 @@ def load_model_for_inference(
       f"{len(missing)} missing, {len(unexpected)} unexpected keys"
   )
 
-  # Use checkpoint's id2label if available (new checkpoints), otherwise
-  # keep the pretrained model's default id2label (generic LABEL_0..N).
+  # Restore label mapping.  New checkpoints include id2label; old ones
+  # don't, so we generate generic LABEL_0..LABEL_N matching the classifier.
   if "id2label" in ckpt:
     model.config.id2label = ckpt["id2label"]
     model.config.label2id = {v: k for k, v in ckpt["id2label"].items()}
+  else:
+    n = num_labels
+    model.config.id2label = {str(i): f"LABEL_{i}" for i in range(n)}
+    model.config.label2id = {f"LABEL_{i}": str(i) for i in range(n)}
+    logging.warning(
+        f"Checkpoint has no id2label — using generic LABEL_0..LABEL_{n - 1}. "
+        "Re-train with the updated code to get proper label names."
+    )
   model.to(device).eval()
   return model, processor
 
