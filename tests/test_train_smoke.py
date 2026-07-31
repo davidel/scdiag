@@ -15,6 +15,8 @@ from PIL import Image
 
 LogitsOutput = namedtuple("LogitsOutput", ["logits"])
 
+MockConfig = namedtuple("MockConfig", ["id2label"])
+
 
 class TinyModel(torch.nn.Module):
   """Minimal torch.nn.Module that accepts pixel_values and returns .logits."""
@@ -22,6 +24,9 @@ class TinyModel(torch.nn.Module):
   def __init__(self, num_labels=3):
     super().__init__()
     self.fc = torch.nn.Linear(3 * 64 * 64, num_labels)
+    self.config = MockConfig(
+        id2label={str(i): f"class_{i}" for i in range(num_labels)}
+    )
 
   def forward(self, pixel_values, **kwargs):
     return LogitsOutput(logits=self.fc(pixel_values.flatten(1)))

@@ -5,6 +5,7 @@ import json
 import logging
 import os
 
+import numpy as np
 import torch
 from PIL import Image
 
@@ -63,6 +64,13 @@ def parse_args(argv=None):
       help="Logging level.",
   )
   parser.add_argument(
+      "--xgboost_model",
+      type=str,
+      default=None,
+      help="Optional XGBoost model path. If provided, run XGBoost alongside "
+      "the PyTorch classifier.",
+  )
+  parser.add_argument(
       "images",
       nargs="+",
       help="Image file paths and/or URLs.",
@@ -80,12 +88,12 @@ def open_image(source: str) -> Image.Image:
 
 
 def predict_single(model, transform, image: Image.Image, device: str):
-  """Run inference on one image. Returns probabilities tensor."""
+  """Run inference on one image. Returns (logits, pixel_values) tensor."""
   pixel_values = transform(image).unsqueeze(0).to(device)
   with torch.no_grad():
     logits = model(pixel_values).logits
   probs = torch.softmax(logits, dim=-1).squeeze()
-  return probs
+  return probs, pixel_values
 
 
 def main(argv=None):
@@ -108,11 +116,19 @@ def main(argv=None):
   )
   transform = build_val_transform(processor, args.image_size)
 
+  # Load XGBoost if requested
+  xgb_clf = None
+  if args.xgboost_model:
+    from xgboost import XGBClassifier
+    xgb_clf = XGBClassifier()
+    xgb_clf.load_model(args.xgboost_model)
+    logging.info(f"Loaded XGBoost model: {args.xgboost_model}")
+
   # Classify each image
   results = []
   for source in args.images:
     image = open_image(source)
-    probs = predict_single(model, transform, image, device)
+    probs, pixel_values = predict_single(model, transform, image, device)
 
     # Build sorted prediction list
     predictions = []
@@ -129,10 +145,31 @@ def main(argv=None):
     for p in predictions:
       logging.info(f"  {p['probability']:.1%}  {p['label']}")
 
-    results.append({
+    result = {
         "source": source,
         "predictions": predictions,
-    })
+    }
+
+    # XGBoost inference
+    if xgb_clf is not None:
+      from scdiag.model_utils import extract_features
+      with torch.no_grad():
+        backbone_out = model.convnextv2(pixel_values)
+        features = extract_features(backbone_out)
+      xgb_probs = xgb_clf.predict_proba(features.cpu().numpy())[0]
+      xgb_predictions = []
+      for idx in np.argsort(xgb_probs)[::-1].tolist():
+        xgb_predictions.append({
+            "label": model.config.id2label[idx],
+            "probability": round(float(xgb_probs[idx]), 4),
+        })
+      if args.top_k:
+        xgb_predictions = xgb_predictions[:args.top_k]
+      result["xgboost_predictions"] = xgb_predictions
+      logging.info(f"  XGBoost top: {xgb_predictions[0]['label']} "
+                   f"({xgb_predictions[0]['probability']:.1%})")
+
+    results.append(result)
 
   # Optional JSON output
   if args.output:

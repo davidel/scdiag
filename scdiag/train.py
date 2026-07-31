@@ -289,7 +289,114 @@ def parse_args(argv=None):
       "(format: gs://BUCKET/PREFIX)",
   )
 
+  # XGBoost
+  g = parser.add_argument_group("xgboost")
+  g.add_argument(
+      "--train_xgboost", action="store_true",
+      help="Train XGBoost on backbone features after training completes",
+  )
+  g.add_argument(
+      "--xgboost_model", default="xgboost_model.json",
+      help="Output path for the saved XGBoost model "
+      "(default: %(default)s)",
+  )
+  g.add_argument(
+      "--xgb_max_depth", type=int, default=6,
+      help="XGBoost max tree depth (default: %(default)s)",
+  )
+  g.add_argument(
+      "--xgb_n_estimators", type=int, default=200,
+      help="XGBoost number of trees (default: %(default)s)",
+  )
+  g.add_argument(
+      "--xgb_learning_rate", type=float, default=0.1,
+      help="XGBoost learning rate (default: %(default)s)",
+  )
+  g.add_argument(
+      "--xgb_subsample", type=float, default=0.8,
+      help="XGBoost row sampling ratio (default: %(default)s)",
+  )
+  g.add_argument(
+      "--xgb_colsample_bytree", type=float, default=0.8,
+      help="XGBoost column sampling ratio (default: %(default)s)",
+  )
+  g.add_argument(
+      "--xgb_min_child_weight", type=int, default=1,
+      help="XGBoost min child weight (default: %(default)s)",
+  )
+  g.add_argument(
+      "--xgb_gamma", type=float, default=0.0,
+      help="XGBoost min split loss (default: %(default)s)",
+  )
+  g.add_argument(
+      "--xgb_reg_alpha", type=float, default=0.0,
+      help="XGBoost L1 regularization (default: %(default)s)",
+  )
+
   return parser.parse_args(argv)
+
+
+def train_xgboost_on_backbone(args, train_ds, val_ds, device):
+  """Train XGBoost on backbone features after PyTorch training completes.
+
+  Args:
+      args: Parsed CLI args (contains xgb_* hyperparameters, checkpoint paths, etc.)
+      train_ds: Training HF Dataset (raw, before proxy wrapping).
+      val_ds: Validation HF Dataset (raw, before proxy wrapping).
+      device: torch device.
+  """
+  from scdiag.model_utils import (
+      build_val_transform, collect_features, load_model_for_inference,
+  )
+  from scdiag.hf_proxy import HFDatasetProxy
+  from scdiag.xgb_utils import train_xgboost, eval_xgboost
+
+  logging.info("=" * 60)
+  logging.info("XGBoost training on backbone features")
+  logging.info("=" * 60)
+
+  # 1. Load the best checkpoint into a fresh model
+  best_ckpt_path = args.checkpoint + "_best.pt"
+  logging.info(f"Loading best checkpoint: {best_ckpt_path}")
+  model_best, _ = load_model_for_inference(
+      args.model, best_ckpt_path, "cpu", cache_dir=args.cache_dir
+  )
+
+  # 2. Rebuild train and val datasets with val transforms (not train augs)
+  processor = AutoImageProcessor.from_pretrained(args.model)
+  val_transform = build_val_transform(processor, args.image_size)
+  train_proxy = HFDatasetProxy(train_ds, transform=val_transform)
+  val_proxy = HFDatasetProxy(val_ds, transform=val_transform)
+
+  # 3. Collect features
+  logging.info("Extracting train features...")
+  train_features, train_labels = collect_features(
+      model_best, train_proxy, device
+  )
+  logging.info(f"  Train features shape: {train_features.shape}")
+
+  logging.info("Extracting val features...")
+  val_features, val_labels = collect_features(
+      model_best, val_proxy, device
+  )
+  logging.info(f"  Val features shape: {val_features.shape}")
+
+  # 4. Free the model — XGBoost doesn't need it anymore
+  del model_best
+  torch.cuda.empty_cache()
+
+  # 5. Train XGBoost
+  clf = train_xgboost(train_features, train_labels, args)
+
+  # 6. Evaluate on val set
+  val_metrics = eval_xgboost(clf, val_features, val_labels)
+  logging.info(f"XGBoost val accuracy: {val_metrics['accuracy']:.2%}")
+  for cls, acc in val_metrics["per_class_accuracy"].items():
+    logging.info(f"  {cls}: {acc:.2%}")
+
+  # 7. Save the XGBoost model
+  clf.save_model(args.xgboost_model)
+  logging.info(f"XGBoost model saved: {args.xgboost_model}")
 
 
 def mixup_data(x, y, alpha=0.2):
@@ -674,6 +781,18 @@ def main():
     )
     logging.info("Checkpoint saved on exit.")
     writer.close()
+
+    # Free training model VRAM before XGBoost block.
+    del model
+    del optimizer
+    del scaler
+    torch.cuda.empty_cache()
+
+    if args.train_xgboost:
+      # Access raw HF datasets (before proxy wrapping) for XGBoost.
+      train_xgboost_on_backbone(
+          args, train_proxy.dataset, val_proxy.dataset, device
+      )
 
 
 if __name__ == "__main__":

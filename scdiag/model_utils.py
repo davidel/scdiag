@@ -2,7 +2,9 @@
 
 import logging
 
+import numpy as np
 import torch
+from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoImageProcessor, AutoModelForImageClassification
@@ -75,3 +77,51 @@ def load_model_for_inference(
     model.config.label2id = {v: k for k, v in ckpt["id2label"].items()}
   model.to(device).eval()
   return model, processor
+
+
+def extract_features(outputs):
+  """Extract features from a HuggingFace model output.
+
+  If pooler_output is available (already pooled to [N, hidden_size]),
+  use it directly.  Otherwise, apply global average pooling to
+  last_hidden_state.
+
+  Args:
+      outputs: Model output object (e.g. BaseModelOutputWithPoolingAndNoAttention).
+
+  Returns:
+      torch.Tensor of shape [N, hidden_size].
+  """
+  if outputs.pooler_output is not None:
+    return outputs.pooler_output
+  return outputs.last_hidden_state.mean([-2, -1])
+
+
+def collect_features(model, dataset, device, batch_size=128):
+  """Extract backbone features for all samples in a dataset.
+
+  Args:
+      model: ConvNextV2ForImageClassification (eval mode, on device).
+      dataset: HFDatasetProxy (already has transform applied).
+      device: torch device.
+      batch_size: batch size for feature extraction (default 128).
+
+  Returns:
+      features: np.ndarray of shape [N, hidden_size], dtype float32.
+      labels: np.ndarray of shape [N], dtype int64.
+  """
+  model.eval()
+  loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+
+  features_list = []
+  labels_list = []
+
+  with torch.no_grad():
+    for pixel_values, batch_labels in loader:
+      pixel_values = pixel_values.to(device)
+      outputs = model.convnextv2(pixel_values)
+      features = extract_features(outputs)
+      features_list.append(features.cpu().numpy())
+      labels_list.append(batch_labels.numpy())
+
+  return np.concatenate(features_list), np.concatenate(labels_list)
