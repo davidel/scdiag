@@ -134,7 +134,7 @@ def main(argv=None):
     predictions = []
     for idx in probs.argsort(descending=True).tolist():
       predictions.append({
-          "label": model.config.id2label[idx],
+          "label": model.config.id2label[str(idx)],
           "probability": round(probs[idx].item(), 4),
       })
     if args.top_k:
@@ -160,7 +160,7 @@ def main(argv=None):
       xgb_predictions = []
       for idx in np.argsort(xgb_probs)[::-1].tolist():
         xgb_predictions.append({
-            "label": model.config.id2label[idx],
+            "label": model.config.id2label[str(idx)],
             "probability": round(float(xgb_probs[idx]), 4),
         })
       if args.top_k:
