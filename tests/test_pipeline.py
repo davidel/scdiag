@@ -5,6 +5,7 @@ load → detect columns → split → build → sample path without a GPU
 and without downloading anything from the Hub.
 """
 
+import os
 import tempfile
 
 import pytest
@@ -14,273 +15,507 @@ import datasets
 from PIL import Image
 from unittest.mock import patch, MagicMock
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _import_train():
-  """Lazy-import train.py so module-level evaluate.load() is mocked."""
-  with patch("evaluate.load", return_value=MagicMock()):
-    from scdiag import train
-  return train
+  """Lazy-import scdiag.train so module-level fixtures resolve cleanly."""
+  import importlib
+  import scdiag.train
+
+  importlib.reload(scdiag.train)
+  return scdiag.train
 
 
-def _make_synthetic_dataset(num_samples=32, num_classes=3,
-                            image_col="image", label_col="dx"):
-  """Build a tiny in-memory dataset that mimics marmal88/skin_cancer."""
-  rng = np.random.RandomState(42)
-  images = [Image.fromarray(rng.randint(0, 255, (64, 64, 3), dtype=np.uint8))
-            for _ in range(num_samples)]
-  labels = [f"class_{i % num_classes}" for i in range(num_samples)]
-  data = {image_col: images, label_col: labels}
-  feat = datasets.Features({
+def _make_synthetic_dataset(label_col="label", image_col="image", n=64, num_classes=3):
+  """Create a synthetic HuggingFace Dataset with images and labels."""
+  labels = [f"class_{i}" for i in range(num_classes)]
+
+  def _rand_img():
+    arr = np.random.randint(0, 256, (64, 64, 3), dtype=np.uint8)
+    return Image.fromarray(arr)
+
+  data = {
+      image_col: [_rand_img() for _ in range(n)],
+      label_col: [labels[i % num_classes] for i in range(n)],
+  }
+
+  features = datasets.Features({
       image_col: datasets.Image(),
-      label_col: datasets.Value("string"),
+      label_col: datasets.ClassLabel(names=labels),
   })
-  return datasets.Dataset.from_dict(data, features=feat)
+
+  return datasets.Dataset.from_dict(data, features=features)
 
 
 # ---------------------------------------------------------------------------
-# Tests
+# Detect image column
 # ---------------------------------------------------------------------------
-
-class TestDetectLabelColumn:
-
-  def test_detects_class_label(self):
-    train_mod = _import_train()
-    ds = datasets.Dataset.from_dict({
-        "image": [Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8))],
-        "label": [0],
-    }, features=datasets.Features({
-        "image": datasets.Image(),
-        "label": datasets.ClassLabel(names=["a", "b"]),
-    }))
-    assert train_mod._detect_label_column(ds) == "label"
-
-  def test_detects_dx_string_column(self):
-    train_mod = _import_train()
-    ds = _make_synthetic_dataset(label_col="dx")
-    assert train_mod._detect_label_column(ds) == "dx"
-
-  def test_raises_when_no_label_found(self):
-    train_mod = _import_train()
-    ds = datasets.Dataset.from_dict({
-        "image": [Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8))],
-        "data": [1.0],
-    }, features=datasets.Features({
-        "image": datasets.Image(),
-        "data": datasets.Value("float32"),
-    }))
-    with pytest.raises(ValueError, match="No label column found"):
-      train_mod._detect_label_column(ds)
 
 
 class TestDetectImageColumn:
 
-  def test_detects_image_column(self):
+  def test_finds_image_column(self):
     train_mod = _import_train()
-    ds = _make_synthetic_dataset(image_col="image")
-    assert train_mod._detect_image_column(ds) == "image"
+    ds = _make_synthetic_dataset(label_col="dx", image_col="image")
+    assert train_mod.HFDatasetProxy.detect_image_column(ds) == "image"
 
-  def test_detects_img_column(self):
+  def test_finds_nonstandard_name(self):
     train_mod = _import_train()
-    ds = _make_synthetic_dataset(image_col="img")
-    assert train_mod._detect_image_column(ds) == "img"
+    ds = _make_synthetic_dataset(label_col="class", image_col="img")
+    assert train_mod.HFDatasetProxy.detect_image_column(ds) == "img"
 
-  def test_raises_when_no_image_found(self):
+  def test_returns_none_when_no_image(self):
     train_mod = _import_train()
-    ds = datasets.Dataset.from_dict({
-        "data": [1.0],
-        "label": ["a"],
-    }, features=datasets.Features({
-        "data": datasets.Value("float32"),
-        "label": datasets.ClassLabel(names=["a"]),
-    }))
-    with pytest.raises(ValueError, match="No image column found"):
-      train_mod._detect_image_column(ds)
+    ds = datasets.Dataset.from_dict(
+        {
+            "data": [1.0, 2.0],
+            "label": ["a", "b"],
+        },
+        features=datasets.Features({
+            "data": datasets.Value("float32"),
+            "label": datasets.ClassLabel(names=["a", "b"]),
+        }),
+    )
+    assert train_mod.HFDatasetProxy.detect_image_column(ds) is None
+
+  def test_prefers_known_name_over_unknown(self):
+    train_mod = _import_train()
+    """When multiple Image columns exist, prefer the one with a known name."""
+    imgs = [Image.fromarray(np.zeros((32, 32, 3), dtype=np.uint8)) for _ in range(4)]
+    ds = datasets.Dataset.from_dict(
+        {
+            "thumb": imgs,
+            "image": imgs,
+            "label": [0, 1, 0, 1]
+        },
+        features=datasets.Features({
+            "thumb": datasets.Image(),
+            "image": datasets.Image(),
+            "label": datasets.ClassLabel(names=["a", "b"]),
+        }),
+    )
+    assert train_mod.HFDatasetProxy.detect_image_column(ds) == "image"
+
+  def test_detects_filepath_string_column(self):
+    train_mod = _import_train()
+    """Detect a known image name even when stored as file path strings."""
+    ds = datasets.Dataset.from_dict(
+        {
+            "path": ["/a.jpg", "/b.jpg"],
+            "label": [0, 1]
+        },
+        features=datasets.Features({
+            "path": datasets.Value("string"),
+            "label": datasets.ClassLabel(names=["a", "b"]),
+        }),
+    )
+    assert train_mod.HFDatasetProxy.detect_image_column(ds) == "path"
+
+  def test_filepath_cast_to_pil_image(self):
+    train_mod = _import_train()
+    """When image column is a string path, load_and_split_dataset should cast
+    it to datasets.Image and return actual PIL images."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+      paths = []
+      for i in range(4):
+        p = os.path.join(tmpdir, f"{i}.png")
+        Image.fromarray(np.zeros((32, 32, 3), dtype=np.uint8)).save(p)
+        paths.append(p)
+
+      ds = datasets.Dataset.from_dict(
+          {
+              "image_file": paths,
+              "label": ["a", "b", "a", "b"]
+          },
+          features=datasets.Features({
+              "image_file": datasets.Value("string"),
+              "label": datasets.ClassLabel(names=["a", "b"]),
+          }),
+      )
+      with patch("scdiag.train.load_dataset", return_value=ds):
+        train_p, val_p = train_mod.load_and_split_dataset("fake_ds")
+
+      img = train_p.dataset[0]["image_file"]
+      assert isinstance(img, Image.Image), (f"Expected PIL Image, got {type(img)}")
+
+
+# ---------------------------------------------------------------------------
+# Detect label column
+# ---------------------------------------------------------------------------
+
+
+class TestDetectLabelColumn:
+
+  def test_prefers_label_classlabel(self):
+    train_mod = _import_train()
+    ds = _make_synthetic_dataset(label_col="label", image_col="image")
+    assert train_mod.HFDatasetProxy.detect_label_column(ds) == "label"
+
+  def test_finds_dx_classlabel(self):
+    train_mod = _import_train()
+    ds = _make_synthetic_dataset(label_col="dx", image_col="image")
+    assert train_mod.HFDatasetProxy.detect_label_column(ds) == "dx"
+
+  def test_finds_diagnosis_classlabel(self):
+    train_mod = _import_train()
+    ds = _make_synthetic_dataset(label_col="diagnosis", image_col="img")
+    assert train_mod.HFDatasetProxy.detect_label_column(ds) == "diagnosis"
+
+  def test_finds_labels_plural(self):
+    train_mod = _import_train()
+    ds = _make_synthetic_dataset(label_col="labels", image_col="image")
+    assert train_mod.HFDatasetProxy.detect_label_column(ds) == "labels"
+
+  def test_finds_species_classlabel(self):
+    train_mod = _import_train()
+    ds = _make_synthetic_dataset(label_col="species", image_col="image")
+    assert train_mod.HFDatasetProxy.detect_label_column(ds) == "species"
+
+  def test_finds_string_value_column(self):
+    train_mod = _import_train()
+    raw = datasets.Dataset.from_dict(
+        {
+            "img": [
+                Image.fromarray(np.zeros((32, 32, 3), dtype=np.uint8)) for _ in range(6)
+            ],
+            "category": ["cat", "dog", "cat", "dog", "cat", "dog"],
+        },
+        features=datasets.Features({
+            "img": datasets.Image(),
+            "category": datasets.Value("string"),
+        }),
+    )
+    assert train_mod.HFDatasetProxy.detect_label_column(raw) == "category"
+
+  def test_finds_int_value_column(self):
+    train_mod = _import_train()
+    raw = datasets.Dataset.from_dict(
+        {
+            "image": [
+                Image.fromarray(np.zeros((32, 32, 3), dtype=np.uint8)) for _ in range(4)
+            ],
+            "coarse_label": [0, 1, 0, 1],
+        },
+        features=datasets.Features({
+            "image": datasets.Image(),
+            "coarse_label": datasets.Value("int64"),
+        }),
+    )
+    assert train_mod.HFDatasetProxy.detect_label_column(raw) == "coarse_label"
+
+  def test_ignores_path_columns(self):
+    train_mod = _import_train()
+    raw = datasets.Dataset.from_dict(
+        {
+            "image": [
+                Image.fromarray(np.zeros((32, 32, 3), dtype=np.uint8)) for _ in range(4)
+            ],
+            "file_path": ["/a.jpg", "/b.jpg", "/c.jpg", "/d.jpg"],
+            "target": [0, 1, 0, 1],
+        },
+        features=datasets.Features({
+            "image": datasets.Image(),
+            "file_path": datasets.Value("string"),
+            "target": datasets.Value("int64"),
+        }),
+    )
+    assert train_mod.HFDatasetProxy.detect_label_column(raw) == "target"
+
+  def test_returns_none_when_no_label(self):
+    train_mod = _import_train()
+    ds = datasets.Dataset.from_dict(
+        {
+            "image": [
+                Image.fromarray(np.zeros((32, 32, 3), dtype=np.uint8)) for _ in range(2)
+            ],
+        },
+        features=datasets.Features({
+            "image": datasets.Image(),
+        }),
+    )
+    assert train_mod.HFDatasetProxy.detect_label_column(ds) is None
+
+
+# ---------------------------------------------------------------------------
+# Load and split dataset
+# ---------------------------------------------------------------------------
 
 
 class TestLoadAndSplit:
 
-  def test_renames_label_and_detects_image(self):
+  def test_renames_label_and_returns_proxies(self):
     train_mod = _import_train()
     raw = _make_synthetic_dataset(label_col="dx", image_col="image")
 
     with patch("scdiag.train.load_dataset", return_value=raw):
-      ds, image_col = train_mod.load_and_split_dataset("fake-dataset")
+      train_p, val_p = train_mod.load_and_split_dataset("fake_dataset")
 
-    assert "label" in ds["train"].features
-    assert "dx" not in ds["train"].features
-    assert image_col == "image"
-    assert len(ds["train"]) > 0
-    assert len(ds["test"]) > 0
+    assert isinstance(train_p, train_mod.HFDatasetProxy)
+    assert isinstance(val_p, train_mod.HFDatasetProxy)
+    assert "label" in train_p.dataset.column_names
+    assert "label" in val_p.dataset.column_names
 
-  def test_preserves_label_if_already_named_label(self):
+  def test_preserves_label_column_if_already_named_label(self):
     train_mod = _import_train()
-    raw = _make_synthetic_dataset(label_col="label")
+    raw = _make_synthetic_dataset(label_col="label", image_col="image")
 
     with patch("scdiag.train.load_dataset", return_value=raw):
-      ds, image_col = train_mod.load_and_split_dataset("fake-dataset")
+      train_p, val_p = train_mod.load_and_split_dataset("fake_dataset")
 
-    assert "label" in ds["train"].features
+    assert "label" in train_p.dataset.column_names
 
-  def test_handles_nonstandard_image_column(self):
+  def test_raises_when_no_image_column(self):
     train_mod = _import_train()
-    raw = _make_synthetic_dataset(image_col="pixel_data", label_col="class")
+    ds = datasets.Dataset.from_dict(
+        {
+            "data": [1.0, 2.0],
+            "label": ["a", "b"],
+        },
+        features=datasets.Features({
+            "data": datasets.Value("float32"),
+            "label": datasets.ClassLabel(names=["a", "b"]),
+        }),
+    )
+
+    with patch("scdiag.train.load_dataset", return_value=ds):
+      with pytest.raises(ValueError, match="No image column"):
+        train_mod.load_and_split_dataset("fake_dataset")
+
+  def test_class_encode_non_classlabel_column(self):
+    train_mod = _import_train()
+    """If the label column is a plain string Value (not ClassLabel),
+    it should still work by auto-encoding."""
+    raw = datasets.Dataset.from_dict(
+        {
+            "image": [
+                Image.fromarray(np.zeros((64, 64, 3), dtype=np.uint8))
+                for _ in range(20)
+            ],
+            "diagnosis": ["benign"] * 10 + ["malignant"] * 10,
+        },
+        features=datasets.Features({
+            "image": datasets.Image(),
+            "diagnosis": datasets.Value("string"),
+        }),
+    )
 
     with patch("scdiag.train.load_dataset", return_value=raw):
-      ds, image_col = train_mod.load_and_split_dataset("fake-dataset")
-
-    assert image_col == "pixel_data"
-    assert "label" in ds["train"].features
+      train_p, val_p = train_mod.load_and_split_dataset("fake_dataset")
+    assert "label" in train_p.dataset.column_names
 
 
-class TestBuildDatasets:
-
-  @pytest.fixture()
-  def loaded(self):
-    train_mod = _import_train()
-    raw = _make_synthetic_dataset()
-    with patch("scdiag.train.load_dataset", return_value=raw):
-      ds, image_col = train_mod.load_and_split_dataset("fake-dataset")
-    return ds, image_col
-
-  def test_returns_dataset_and_processor(self, loaded):
-    train_mod = _import_train()
-    ds, image_col = loaded
-    with tempfile.TemporaryDirectory() as cache:
-      dataset, processor = train_mod.build_datasets(
-          ds, "facebook/convnextv2-base-22k-224", 224,
-          image_col=image_col, cache_dir=cache)
-    assert "train" in dataset
-    assert "test" in dataset
-    assert processor is not None
-
-  def test_train_sample_shape(self, loaded):
-    train_mod = _import_train()
-    ds, image_col = loaded
-    with tempfile.TemporaryDirectory() as cache:
-      dataset, _ = train_mod.build_datasets(
-          ds, "facebook/convnextv2-base-22k-224", 224,
-          image_col=image_col, cache_dir=cache)
-
-    sample = dataset["train"][0]
-    assert "pixel_values" in sample
-    assert "labels" in sample
-    assert sample["pixel_values"].shape == (3, 224, 224)
-
-  def test_test_sample_shape(self, loaded):
-    train_mod = _import_train()
-    ds, image_col = loaded
-    with tempfile.TemporaryDirectory() as cache:
-      dataset, _ = train_mod.build_datasets(
-          ds, "facebook/convnextv2-base-22k-224", 224,
-          image_col=image_col, cache_dir=cache)
-
-    sample = dataset["test"][0]
-    assert sample["pixel_values"].shape == (3, 224, 224)
-
-  def test_batched_access(self, loaded):
-    """Simulate what the DataLoader does with __getitems__."""
-    train_mod = _import_train()
-    ds, image_col = loaded
-    with tempfile.TemporaryDirectory() as cache:
-      dataset, _ = train_mod.build_datasets(
-          ds, "facebook/convnextv2-base-22k-224", 224,
-          image_col=image_col, cache_dir=cache)
-
-    n = len(dataset["train"])
-    batch_size = min(8, n)
-    batch = dataset["train"][:batch_size]
-    assert batch["pixel_values"].shape == (batch_size, 3, 224, 224)
-    assert batch["labels"].shape == (batch_size,)
-
-  def test_labels_are_integer_tensors(self, loaded):
-    train_mod = _import_train()
-    ds, image_col = loaded
-    with tempfile.TemporaryDirectory() as cache:
-      dataset, _ = train_mod.build_datasets(
-          ds, "facebook/convnextv2-base-22k-224", 224,
-          image_col=image_col, cache_dir=cache)
-
-    labels = dataset["train"][0]["labels"]
-    assert isinstance(labels, torch.Tensor)
-    assert labels.dtype in (torch.int64, torch.int32)
-
-  def test_pixel_values_in_valid_range(self, loaded):
-    """After normalization, values should be roughly in [-4, 4]."""
-    train_mod = _import_train()
-    ds, image_col = loaded
-    with tempfile.TemporaryDirectory() as cache:
-      dataset, _ = train_mod.build_datasets(
-          ds, "facebook/convnextv2-base-22k-224", 224,
-          image_col=image_col, cache_dir=cache)
-
-    pv = dataset["train"][0]["pixel_values"]
-    assert torch.isfinite(pv).all()
-    assert pv.min() > -5.0
-    assert pv.max() < 5.0
-
-  def test_nonstandard_image_column(self, loaded):
-    """Ensure transforms work when the image column isn't called 'image'."""
-    train_mod = _import_train()
-    raw = _make_synthetic_dataset(image_col="custom_img", label_col="dx")
-    with patch("scdiag.train.load_dataset", return_value=raw):
-      ds, image_col = train_mod.load_and_split_dataset("fake-dataset")
-
-    with tempfile.TemporaryDirectory() as cache:
-      dataset, _ = train_mod.build_datasets(
-          ds, "facebook/convnextv2-base-22k-224", 224,
-          image_col=image_col, cache_dir=cache)
-
-    sample = dataset["train"][0]
-    assert sample["pixel_values"].shape == (3, 224, 224)
+# ---------------------------------------------------------------------------
+# Compute class weights
+# ---------------------------------------------------------------------------
 
 
 class TestComputeClassWeights:
 
-  def test_weights_shape_and_positive(self):
+  def test_balanced_classes_get_equal_weights(self):
     train_mod = _import_train()
-    raw = _make_synthetic_dataset(num_classes=3)
-    with patch("scdiag.train.load_dataset", return_value=raw):
-      ds, _ = train_mod.load_and_split_dataset("fake-dataset")
-    weights = train_mod.compute_class_weights(ds, 3)
-    assert weights.shape == (3,)
-    assert torch.isfinite(weights).all()
-    assert (weights > 0).all()
+    # Create a dataset where the TRAIN split has exactly 20 per class.
+    # 20 benign + 20 malignant = 40 total train (50 train / 10 test with 20%)
+    raw = datasets.Dataset.from_dict(
+        {
+            "image": [
+                Image.fromarray(np.zeros((64, 64, 3), dtype=np.uint8))
+                for _ in range(50)
+            ],
+            "label": ["benign"] * 25 + ["malignant"] * 25,
+        },
+        features=datasets.Features({
+            "image": datasets.Image(),
+            "label": datasets.ClassLabel(names=["benign", "malignant"]),
+        }),
+    )
+    # Create a dataset dict with exact train counts
+    train_ds = datasets.Dataset.from_dict(
+        {
+            "image": [
+                Image.fromarray(np.zeros((64, 64, 3), dtype=np.uint8))
+                for _ in range(40)
+            ],
+            "label": ["benign"] * 20 + ["malignant"] * 20,
+        },
+        features=datasets.Features({
+            "image": datasets.Image(),
+            "label": datasets.ClassLabel(names=["benign", "malignant"]),
+        }),
+    )
+    dataset_dict = datasets.DatasetDict({
+        "train": train_ds,
+        "test": raw,
+    })
 
-  def test_balanced_dataset_gives_uniform_weights(self):
+    weights = train_mod.compute_class_weights(train_ds, num_labels=2)
+    assert weights.shape == (2,)
+    # For balanced classes, all weights should be equal
+    assert torch.allclose(weights, weights[0].expand_as(weights), atol=1e-6)
+
+  def test_imbalanced_classes_get_inverse_weights(self):
     train_mod = _import_train()
-    # Build a perfectly balanced dataset, bypass train_test_split so
-    # class proportions stay even.
-    raw = _make_synthetic_dataset(num_samples=30, num_classes=3)
-    raw = raw.class_encode_column("dx").rename_column("dx", "label")
-    ds = datasets.DatasetDict({"train": raw, "test": raw})
-    weights = train_mod.compute_class_weights(ds, 3)
-    # All weights should be equal (≈1.0)
-    assert torch.allclose(weights, torch.ones(3), atol=1e-5)
+    labels = ["benign"] * 90 + ["malignant"] * 10
+    raw = datasets.Dataset.from_dict(
+        {
+            "image": [
+                Image.fromarray(np.zeros((64, 64, 3), dtype=np.uint8))
+                for _ in range(100)
+            ],
+            "label": labels,
+        },
+        features=datasets.Features({
+            "image": datasets.Image(),
+            "label": datasets.ClassLabel(names=["benign", "malignant"]),
+        }),
+    )
+    raw_split = raw.train_test_split(test_size=0.2, seed=42)
+    train_ds = raw_split["train"]
+
+    weights = train_mod.compute_class_weights(train_ds, num_labels=2)
+    assert weights.shape == (2,)
+    # The minority class (malignant) should have higher weight
+    assert weights[1] > weights[0]
 
 
-class TestParseArgs:
+# ---------------------------------------------------------------------------
+# HFDatasetProxy
+# ---------------------------------------------------------------------------
+
+
+class TestHFDatasetProxy:
+
+  def test_len(self):
+    train_mod = _import_train()
+    raw = _make_synthetic_dataset(n=20)
+    proxy = train_mod.HFDatasetProxy(raw)
+    assert len(proxy) == 20
+
+  def test_getitem_returns_image_and_label(self):
+    train_mod = _import_train()
+    raw = _make_synthetic_dataset(n=10)
+    proxy = train_mod.HFDatasetProxy(raw)
+    image, label = proxy[0]
+    assert isinstance(image, Image.Image)
+    assert isinstance(label, int)
+
+  def test_getitem_with_transform(self):
+    train_mod = _import_train()
+    from torchvision.transforms import v2
+
+    transform = v2.Compose([
+        v2.Resize(size=(32, 32)),
+        v2.ToImage(),
+        v2.ToDtype(torch.float32, scale=True),
+    ])
+    raw = _make_synthetic_dataset(n=10)
+    proxy = train_mod.HFDatasetProxy(raw, transform=transform)
+    image, label = proxy[0]
+    assert isinstance(image, torch.Tensor)
+    assert image.shape == (3, 32, 32)
+
+  def test_num_labels(self):
+    train_mod = _import_train()
+    raw = _make_synthetic_dataset(n=20, num_classes=3)
+    proxy = train_mod.HFDatasetProxy(raw)
+    assert proxy.num_labels == 3
+
+  def test_num_labels_with_five_classes(self):
+    train_mod = _import_train()
+    raw = _make_synthetic_dataset(n=30, num_classes=5)
+    proxy = train_mod.HFDatasetProxy(raw)
+    assert proxy.num_labels == 5
+
+
+# ---------------------------------------------------------------------------
+# Build transforms
+# ---------------------------------------------------------------------------
+
+
+class TestBuildTransforms:
+
+  def test_returns_train_and_val(self):
+    train_mod = _import_train()
+    # Mock processor with image_mean/image_std
+    mock_processor = MagicMock()
+    mock_processor.image_mean = [0.485, 0.456, 0.406]
+    mock_processor.image_std = [0.229, 0.224, 0.225]
+
+    train_t, val_t = train_mod.build_transforms(mock_processor, image_size=224)
+    assert callable(train_t)
+    assert callable(val_t)
+
+  def test_train_transform_output_shape(self):
+    train_mod = _import_train()
+    mock_processor = MagicMock()
+    mock_processor.image_mean = [0.5, 0.5, 0.5]
+    mock_processor.image_std = [0.5, 0.5, 0.5]
+
+    train_t, _ = train_mod.build_transforms(mock_processor, image_size=64)
+    img = Image.fromarray(np.random.randint(0, 256, (128, 128, 3), dtype=np.uint8))
+    result = train_t(img)
+    assert isinstance(result, torch.Tensor)
+    assert result.shape == (3, 64, 64)
+
+  def test_val_transform_output_shape(self):
+    train_mod = _import_train()
+    mock_processor = MagicMock()
+    mock_processor.image_mean = [0.5, 0.5, 0.5]
+    mock_processor.image_std = [0.5, 0.5, 0.5]
+
+    _, val_t = train_mod.build_transforms(mock_processor, image_size=64)
+    img = Image.fromarray(np.random.randint(0, 256, (128, 128, 3), dtype=np.uint8))
+    result = val_t(img)
+    assert isinstance(result, torch.Tensor)
+    assert result.shape == (3, 64, 64)
+
+
+# ---------------------------------------------------------------------------
+# Parse args (updated CLI)
+# ---------------------------------------------------------------------------
+
+
+class TestArgParsing:
 
   def test_defaults(self):
     train_mod = _import_train()
     args = train_mod.parse_args([])
-    assert args.model == "facebook/convnextv2-base-22k-224"
+    assert args.model == "google/vit-base-patch16-224"
     assert args.dataset == "marmal88/skin_cancer"
     assert args.epochs == 5
     assert args.image_size == 448
+    assert args.lr == 3e-5
+    assert args.batch_size == 32
+    assert args.resume is False
+    assert args.log_every == 20
+    assert args.save_every == 500
+    assert args.amp_dtype is None
 
   def test_overrides(self):
     train_mod = _import_train()
     args = train_mod.parse_args([
-        "--model", "my-model",
-        "--dataset", "my-dataset",
-        "--epochs", "3",
-        "--image_size", "224",
+        "--model",
+        "my-model",
+        "--dataset",
+        "my-dataset",
+        "--epochs",
+        "3",
+        "--image_size",
+        "224",
     ])
     assert args.model == "my-model"
     assert args.dataset == "my-dataset"
     assert args.epochs == 3
     assert args.image_size == 224
+
+  def test_resume_flag(self):
+    train_mod = _import_train()
+    args = train_mod.parse_args(["--resume"])
+    assert args.resume is True
+
+  def test_amp_dtype_choices(self):
+    train_mod = _import_train()
+    args = train_mod.parse_args(["--amp_dtype", "bfloat16"])
+    assert args.amp_dtype == "bfloat16"

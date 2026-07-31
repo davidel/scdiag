@@ -15,9 +15,6 @@ dependencies = [
     "torchvision",
     "transformers",
     "datasets",
-    "evaluate",
-    "accelerate",
-    "scikit-learn",
 ]
 
 [project.optional-dependencies]
