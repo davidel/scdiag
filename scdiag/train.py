@@ -357,6 +357,7 @@ def train_xgboost_on_backbone(args, train_ds, val_ds, device):
   model_best, _ = load_model_for_inference(
       args.model, best_ckpt_path, "cpu", cache_dir=args.cache_dir
   )
+  model_best = model_best.to(device)
 
   # 2. Rebuild train and val datasets with val transforms (not train augs)
   processor = AutoImageProcessor.from_pretrained(args.model)
