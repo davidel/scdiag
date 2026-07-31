@@ -85,6 +85,8 @@ class HFDatasetProxy:
     item = self.dataset[idx]
     image = item[self.image_col]
     label = item["label"]
+    if hasattr(image, "convert"):
+      image = image.convert("RGB")
     if self.transform is not None:
       image = self.transform(image)
     return image, label
@@ -284,6 +286,10 @@ def compute_class_weights(train_dataset, num_labels):
   else:
     labels = np.array(raw_labels, dtype=np.int64)
 
+  actual_labels = np.unique(labels)
+  if len(actual_labels) > num_labels:
+    raise ValueError(
+        f"Dataset has {len(actual_labels)} unique labels but num_labels={num_labels}")
   counts = np.bincount(labels, minlength=num_labels).astype(np.float64)
   counts = np.maximum(counts, 1.0)
   weights = 1.0 / counts
@@ -469,6 +475,7 @@ def train_one_epoch(
   total_batches = len(dataloader)
   start_time = time.time()
   last_log_time = time.time()
+  window_samples = 0
 
   for batch_idx, (images, targets) in enumerate(dataloader):
     images, targets = images.to(device), targets.to(device)
@@ -505,13 +512,13 @@ def train_one_epoch(
     batch_size = targets.size(0)
     total_loss += loss.item() * batch_size * args.grad_accum_steps
     total_samples += batch_size
+    window_samples += batch_size
 
     # Periodic step-level logging.
     if (batch_idx + 1) % args.log_every == 0 or (batch_idx + 1) == total_batches:
       global_step = epoch * total_batches + batch_idx
       elapsed = time.time() - last_log_time
-      samples_in_window = args.log_every * batch_size  # approximate
-      throughput = samples_in_window / elapsed if elapsed > 0 else 0
+      throughput = window_samples / elapsed if elapsed > 0 else 0
       lr_now = optimizer.param_groups[0]["lr"]
       avg_loss = total_loss / total_samples
       top1 = (correct_top1 / total_samples) * 100.0
@@ -538,6 +545,7 @@ def train_one_epoch(
                 global_step,
             )
       last_log_time = time.time()
+      window_samples = 0
 
   avg_loss = total_loss / total_samples
   top1 = (correct_top1 / total_samples) * 100.0
@@ -605,6 +613,9 @@ def main():
   train_proxy.transform = train_transforms
   val_proxy.transform = val_transforms
 
+  if len(train_proxy) < args.batch_size:
+    raise ValueError(f"Training set ({len(train_proxy)} samples) is smaller than "
+                     f"batch_size ({args.batch_size}). Reduce --batch_size.")
   train_loader = DataLoader(
       train_proxy,
       batch_size=args.batch_size,
@@ -689,6 +700,9 @@ def main():
       logging.info("  Restored scheduler state")
     else:
       logging.info("  Skipped scheduler state")
+    if scaler is not None and "scaler_state_dict" in ckpt:
+      scaler.load_state_dict(ckpt["scaler_state_dict"])
+      logging.info("  Restored GradScaler state")
     start_epoch = ckpt.get("epoch", -1) + 1
     best_top1 = ckpt.get("best_top1", 0.0)
     logging.info(f"  Resumed at epoch {start_epoch}, best_top1={best_top1:.2f}%")
@@ -734,7 +748,12 @@ def main():
                 optimizer,
                 scheduler,
                 epoch,
-                extra={"best_top1": best_top1},
+                extra={
+                    "best_top1":
+                        best_top1,
+                    "scaler_state_dict":
+                        (scaler.state_dict() if scaler is not None else None)
+                },
             ),
             args.checkpoint + "_best.pt",
             gcs_uri=args.gcs_checkpoint,
@@ -751,7 +770,12 @@ def main():
             optimizer,
             scheduler,
             completed_epoch,
-            extra={"best_top1": best_top1},
+            extra={
+                "best_top1":
+                    best_top1,
+                "scaler_state_dict":
+                    (scaler.state_dict() if scaler is not None else None)
+            },
         ),
         args.checkpoint + "_latest.pt",
         gcs_uri=args.gcs_checkpoint,
