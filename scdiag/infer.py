@@ -166,8 +166,9 @@ def main(argv=None):
       if args.top_k:
         xgb_predictions = xgb_predictions[:args.top_k]
       result["xgboost_predictions"] = xgb_predictions
-      logging.info(f"  XGBoost top: {xgb_predictions[0]['label']} "
-                   f"({xgb_predictions[0]['probability']:.1%})")
+      logging.info("  XGBoost:")
+      for p in xgb_predictions:
+        logging.info(f"  {p['probability']:.1%}  {p['label']}")
 
     results.append(result)
 
