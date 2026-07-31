@@ -13,8 +13,14 @@ Fine-tune HuggingFace image-classification models for skin-lesion classification
 - **Gradient accumulation** — effective batch size = `batch_size * grad_accum_steps`.
 - **Linear warmup + cosine annealing** learning rate schedule.
 - **Class-weighted loss** with inverse-frequency weighting and label smoothing.
+- **Mixup** — optional Mixup regularization (`--mixup_alpha`) for reducing
+  overfitting on small datasets.
+- **Strong augmentations** — random rotation, elastic deformation, aggressive
+  cropping, and color jitter tuned for dermoscopy images.
 - **Checkpointing** — saves `_latest.pt` and `_best.pt` (by validation accuracy).
 - **Auto-resume** — automatically resumes from an existing checkpoint if found.
+  Supports **cross-dataset resume** (backbone weights transfer, classifier
+  head reinitialised).
 - **TensorBoard** logging.
 - **GCS sync** — optional checkpoint upload to Google Cloud Storage.
 
@@ -70,11 +76,38 @@ scdiag-train --model google/vit-base-patch16-224 \
 | `--log_dir` | `None` | TensorBoard log directory (default: `<checkpoint_dir>/logs`) |
 | `--cache_dir` | `None` | HuggingFace cache directory |
 | `--gcs_checkpoint` | `None` | GCS URI for checkpoint sync (`gs://BUCKET/PREFIX`) |
+| `--mixup_alpha` | `0.0` | Mixup alpha (0 = disabled, recommended: `0.2`) |
 | `--ignore_optimizer_ckpt` | `False` | Skip restoring optimizer state on resume |
 | `--ignore_scheduler_ckpt` | `False` | Skip restoring scheduler state on resume |
+| `--ignore_scaler_ckpt` | `False` | Skip restoring GradScaler state on resume |
 
 Training automatically resumes from an existing `_latest.pt` or `_best.pt`
 checkpoint if one exists at the `--checkpoint` path.
+
+### Cross-Dataset Resume
+
+To fine-tune backbone weights from a previous run on a different dataset
+(e.g. switching from `marmal88/skin_cancer` to `ahmed-ai/skin-lesions-classification-dataset`):
+
+```bash
+scdiag-train --model facebook/convnextv2-base-22k-224 \
+             --dataset ahmed-ai/skin-lesions-classification-dataset \
+             --checkpoint scdiag \
+             --ignore_optimizer_ckpt \
+             --ignore_scheduler_ckpt \
+             --ignore_scaler_ckpt \
+             --epochs 10 \
+             --batch_size 16 \
+             --lr 3e-5 \
+             --mixup_alpha 0.2 \
+             --amp_dtype bfloat16 \
+             --gcs_checkpoint gs://YOUR_BUCKET/scdiag
+```
+
+The checkpoint's backbone weights are loaded (`strict=False`), while the
+classifier head (different `num_classes`) is reinitialised and trained from
+scratch.  All three `--ignore_*` flags are recommended so the optimizer
+momentum, LR schedule, and scaler history from the old run don't interfere.
 
 ## Development
 
