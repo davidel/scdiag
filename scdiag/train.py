@@ -19,6 +19,7 @@ from transformers import AutoImageProcessor, AutoModelForImageClassification
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.logging_utils import setup_logging
 from scdiag.gcs_utils import save_checkpoint, checkpoint_dict
+from scdiag.model_utils import DTYPE_MAP
 
 from scdiag.hf_proxy import HFDatasetProxy
 
@@ -339,13 +340,11 @@ def train_one_epoch(
   for batch_idx, (images, targets) in enumerate(dataloader):
     images, targets = images.to(device), targets.to(device)
 
-    # --- Mixup ---
     use_mixup = args.mixup_alpha > 0 and images.size(0) >= 2
     if use_mixup:
       images, targets_a, targets_b, lam = mixup_data(images,
                                                      targets,
                                                      alpha=args.mixup_alpha)
-    # -------------
 
     with torch.amp.autocast(
         "cuda",
@@ -469,8 +468,7 @@ def main():
   args = parse_args()
 
   # Convert string amp_dtype to torch.dtype.
-  _dtype_map = {"float16": torch.float16, "bfloat16": torch.bfloat16}
-  args.amp_dtype = _dtype_map.get(args.amp_dtype, args.amp_dtype)
+  args.amp_dtype = DTYPE_MAP.get(args.amp_dtype, args.amp_dtype)
 
   setup_logging(args.log_level)
 
