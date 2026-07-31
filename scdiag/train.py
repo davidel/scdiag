@@ -26,9 +26,13 @@ from scdiag.hf_proxy import HFDatasetProxy
 def build_transforms(processor, image_size):
   """Create train / val augmentation pipelines.
 
-    Stochastic augmentations only.  The processor handles deterministic
-    resize-to-model-size and normalization.
+    Includes the processor's normalization (mean / std) so images arrive
+    at the model ready for inference.
     """
+  _norm = [
+      v2.Normalize(mean=processor.image_mean, std=processor.image_std),
+  ]
+
   train_augmentations = v2.Compose([
       v2.RandomResizedCrop(size=(image_size, image_size),
                            scale=(0.85, 1.0),
@@ -38,11 +42,13 @@ def build_transforms(processor, image_size):
       v2.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.1),
       v2.ToImage(),
       v2.ToDtype(torch.float32, scale=True),
+      *_norm,
   ])
 
   val_augmentations = v2.Compose([
       v2.ToImage(),
       v2.ToDtype(torch.float32, scale=True),
+      *_norm,
   ])
 
   return train_augmentations, val_augmentations
@@ -435,8 +441,7 @@ def main():
   logging.info(f"Class weights: {class_weights.tolist()}")
 
   train_proxy.transform = train_transforms
-  train_proxy.processor = processor
-  val_proxy.processor = processor
+  val_proxy.transform = val_transforms
 
   if len(train_proxy) < args.batch_size:
     raise ValueError(f"Training set ({len(train_proxy)} samples) is smaller than "

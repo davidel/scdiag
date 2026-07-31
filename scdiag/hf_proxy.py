@@ -71,8 +71,6 @@ class HFDatasetProxy:
       image = image.convert("RGB")
     if self.transform is not None:
       image = self.transform(image)
-    if self.processor is not None:
-      image = self.processor(image, return_tensors="pt")["pixel_values"]
     return image, label
 
   @property
