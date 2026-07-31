@@ -74,8 +74,7 @@ class HFDatasetProxy:
   })
 
   def __init__(self, hf_dataset, transform=None):
-    self.dataset = self.normalize_labels(
-        self.normalize_image_column(hf_dataset))
+    self.dataset = self.normalize_labels(self.normalize_image_column(hf_dataset))
     self.image_col = self.detect_image_column(self.dataset)
     self.transform = transform
 
@@ -244,15 +243,13 @@ def load_and_split_dataset(dataset_name, cache_dir=None, test_size=0.2, seed=42)
       raise ValueError(f"No image column detected in {dataset_name}. "
                        f"Columns: {list(raw.features.keys())}")
     split = raw.train_test_split(test_size=test_size, seed=seed)
-    return (HFDatasetProxy(split["train"]),
-            HFDatasetProxy(split["test"]))
+    return (HFDatasetProxy(split["train"]), HFDatasetProxy(split["test"]))
 
   # DatasetDict: validate and ensure train/test splits exist.
   for split_name in raw:
     if HFDatasetProxy.detect_image_column(raw[split_name]) is None:
-      raise ValueError(
-          f"No image column in split '{split_name}' of {dataset_name}. "
-          f"Columns: {list(raw[split_name].features.keys())}")
+      raise ValueError(f"No image column in split '{split_name}' of {dataset_name}. "
+                       f"Columns: {list(raw[split_name].features.keys())}")
 
   splits = set(raw.keys())
   if "train" not in splits or "test" not in splits:
@@ -383,12 +380,7 @@ def parse_args(argv=None):
       "'_best.pt' are appended automatically "
       "(default: %(default)s)",
   )
-  parser.add_argument(
-      "--resume",
-      action="store_true",
-      default=False,
-      help="Auto-resume from <checkpoint>_latest.pt",
-  )
+
   parser.add_argument(
       "--log_dir",
       type=str,
@@ -642,6 +634,7 @@ def main():
   total_params = sum(p.numel() for p in model.parameters())
   trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
   logging.info(f"Model params: {total_params:,} total, {trainable:,} trainable")
+  logging.info(f"Model structure:\n{model}")
 
   criterion = nn.CrossEntropyLoss(weight=class_weights,
                                   label_smoothing=args.label_smoothing)
@@ -673,24 +666,32 @@ def main():
   start_epoch = 0
   best_top1 = 0.0
 
-  if args.resume:
-    resume_path = None
-    if os.path.exists(ckpt_latest):
-      resume_path = ckpt_latest
-    elif os.path.exists(ckpt_best):
-      resume_path = ckpt_best
+  resume_path = None
+  if os.path.exists(ckpt_latest):
+    resume_path = ckpt_latest
+  elif os.path.exists(ckpt_best):
+    resume_path = ckpt_best
 
-    if resume_path:
-      logging.info(f"Resuming from checkpoint: {resume_path}")
-      ckpt = torch.load(resume_path, map_location=device, weights_only=False)
-      model.load_state_dict(ckpt["model_state_dict"])
-      if not args.ignore_optimizer_ckpt and "optimizer_state_dict" in ckpt:
-        optimizer.load_state_dict(ckpt["optimizer_state_dict"])
-      if not args.ignore_scheduler_ckpt and "scheduler_state_dict" in ckpt:
-        scheduler.load_state_dict(ckpt["scheduler_state_dict"])
-      start_epoch = ckpt.get("epoch", -1) + 1
-      best_top1 = ckpt.get("best_top1", 0.0)
-      logging.info(f"  Resumed at epoch {start_epoch}, best_top1={best_top1:.2f}%")
+  if resume_path:
+    logging.info(f"Resuming from checkpoint: {resume_path}")
+    ckpt = torch.load(resume_path, map_location=device, weights_only=False)
+    ckpt_keys = list(ckpt.keys())
+    logging.info(f"  Checkpoint keys: {ckpt_keys}")
+    model.load_state_dict(ckpt["model_state_dict"])
+    logging.info("  Restored model weights")
+    if not args.ignore_optimizer_ckpt and "optimizer_state_dict" in ckpt:
+      optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+      logging.info("  Restored optimizer state")
+    else:
+      logging.info("  Skipped optimizer state")
+    if not args.ignore_scheduler_ckpt and "scheduler_state_dict" in ckpt:
+      scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+      logging.info("  Restored scheduler state")
+    else:
+      logging.info("  Skipped scheduler state")
+    start_epoch = ckpt.get("epoch", -1) + 1
+    best_top1 = ckpt.get("best_top1", 0.0)
+    logging.info(f"  Resumed at epoch {start_epoch}, best_top1={best_top1:.2f}%")
 
   completed_epoch = start_epoch - 1  # last fully completed (-1 = none yet)
   try:

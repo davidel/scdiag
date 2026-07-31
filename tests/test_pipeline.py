@@ -488,7 +488,6 @@ class TestArgParsing:
     assert args.image_size == 448
     assert args.lr == 3e-5
     assert args.batch_size == 32
-    assert args.resume is False
     assert args.log_every == 20
     assert args.save_every == 500
     assert args.amp_dtype is None
@@ -509,11 +508,6 @@ class TestArgParsing:
     assert args.dataset == "my-dataset"
     assert args.epochs == 3
     assert args.image_size == 224
-
-  def test_resume_flag(self):
-    train_mod = _import_train()
-    args = train_mod.parse_args(["--resume"])
-    assert args.resume is True
 
   def test_amp_dtype_choices(self):
     train_mod = _import_train()

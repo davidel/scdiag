@@ -159,7 +159,6 @@ class TestParseArgs:
     assert args.image_size == 448
     assert args.lr == 3e-5
     assert args.batch_size == 32
-    assert args.resume is False
     assert args.log_every == 20
     assert args.save_every == 500
     assert args.amp_dtype is None
@@ -180,7 +179,6 @@ class TestParseArgs:
         "1e-4",
         "--batch_size",
         "64",
-        "--resume",
         "--log_every",
         "50",
         "--save_every",
@@ -194,7 +192,6 @@ class TestParseArgs:
     assert args.image_size == 224
     assert args.lr == 1e-4
     assert args.batch_size == 64
-    assert args.resume is True
     assert args.log_every == 50
     assert args.save_every == 100
     assert args.amp_dtype == "bfloat16"
