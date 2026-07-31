@@ -21,7 +21,7 @@ def train_xgboost(train_features, train_labels, args):
   logging.info(f"Training XGBoost: {len(train_labels)} samples, {num_class} classes")
 
   # XGBoost requires explicit num_class for multi:softprob.
-  clf = XGBClassifier(
+  xgb_model = XGBClassifier(
       objective="multi:softprob",
       num_class=num_class,
       max_depth=args.xgb_max_depth,
@@ -36,16 +36,16 @@ def train_xgboost(train_features, train_labels, args):
       verbosity=0,
   )
 
-  clf.fit(train_features, train_labels)
+  xgb_model.fit(train_features, train_labels)
   logging.info("XGBoost training complete")
-  return clf
+  return xgb_model
 
 
-def eval_xgboost(clf, features, labels, id2label=None):
+def eval_xgboost(xgb_model, features, labels, id2label=None):
   """Evaluate an XGBoost classifier.
 
   Args:
-      clf: Fitted XGBClassifier.
+      xgb_model: Fitted XGBClassifier.
       features: np.ndarray of shape [N, hidden_size].
       labels: np.ndarray of shape [N].
       id2label: Optional dict mapping class indices to names.
@@ -55,7 +55,7 @@ def eval_xgboost(clf, features, labels, id2label=None):
   """
   # XGBoost 2.x predict() with multi:softprob returns probabilities (2D),
   # not class labels. Use predict_proba + argmax to get class predictions.
-  proba = clf.predict_proba(features)
+  proba = xgb_model.predict_proba(features)
   predictions = np.argmax(proba, axis=1)
   accuracy = np.mean(predictions == labels)
 
