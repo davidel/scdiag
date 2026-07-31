@@ -193,7 +193,7 @@ def parse_args(argv=None):
   parser.add_argument(
       "--label_smoothing",
       type=float,
-      default=0.1,
+      default=0.0,
       help="Label smoothing (default: %(default)s)",
   )
   parser.add_argument(
