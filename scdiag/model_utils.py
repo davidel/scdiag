@@ -49,16 +49,19 @@ def load_model_for_inference(
   Returns:
       (model, processor) tuple.
   """
+  ckpt = torch.load(checkpoint_path, map_location="cpu")
+  state_dict = ckpt["model_state_dict"]
+
+  # Infer num_labels from the checkpoint's classifier head.
+  num_labels = state_dict["classifier.weight"].shape[0]
+
   processor = AutoImageProcessor.from_pretrained(
       model_name, cache_dir=cache_dir
   )
   model = AutoModelForImageClassification.from_pretrained(
-      model_name, cache_dir=cache_dir
+      model_name, num_labels=num_labels, cache_dir=cache_dir
   )
-  ckpt = torch.load(checkpoint_path, map_location="cpu")
-  missing, unexpected = model.load_state_dict(
-      ckpt["model_state_dict"], strict=False
-  )
+  missing, unexpected = model.load_state_dict(state_dict, strict=False)
   logging.info(
       f"Loaded weights from {checkpoint_path}: "
       f"{len(missing)} missing, {len(unexpected)} unexpected keys"
