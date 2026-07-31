@@ -35,11 +35,13 @@ def build_transforms(processor, image_size):
 
   train_augmentations = v2.Compose([
       v2.RandomResizedCrop(size=(image_size, image_size),
-                           scale=(0.85, 1.0),
+                           scale=(0.2, 1.0),
                            antialias=True),
       v2.RandomHorizontalFlip(p=0.5),
       v2.RandomVerticalFlip(p=0.5),
-      v2.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.1),
+      v2.RandomRotation(degrees=360),
+      v2.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.15, hue=0.05),
+      v2.ElasticTransform(alpha=50.0, sigma=5.0),
       v2.ToImage(),
       v2.ToDtype(torch.float32, scale=True),
       *_norm,
@@ -267,6 +269,14 @@ def parse_args(argv=None):
   )
 
   parser.add_argument(
+      "--mixup_alpha",
+      type=float,
+      default=0.0,
+      help="Mixup alpha (default: 0.0 = disabled). "
+      "Recommended: 0.2 for skin lesion classification",
+  )
+
+  parser.add_argument(
       "--cache_dir",
       type=str,
       default=None,
@@ -281,6 +291,23 @@ def parse_args(argv=None):
   )
 
   return parser.parse_args(argv)
+
+
+def mixup_data(x, y, alpha=0.2):
+  """Apply Mixup to a batch: returns mixed images, and two label sets + lambda.
+
+  Returns ``(mixed_x, y_a, y_b, lam)`` where ``lam`` is the interpolation
+  coefficient sampled from ``Beta(alpha, alpha)``.  When ``alpha <= 0`` the
+  function is a no-op and returns the originals unchanged.
+  """
+  if alpha <= 0:
+    return x, y, y, 1.0
+  lam = np.random.beta(alpha, alpha)
+  lam = max(lam, 1.0 - lam)  # keep lambda > 0.5 for consistency
+  batch_size = x.size(0)
+  index = torch.randperm(batch_size, device=x.device)
+  mixed_x = lam * x + (1.0 - lam) * x[index]
+  return mixed_x, y, y[index], lam
 
 
 def train_one_epoch(
@@ -314,6 +341,14 @@ def train_one_epoch(
   for batch_idx, (images, targets) in enumerate(dataloader):
     images, targets = images.to(device), targets.to(device)
 
+    # --- Mixup ---
+    use_mixup = args.mixup_alpha > 0 and images.size(0) >= 2
+    if use_mixup:
+      images, targets_a, targets_b, lam = mixup_data(images,
+                                                     targets,
+                                                     alpha=args.mixup_alpha)
+    # -------------
+
     with torch.amp.autocast(
         "cuda",
         dtype=amp_dtype,
@@ -321,7 +356,12 @@ def train_one_epoch(
     ):
       outputs = model(pixel_values=images)
       logits = outputs.logits
-      loss = criterion(logits, targets) / args.grad_accum_steps
+      if use_mixup:
+        loss = (lam * criterion(logits, targets_a) +
+                (1.0 - lam) * criterion(logits, targets_b))
+        loss = loss / args.grad_accum_steps
+      else:
+        loss = criterion(logits, targets) / args.grad_accum_steps
 
     if amp_dtype == torch.float16 and scaler is not None:
       scaler.scale(loss).backward()
@@ -341,14 +381,16 @@ def train_one_epoch(
       optimizer.zero_grad(set_to_none=True)
 
     with torch.no_grad():
-      correct_top1 += (logits.argmax(dim=1) == targets).sum().item()
+      orig_targets = targets if not use_mixup else (
+          targets_a if lam >= 0.5 else targets_b)
+      correct_top1 += (logits.argmax(dim=1) == orig_targets).sum().item()
 
-    batch_size = targets.size(0)
+    batch_size = orig_targets.size(0)
     total_loss += loss.item() * batch_size * args.grad_accum_steps
     total_samples += batch_size
     window_samples += batch_size
     window_loss += loss.item() * batch_size * args.grad_accum_steps
-    window_correct += (logits.argmax(dim=1) == targets).sum().item()
+    window_correct += (logits.argmax(dim=1) == orig_targets).sum().item()
 
     # Periodic step-level logging.
     if (batch_idx + 1) % args.log_every == 0 or (batch_idx + 1) == total_batches:
