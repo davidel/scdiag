@@ -59,7 +59,8 @@ def load_model_for_inference(
       model_name, cache_dir=cache_dir
   )
   model = AutoModelForImageClassification.from_pretrained(
-      model_name, num_labels=num_labels, cache_dir=cache_dir
+      model_name, num_labels=num_labels, ignore_mismatched_sizes=True,
+      cache_dir=cache_dir
   )
   missing, unexpected = model.load_state_dict(state_dict, strict=False)
   logging.info(
