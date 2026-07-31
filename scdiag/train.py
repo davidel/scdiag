@@ -289,6 +289,8 @@ def train_one_epoch(
   start_time = time.time()
   last_log_time = time.time()
   window_samples = 0
+  window_correct = 0
+  window_loss = 0.0
 
   for batch_idx, (images, targets) in enumerate(dataloader):
     images, targets = images.to(device), targets.to(device)
@@ -326,6 +328,8 @@ def train_one_epoch(
     total_loss += loss.item() * batch_size * args.grad_accum_steps
     total_samples += batch_size
     window_samples += batch_size
+    window_loss += loss.item() * batch_size * args.grad_accum_steps
+    window_correct += (logits.argmax(dim=1) == targets).sum().item()
 
     # Periodic step-level logging.
     if (batch_idx + 1) % args.log_every == 0 or (batch_idx + 1) == total_batches:
@@ -333,16 +337,21 @@ def train_one_epoch(
       elapsed = time.time() - last_log_time
       throughput = window_samples / elapsed if elapsed > 0 else 0
       lr_now = optimizer.param_groups[0]["lr"]
+      w_loss = window_loss / window_samples if window_samples > 0 else 0.0
+      w_top1 = (window_correct / window_samples) * 100.0 if window_samples > 0 else 0.0
       avg_loss = total_loss / total_samples
       top1 = (correct_top1 / total_samples) * 100.0
       msg = (f"  [Step {batch_idx + 1}/{total_batches}] "
-             f"loss={avg_loss:.4f} top1={top1:.2f}% "
+             f"loss={w_loss:.4f} top1={w_top1:.2f}% "
+             f"(avg loss={avg_loss:.4f} top1={top1:.2f}%) "
              f"lr={lr_now:.2e} {throughput:.0f} img/s"
              f"{gpu_stats_str(device)}")
       logging.info(msg)
       if writer is not None:
-        writer.add_scalar("Train/loss", avg_loss, global_step)
-        writer.add_scalar("Train/top1", top1, global_step)
+        writer.add_scalar("Train/loss", w_loss, global_step)
+        writer.add_scalar("Train/top1", w_top1, global_step)
+        writer.add_scalar("Train/loss_avg", avg_loss, global_step)
+        writer.add_scalar("Train/top1_avg", top1, global_step)
         writer.add_scalar("Train/lr", lr_now, global_step)
         writer.add_scalar("Train/throughput", throughput, global_step)
         if device.type == "cuda":
@@ -359,6 +368,8 @@ def train_one_epoch(
             )
       last_log_time = time.time()
       window_samples = 0
+      window_correct = 0
+      window_loss = 0.0
 
   avg_loss = total_loss / total_samples
   top1 = (correct_top1 / total_samples) * 100.0
