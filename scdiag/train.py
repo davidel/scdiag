@@ -575,8 +575,14 @@ def main():
     ckpt = torch.load(resume_path, map_location=device, weights_only=False)
     ckpt_keys = list(ckpt.keys())
     logging.info(f"  Checkpoint keys: {ckpt_keys}")
-    model.load_state_dict(ckpt["model_state_dict"])
+    result = model.load_state_dict(ckpt["model_state_dict"], strict=False)
     logging.info("  Restored model weights")
+    if result.missing_keys:
+      logging.warning(f"  Missing keys (randomly initialized): "
+                      f"{result.missing_keys}")
+    if result.unexpected_keys:
+      logging.warning(f"  Unexpected keys (ignored): "
+                      f"{result.unexpected_keys}")
     if not args.ignore_optimizer_ckpt and "optimizer_state_dict" in ckpt:
       optimizer.load_state_dict(ckpt["optimizer_state_dict"])
       logging.info("  Restored optimizer state")
