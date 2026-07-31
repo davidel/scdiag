@@ -292,13 +292,9 @@ def parse_args(argv=None):
   # XGBoost
   g = parser.add_argument_group("xgboost")
   g.add_argument(
-      "--train_xgboost", action="store_true",
-      help="Train XGBoost on backbone features after training completes",
-  )
-  g.add_argument(
-      "--xgboost_model", default="xgboost_model.json",
-      help="Output path for the saved XGBoost model "
-      "(default: %(default)s)",
+      "--xgboost_model", default=None,
+      help="Output path for XGBoost model. If set, train XGBoost on "
+      "backbone features after training completes (default: disabled)",
   )
   g.add_argument(
       "--xgb_max_depth", type=int, default=6,
@@ -788,7 +784,7 @@ def main():
     del scaler
     torch.cuda.empty_cache()
 
-    if args.train_xgboost:
+    if args.xgboost_model:
       # Access raw HF datasets (before proxy wrapping) for XGBoost.
       train_xgboost_on_backbone(
           args, train_proxy.dataset, val_proxy.dataset, device

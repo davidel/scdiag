@@ -22,7 +22,7 @@ Fine-tune HuggingFace image-classification models for skin-lesion classification
   Supports **cross-dataset resume** (backbone weights transfer, classifier
   head reinitialised).
 - **XGBoost classifier** — optionally train an XGBoost model on backbone features
-  after PyTorch training completes (`--train_xgboost`). Compare linear head vs
+  after PyTorch training completes (`--xgboost_model`). Compare linear head vs
   tree-based classifier performance.
 - **TensorBoard** logging.
 - **GCS sync** — optional checkpoint upload to Google Cloud Storage.
@@ -82,8 +82,7 @@ scdiag-train --model google/vit-base-patch16-224 \
 | `--ignore_optimizer_ckpt` | `False` | Skip restoring optimizer state on resume |
 | `--ignore_scheduler_ckpt` | `False` | Skip restoring scheduler state on resume |
 | `--ignore_scaler_ckpt` | `False` | Skip restoring GradScaler state on resume |
-| `--train_xgboost` | `False` | Train XGBoost on backbone features after training |
-| `--xgboost_model` | `xgboost_model.json` | Output path for XGBoost model |
+| `--xgboost_model` | `None` | Output path for XGBoost model. If set, train XGBoost on backbone features after training. |
 | `--xgb_max_depth` | `6` | XGBoost max tree depth |
 | `--xgb_n_estimators` | `200` | XGBoost number of trees |
 | `--xgb_learning_rate` | `0.1` | XGBoost learning rate |
@@ -141,7 +140,8 @@ scdiag-infer --model facebook/convnextv2-base-22k-224 \
 
 ### XGBoost Inference
 
-When `--xgboost_model` is provided, the output includes both PyTorch and XGBoost predictions:
+When `--xgboost_model` is provided at inference time, the output includes both
+PyTorch and XGBoost predictions:
 
 ```json
 {
