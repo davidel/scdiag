@@ -52,7 +52,7 @@ scdiag-train --model google/vit-base-patch16-224 \
 |---|---|---|
 | `--model` | `google/vit-base-patch16-224` | HuggingFace model name or local path |
 | `--dataset` | `marmal88/skin_cancer` | HuggingFace dataset name |
-| `--image_size` | `448` | Resize images to this size |
+| `--image_size` | `448` | Augmentation crop size (processor handles final resize) |
 | `--num_labels` | `None` | Override number of labels (auto-detected) |
 | `--epochs` | `5` | Number of training epochs |
 | `--batch_size` | `32` | Batch size |

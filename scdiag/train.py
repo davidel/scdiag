@@ -434,12 +434,9 @@ def main():
   class_weights = compute_class_weights(train_proxy.dataset, num_labels).to(device)
   logging.info(f"Class weights: {class_weights.tolist()}")
 
-  processor_size = {"height": args.image_size, "width": args.image_size}
   train_proxy.transform = train_transforms
   train_proxy.processor = processor
-  train_proxy.processor_size = processor_size
   val_proxy.processor = processor
-  val_proxy.processor_size = processor_size
 
   if len(train_proxy) < args.batch_size:
     raise ValueError(f"Training set ({len(train_proxy)} samples) is smaller than "

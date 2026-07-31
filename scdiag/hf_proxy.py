@@ -54,14 +54,11 @@ class HFDatasetProxy:
       "channel",
   })
 
-  def __init__(self, hf_dataset, transform=None, processor=None, processor_size=None):
+  def __init__(self, hf_dataset, transform=None, processor=None):
     self.dataset = self.normalize_labels(self.normalize_image_column(hf_dataset))
     self.image_col = self.detect_image_column(self.dataset)
     self.transform = transform
-    if processor is not None and processor_size is None:
-      raise ValueError("processor_size is required when processor is set")
     self.processor = processor
-    self.processor_size = processor_size
 
   def __len__(self):
     return len(self.dataset)
@@ -75,8 +72,7 @@ class HFDatasetProxy:
     if self.transform is not None:
       image = self.transform(image)
     if self.processor is not None:
-      image = self.processor(image, size=self.processor_size,
-                             return_tensors="pt")["pixel_values"]
+      image = self.processor(image, return_tensors="pt")["pixel_values"]
     return image, label
 
   @property

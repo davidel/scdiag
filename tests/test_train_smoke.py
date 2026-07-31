@@ -32,18 +32,15 @@ class TinyProcessor:
 
   image_mean = [0.5, 0.5, 0.5]
   image_std = [0.5, 0.5, 0.5]
-  size = {"height": 64, "width": 64}
 
-  def __call__(self, image, size=None, return_tensors="pt"):
+  def __call__(self, image, return_tensors="pt"):
     import torchvision.transforms.functional as F
     import numpy as np
     from PIL import Image as PILImage
-    s = size or self.size
-    h, w = s["height"], s["width"]
     if isinstance(image, torch.Tensor):
       image = PILImage.fromarray(
           (image.permute(1, 2, 0).numpy() * 255).astype(np.uint8))
-    image = F.resize(image, [h, w])
+    image = F.resize(image, [64, 64])
     image = F.to_tensor(image)
     image = F.normalize(image, mean=self.image_mean, std=self.image_std)
     return {"pixel_values": image}
