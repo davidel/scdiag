@@ -418,10 +418,13 @@ def train_xgboost_on_backbone(args, train_ds, val_ds, device):
   )
 
   # 6. Evaluate on val set
-  val_metrics = eval_xgboost(xgb_model, val_features, val_labels)
+  val_metrics = eval_xgboost(xgb_model, val_features, val_labels,
+                             id2label=train_proxy.id2label)
   logging.info(f"XGBoost val accuracy: {val_metrics['accuracy']:.2%}")
   for cls, acc in val_metrics["per_class_accuracy"].items():
     logging.info(f"  {cls}: {acc:.2%}")
+  logging.info(f"Classification report:\n{val_metrics['classification_report']}")
+  logging.info(f"Confusion matrix:\n{val_metrics['confusion_matrix']}")
 
   # 7. Save the XGBoost model
   xgb_model.save_model(args.xgboost_model)

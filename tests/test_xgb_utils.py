@@ -68,7 +68,7 @@ class TestEvalXGBoost:
   """Tests for eval_xgboost()."""
 
   def test_returns_accuracy_and_per_class(self):
-    """Should return accuracy and per_class_accuracy keys."""
+    """Should return accuracy, per_class_accuracy, classification_report, confusion_matrix."""
     rng = np.random.RandomState(42)
     features = rng.randn(40, 16).astype(np.float32)
     labels = rng.randint(0, 3, size=40)
@@ -78,7 +78,11 @@ class TestEvalXGBoost:
 
     assert "accuracy" in result
     assert "per_class_accuracy" in result
+    assert "classification_report" in result
+    assert "confusion_matrix" in result
     assert 0.0 <= result["accuracy"] <= 1.0
+    assert isinstance(result["classification_report"], str)
+    assert result["confusion_matrix"].shape == (3, 3)
 
   def test_per_class_uses_id2label(self):
     """When id2label is provided, per_class keys should be label names."""
@@ -117,3 +121,16 @@ class TestEvalXGBoost:
     # Should have CLASS_0, CLASS_1, CLASS_2
     for key in result["per_class_accuracy"]:
       assert key.startswith("CLASS_")
+
+  def test_confusion_matrix_sums_to_samples(self):
+    """Confusion matrix row sums should equal true label counts."""
+    rng = np.random.RandomState(42)
+    features = rng.randn(50, 16).astype(np.float32)
+    labels = rng.randint(0, 3, size=50)
+
+    clf = train_xgboost(features, labels, max_depth=3, n_estimators=10)
+    result = eval_xgboost(clf, features, labels)
+
+    cm = result["confusion_matrix"]
+    np.testing.assert_array_equal(cm.sum(axis=1),
+                                  np.bincount(labels, minlength=3))

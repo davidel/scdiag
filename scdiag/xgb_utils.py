@@ -61,8 +61,11 @@ def eval_xgboost(xgb_model, features, labels, id2label=None):
       id2label: Optional dict mapping class indices to names.
 
   Returns:
-      {"accuracy": float, "per_class_accuracy": dict[str, float]}
+      {"accuracy": float, "per_class_accuracy": dict[str, float],
+       "classification_report": str, "confusion_matrix": np.ndarray}
   """
+  from sklearn.metrics import classification_report, confusion_matrix
+
   # XGBoost 2.x predict() with multi:softprob returns probabilities (2D),
   # not class labels. Use predict_proba + argmax to get class predictions.
   proba = xgb_model.predict_proba(features)
@@ -76,4 +79,19 @@ def eval_xgboost(xgb_model, features, labels, id2label=None):
     name = id2label[str(cls)] if id2label and str(cls) in id2label else f"CLASS_{cls}"
     per_class[name] = float(cls_acc)
 
-  return {"accuracy": float(accuracy), "per_class_accuracy": per_class}
+  # Build target names for classification report
+  target_names = None
+  if id2label:
+    target_names = [id2label[str(i)] for i in sorted(set(labels))]
+
+  report = classification_report(labels, predictions,
+                                  target_names=target_names,
+                                  zero_division=0)
+  cm = confusion_matrix(labels, predictions)
+
+  return {
+      "accuracy": float(accuracy),
+      "per_class_accuracy": per_class,
+      "classification_report": report,
+      "confusion_matrix": cm,
+  }
