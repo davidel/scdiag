@@ -208,14 +208,19 @@ def main():
 
   # Load dataset
   print(f"Loading dataset: {args.dataset}")
-  dataset = load_dataset(args.dataset, cache_dir=args.cache_dir)
+  raw = load_dataset(args.dataset, cache_dir=args.cache_dir)
 
-  # Use the train split if available, otherwise use the full dataset
-  if isinstance(dataset, dict):
-    if "train" in dataset:
-      dataset = dataset["train"]
-    else:
-      dataset = list(dataset.values())[0]
+  # Merge all splits into a single dataset for re-splitting by lesion_id
+  if isinstance(raw, dict):
+    # DatasetDict: concatenate all splits
+    from datasets import concatenate_datasets
+    splits = list(raw.keys())
+    print(f"Dataset has {len(splits)} splits: {splits}")
+    dataset = concatenate_datasets([raw[split] for split in splits])
+    print(f"Merged into single dataset")
+  else:
+    # Single Dataset
+    dataset = raw
 
   print(f"Dataset loaded: {len(dataset)} images")
   print(f"Columns: {list(dataset.features.keys())}")
