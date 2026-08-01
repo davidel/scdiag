@@ -1,6 +1,7 @@
 """Fine-tune a HuggingFace image-classification model."""
 
 import argparse
+import gc
 import logging
 import os
 import time
@@ -399,6 +400,7 @@ def train_xgboost_on_backbone(args, train_ds, val_ds, device):
 
   # 4. Free the model — XGBoost doesn't need it anymore
   del model_best
+  gc.collect()
   torch.cuda.empty_cache()
 
   # 5. Train XGBoost
@@ -811,6 +813,7 @@ def main():
     del model
     del optimizer
     del scaler
+    gc.collect()
     torch.cuda.empty_cache()
 
     if args.xgboost_model:
