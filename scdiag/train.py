@@ -23,6 +23,28 @@ from scdiag.model_utils import DTYPE_MAP
 
 from scdiag.hf_proxy import HFDatasetProxy
 
+_VALID_STATE_FLAGS = {"opt", "sched", "amp", "none"}
+
+
+def parse_state_flags(flag_value):
+  """Parse a comma-separated state flag string into a set of tokens.
+
+  Returns a set like ``{"opt", "sched", "amp"}``.
+  If the string contains ``"none"``, returns an empty set.
+  Raises ValueError on invalid tokens or empty input.
+  """
+  tokens = {t.strip().lower() for t in flag_value.split(",")}
+  if not tokens:
+    raise ValueError("state flag string must not be empty")
+  invalid = tokens - _VALID_STATE_FLAGS
+  if invalid:
+    raise ValueError(
+        f"Invalid state flag(s): {invalid}. Allowed: {_VALID_STATE_FLAGS}"
+    )
+  if "none" in tokens:
+    return set()
+  return tokens
+
 
 def build_transforms(processor, image_size):
   """Create train / val augmentation pipelines.
@@ -249,22 +271,19 @@ def parse_args(argv=None):
   )
 
   parser.add_argument(
-      "--ignore_optimizer_ckpt",
-      action=argparse.BooleanOptionalAction,
-      default=False,
-      help="Skip restoring the optimizer state from checkpoint",
+      "--state_save",
+      type=str,
+      default="opt,sched,amp",
+      help="Comma-separated list of states to save in checkpoints. "
+      "One or more of: opt, sched, amp, none (default: %(default)s)",
   )
   parser.add_argument(
-      "--ignore_scheduler_ckpt",
-      action=argparse.BooleanOptionalAction,
-      default=False,
-      help="Skip restoring the scheduler from checkpoint",
-  )
-  parser.add_argument(
-      "--ignore_scaler_ckpt",
-      action=argparse.BooleanOptionalAction,
-      default=False,
-      help="Skip restoring the GradScaler state from checkpoint",
+      "--state_load",
+      type=str,
+      default="opt,sched,amp",
+      help="Comma-separated list of states to restore from checkpoint "
+      "on resume. One or more of: opt, sched, amp, none "
+      "(default: %(default)s)",
   )
 
   parser.add_argument(
@@ -574,6 +593,9 @@ def main():
   # Convert string amp_dtype to torch.dtype.
   args.amp_dtype = DTYPE_MAP.get(args.amp_dtype, args.amp_dtype)
 
+  states_to_save = parse_state_flags(args.state_save)
+  states_to_load = parse_state_flags(args.state_load)
+
   setup_logging(args.log_level)
 
   device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -683,19 +705,20 @@ def main():
     if result.unexpected_keys:
       logging.warning(f"  Unexpected keys (ignored): "
                       f"{result.unexpected_keys}")
-    if not args.ignore_optimizer_ckpt and "optimizer_state_dict" in ckpt:
+    if "opt" in states_to_load and "optimizer_state_dict" in ckpt:
       optimizer.load_state_dict(ckpt["optimizer_state_dict"])
       logging.info("  Restored optimizer state")
     else:
       logging.info("  Skipped optimizer state")
-    if not args.ignore_scheduler_ckpt and "scheduler_state_dict" in ckpt:
+    if "sched" in states_to_load and "scheduler_state_dict" in ckpt:
       scheduler.load_state_dict(ckpt["scheduler_state_dict"])
       logging.info("  Restored scheduler state")
     else:
       logging.info("  Skipped scheduler state")
-    if scaler is not None and "scaler_state_dict" in ckpt:
-      if not args.ignore_scaler_ckpt:
-        scaler.load_state_dict(ckpt["scaler_state_dict"])
+    if "amp" in states_to_load:
+      scaler_dict = ckpt.get("scaler_state_dict")
+      if scaler_dict is not None and scaler is not None:
+        scaler.load_state_dict(scaler_dict)
         logging.info("  Restored GradScaler state")
       else:
         logging.info("  Skipped GradScaler state")
@@ -744,12 +767,9 @@ def main():
                 optimizer,
                 scheduler,
                 epoch,
-                extra={
-                    "best_top1":
-                        best_top1,
-                    "scaler_state_dict":
-                        (scaler.state_dict() if scaler is not None else None),
-                },
+                states_to_save=states_to_save,
+                scaler=scaler,
+                best_top1=best_top1,
             ),
             args.checkpoint + "_best.pt",
             gcs_uri=args.gcs_checkpoint,
@@ -766,12 +786,9 @@ def main():
             optimizer,
             scheduler,
             completed_epoch,
-            extra={
-                "best_top1":
-                    best_top1,
-                "scaler_state_dict":
-                    (scaler.state_dict() if scaler is not None else None),
-            },
+            states_to_save=states_to_save,
+            scaler=scaler,
+            best_top1=best_top1,
         ),
         args.checkpoint + "_latest.pt",
         gcs_uri=args.gcs_checkpoint,
