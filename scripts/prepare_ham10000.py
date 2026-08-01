@@ -158,19 +158,19 @@ def group_split_by_lesion_id(
   # Split lesion_ids into train/val/test
   all_lesion_ids = list(lesion_to_indices.keys())
   random.shuffle(all_lesion_ids)
-
+  
   n_test = int(len(all_lesion_ids) * test_size)
   n_val = int(len(all_lesion_ids) * val_size)
-
+  
   test_lesion_ids = set(all_lesion_ids[:n_test])
-  val_lesion_ids = set(all_lesion_ids[n_test:n_test + n_val])
+  val_lesion_ids = set(all_lesion_ids[n_test:n_test + n_val]) if n_val > 0 else set()
   train_lesion_ids = set(all_lesion_ids[n_test + n_val:])
-
+  
   # Collect indices for each split
   train_indices = []
   val_indices = []
   test_indices = []
-
+  
   for lesion_id, indices in lesion_to_indices.items():
     if lesion_id in test_lesion_ids:
       test_indices.extend(indices)
@@ -192,12 +192,20 @@ def group_split_by_lesion_id(
   test_examples = get_examples(test_indices)
 
   print(f"\nSplit by lesion_id:")
-  print(
-      f"  Lesion IDs: {len(train_lesion_ids)} train, {len(val_lesion_ids)} val, {len(test_lesion_ids)} test"
-  )
-  print(
-      f"  Images: {len(train_examples)} train, {len(val_examples)} val, {len(test_examples)} test"
-  )
+  if n_val > 0:
+    print(
+        f"  Lesion IDs: {len(train_lesion_ids)} train, {len(val_lesion_ids)} val, {len(test_lesion_ids)} test"
+    )
+    print(
+        f"  Images: {len(train_examples)} train, {len(val_examples)} val, {len(test_examples)} test"
+    )
+  else:
+    print(
+        f"  Lesion IDs: {len(train_lesion_ids)} train, {len(test_lesion_ids)} test (no val)"
+    )
+    print(
+        f"  Images: {len(train_examples)} train, {len(test_examples)} test (no val)"
+    )
 
   return {
       "train": train_examples,
@@ -221,6 +229,11 @@ def save_as_imagefolder(
   output_path = Path(output_dir)
 
   for split_name, examples in splits.items():
+    # Skip empty splits (e.g., val when --val_size=0)
+    if len(examples) == 0:
+      print(f"\nSkipping {split_name} split (empty)")
+      continue
+    
     print(f"\nSaving {split_name} split with {len(examples)} images...")
 
     # Group by label
