@@ -110,7 +110,11 @@ def load_and_split_dataset(
     val_transform=None,
 ):
   """Load a HuggingFace dataset, return ``(train_proxy, val_proxy)``."""
-  raw = load_dataset(dataset_name, cache_dir=cache_dir)
+  if dataset_name.startswith("imagefolder/"):
+    data_dir = dataset_name.split("/", 1)[1]
+    raw = load_dataset("imagefolder", data_dir=data_dir, cache_dir=cache_dir)
+  else:
+    raw = load_dataset(dataset_name, cache_dir=cache_dir)
 
   # Single split: validate, split and wrap.
   if isinstance(raw, datasets.Dataset):
@@ -191,7 +195,7 @@ def parse_args(argv=None):
       "--dataset",
       type=str,
       default="marmal88/skin_cancer",
-      help="HuggingFace dataset name (default: %(default)s)",
+      help="HuggingFace dataset name, or 'imagefolder/PATH' for local ImageFolder datasets (default: %(default)s)",
   )
   parser.add_argument(
       "--image_size",
