@@ -1,137 +1,43 @@
 #!/usr/bin/env python
 """Prepare HAM10000 dataset with lesion_id-grouped splits.
 
-Downloads the marmal88/skin_cancer dataset from HuggingFace, joins lesion_id
-from the metadata CSV, and creates train/val/test splits grouped by lesion_id
-to prevent data leakage (same lesion never appears in multiple splits).
+Downloads the marmal88/skin_cancer dataset from HuggingFace, and creates
+train/val/test splits grouped by lesion_id to prevent data leakage
+(same lesion never appears in multiple splits).
 
 Output is an ImageFolder structure compatible with:
     --dataset imagefolder/OUTPUT_PATH
 
 Usage:
     python scripts/prepare_ham10000.py --output_dir ./ham10000_grouped
-    python scripts/prepare_ham10000.py --output_dir ./ham10000_grouped --test_size 0.15 --val_size 0.15
-    python scripts/prepare_ham10000.py --output_dir ./ham10000_grouped --cache_dir ~/.cache/huggingface/datasets
+    python scripts/prepare_ham10000.py --output_dir ./ham10000_grouped --test_size 0.15 --val_size 0
 """
 
 import argparse
-import hashlib
-import os
 import random
 import shutil
 from collections import defaultdict
-from io import StringIO
 from pathlib import Path
 
-import pandas as pd
-import requests
 from datasets import load_dataset
-from PIL import Image
-
-
-def download_metadata(dataset_name: str) -> pd.DataFrame:
-  """Download HAM10000_metadata.csv from the HuggingFace dataset repository.
-    
-    The marmal88/skin_cancer dataset stores metadata in metadata/HAM10000_metadata.csv.
-    We fetch it via the HuggingFace Hub API.
-    """
-  url = f"https://huggingface.co/datasets/{dataset_name}/resolve/main/metadata/HAM10000_metadata.csv"
-
-  print(f"Downloading metadata from: {url}")
-  response = requests.get(url, allow_redirects=True)
-  response.raise_for_status()
-
-  df = pd.read_csv(StringIO(response.text))
-  print(f"Downloaded metadata with {len(df)} rows")
-  print(f"Columns: {list(df.columns)}")
-  print(f"Sample image_ids: {df['image_id'].head(3).tolist()}")
-  print(f"Unique lesion_ids: {df['lesion_id'].nunique()}")
-  return df
-
-
-def image_hash(img: Image.Image) -> str:
-  """Compute MD5 hash of PIL Image content for matching."""
-  img_bytes = img.tobytes()
-  return hashlib.md5(img_bytes).hexdigest()
-
-
-def build_image_to_lesion_mapping(
-    dataset,
-    metadata: pd.DataFrame,
-) -> dict:
-  """Build mapping from image hash to lesion_id.
-    
-    This approach works even when PIL Images don't have .filename attribute
-    (e.g., when loaded from Parquet storage).
-    
-    Args:
-        dataset: HuggingFace dataset with 'image' and 'label' columns
-        metadata: DataFrame with 'image_id' and 'lesion_id' columns
-        
-    Returns:
-        Dict mapping image_hash -> lesion_id
-    """
-  # Create lookup from image_id to lesion_id
-  image_id_to_lesion = dict(zip(metadata["image_id"], metadata["lesion_id"]))
-
-  # Build mapping by hashing all images in the dataset
-  # Note: This is O(n) in dataset size and memory-intensive for large datasets
-  # For HAM10000 (~10K images), this is acceptable
-  print("Building image to lesion_id mapping (this may take a moment)...")
-
-  image_to_lesion = {}
-  matched = 0
-  unmatched = 0
-
-  # We'll match by position: assuming the dataset and metadata are ordered
-  # by image_id alphabetically (which is the case for HAM10000 ImageFolder)
-  if len(dataset) == len(metadata):
-    print(f"Dataset size ({len(dataset)}) matches metadata size ({len(metadata)})")
-    print("Matching by position (assuming consistent ordering)...")
-
-    for idx in range(len(dataset)):
-      example = dataset[idx]
-      image = example["image"]
-      lesion_id = metadata.iloc[idx]["lesion_id"]
-      image_id = metadata.iloc[idx]["image_id"]
-
-      # Store by hash
-      img_hash = image_hash(image)
-      image_to_lesion[img_hash] = lesion_id
-      matched += 1
-  else:
-    print(f"Warning: Dataset size ({len(dataset)}) != metadata size ({len(metadata)})")
-    print("Attempting to match by image hash (slower but more robust)...")
-
-    # For each metadata row, we'd need to download the image to hash it
-    # This is too slow for 10K images, so we'll fall back to random splitting
-    print("Falling back to random splitting (no lesion_id grouping)")
-    return None
-
-  print(f"Matched {matched} images to lesion_ids")
-  print(f"Sample mappings: {list(image_to_lesion.items())[:3]}")
-
-  return image_to_lesion
 
 
 def group_split_by_lesion_id(
     dataset,
-    image_to_lesion: dict,
     test_size: float = 0.1,
     val_size: float = 0.1,
     seed: int = 42,
-    label_col: str = "label",
+    label_col: str = "dx",
 ) -> dict:
   """Split dataset by lesion_id groups to prevent data leakage.
-  
+
   Args:
-      dataset: HuggingFace dataset with 'image' and label columns
-      image_to_lesion: Dict mapping image_hash -> lesion_id
+      dataset: HuggingFace dataset with 'image', 'lesion_id', and label columns
       test_size: Fraction of lesion_ids for test set
       val_size: Fraction of lesion_ids for validation set
       seed: Random seed for reproducibility
-      label_col: Name of the label column (default: 'label')
-      
+      label_col: Name of the label column (default: 'dx')
+
   Returns:
       Dict with 'train', 'val', 'test' keys containing lists of (image, label) tuples
   """
@@ -139,40 +45,28 @@ def group_split_by_lesion_id(
 
   # Group dataset indices by lesion_id
   lesion_to_indices = defaultdict(list)
-  unmatched_count = 0
 
   for idx in range(len(dataset)):
     example = dataset[idx]
-    image = example["image"]
-    img_hash = image_hash(image)
-
-    if img_hash in image_to_lesion:
-      lesion_id = image_to_lesion[img_hash]
-      lesion_to_indices[lesion_id].append(idx)
-    else:
-      # Unmatched images go to their own group (will be split randomly)
-      lesion_to_indices[f"__unmatched_{idx}"].append(idx)
-      unmatched_count += 1
-
-  if unmatched_count > 0:
-    print(f"Warning: {unmatched_count} images could not be matched to lesion_id")
+    lesion_id = example["lesion_id"]
+    lesion_to_indices[lesion_id].append(idx)
 
   # Split lesion_ids into train/val/test
   all_lesion_ids = list(lesion_to_indices.keys())
   random.shuffle(all_lesion_ids)
-  
+
   n_test = int(len(all_lesion_ids) * test_size)
   n_val = int(len(all_lesion_ids) * val_size)
-  
+
   test_lesion_ids = set(all_lesion_ids[:n_test])
   val_lesion_ids = set(all_lesion_ids[n_test:n_test + n_val]) if n_val > 0 else set()
   train_lesion_ids = set(all_lesion_ids[n_test + n_val:])
-  
+
   # Collect indices for each split
   train_indices = []
   val_indices = []
   test_indices = []
-  
+
   for lesion_id, indices in lesion_to_indices.items():
     if lesion_id in test_lesion_ids:
       test_indices.extend(indices)
@@ -222,12 +116,12 @@ def save_as_imagefolder(
     label_names: dict = None,
 ):
   """Save splits as ImageFolder structure.
-    
-    Args:
-        splits: Dict with 'train', 'val', 'test' keys containing lists of (image, label) tuples
-        output_dir: Output directory path
-        label_names: Optional dict mapping label_id -> class_name. If None, uses numeric names.
-    """
+
+  Args:
+      splits: Dict with 'train', 'val', 'test' keys containing lists of (image, label) tuples
+      output_dir: Output directory path
+      label_names: Optional dict mapping label_id -> class_name. If None, uses numeric names.
+  """
   output_path = Path(output_dir)
 
   for split_name, examples in splits.items():
@@ -235,7 +129,7 @@ def save_as_imagefolder(
     if len(examples) == 0:
       print(f"\nSkipping {split_name} split (empty)")
       continue
-    
+
     print(f"\nSaving {split_name} split with {len(examples)} images...")
 
     # Group by label
@@ -303,8 +197,7 @@ def main():
       "--cache_dir",
       type=str,
       default=None,
-      help=
-      "HuggingFace datasets cache directory (default: ~/.cache/huggingface/datasets)",
+      help="HuggingFace datasets cache directory (default: ~/.cache/huggingface/datasets)",
   )
 
   args = parser.parse_args()
@@ -330,43 +223,27 @@ def main():
   # Detect label column (HAM10000 uses 'dx', others may use 'label')
   label_col = "label" if "label" in dataset.features else "dx"
   print(f"Using '{label_col}' as label column")
-  
+
   # Get label names
   label_names = None
   if hasattr(dataset.features[label_col], "names"):
     label_names = {i: name for i, name in enumerate(dataset.features[label_col].names)}
     print(f"Labels: {label_names}")
 
-  # Download metadata
-  metadata = download_metadata(args.dataset)
+  # Check for lesion_id column
+  if "lesion_id" not in dataset.features:
+    print("Error: Dataset does not have 'lesion_id' column")
+    print("Available columns:", list(dataset.features.keys()))
+    return
 
-  # Build image to lesion_id mapping
-  image_to_lesion = build_image_to_lesion_mapping(dataset, metadata)
-
-  if image_to_lesion is None:
-    print("\nFalling back to random splitting (no lesion_id grouping)")
-    # Random split as fallback
-    split = dataset.train_test_split(test_size=args.test_size + args.val_size,
-                                     seed=args.seed)
-    train_val = split["train"].train_test_split(test_size=args.val_size /
-                                                (args.test_size + args.val_size),
-                                                seed=args.seed)
-
-    splits = {
-        "train": [(ex["image"], ex[label_col]) for ex in train_val["train"]],
-        "val": [(ex["image"], ex[label_col]) for ex in train_val["test"]],
-        "test": [(ex["image"], ex[label_col]) for ex in split["test"]],
-    }
-  else:
-    # Split by lesion_id
-    splits = group_split_by_lesion_id(
-        dataset,
-        image_to_lesion,
-        test_size=args.test_size,
-        val_size=args.val_size,
-        seed=args.seed,
-        label_col=label_col,
-    )
+  # Split by lesion_id
+  splits = group_split_by_lesion_id(
+      dataset,
+      test_size=args.test_size,
+      val_size=args.val_size,
+      seed=args.seed,
+      label_col=label_col,
+  )
 
   # Save as ImageFolder
   save_as_imagefolder(splits, args.output_dir, label_names)
