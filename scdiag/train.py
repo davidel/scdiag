@@ -402,7 +402,18 @@ def train_xgboost_on_backbone(args, train_ds, val_ds, device):
   torch.cuda.empty_cache()
 
   # 5. Train XGBoost
-  xgb_model = train_xgboost(train_features, train_labels, args)
+  xgb_model = train_xgboost(
+      train_features,
+      train_labels,
+      max_depth=args.xgb_max_depth,
+      n_estimators=args.xgb_n_estimators,
+      learning_rate=args.xgb_learning_rate,
+      subsample=args.xgb_subsample,
+      colsample_bytree=args.xgb_colsample_bytree,
+      min_child_weight=args.xgb_min_child_weight,
+      gamma=args.xgb_gamma,
+      reg_alpha=args.xgb_reg_alpha,
+  )
 
   # 6. Evaluate on val set
   val_metrics = eval_xgboost(xgb_model, val_features, val_labels)
