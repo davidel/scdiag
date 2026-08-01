@@ -120,19 +120,21 @@ def group_split_by_lesion_id(
     test_size: float = 0.1,
     val_size: float = 0.1,
     seed: int = 42,
+    label_col: str = "label",
 ) -> dict:
   """Split dataset by lesion_id groups to prevent data leakage.
-    
-    Args:
-        dataset: HuggingFace dataset with 'image' and 'label' columns
-        image_to_lesion: Dict mapping image_hash -> lesion_id
-        test_size: Fraction of lesion_ids for test set
-        val_size: Fraction of lesion_ids for validation set
-        seed: Random seed for reproducibility
-        
-    Returns:
-        Dict with 'train', 'val', 'test' keys containing lists of (image, label) tuples
-    """
+  
+  Args:
+      dataset: HuggingFace dataset with 'image' and label columns
+      image_to_lesion: Dict mapping image_hash -> lesion_id
+      test_size: Fraction of lesion_ids for test set
+      val_size: Fraction of lesion_ids for validation set
+      seed: Random seed for reproducibility
+      label_col: Name of the label column (default: 'label')
+      
+  Returns:
+      Dict with 'train', 'val', 'test' keys containing lists of (image, label) tuples
+  """
   random.seed(seed)
 
   # Group dataset indices by lesion_id
@@ -184,7 +186,7 @@ def group_split_by_lesion_id(
     examples = []
     for idx in indices:
       example = dataset[idx]
-      examples.append((example["image"], example["label"]))
+      examples.append((example["image"], example[label_col]))
     return examples
 
   train_examples = get_examples(train_indices)
@@ -325,10 +327,14 @@ def main():
   print(f"Dataset loaded: {len(dataset)} images")
   print(f"Columns: {list(dataset.features.keys())}")
 
+  # Detect label column (HAM10000 uses 'dx', others may use 'label')
+  label_col = "label" if "label" in dataset.features else "dx"
+  print(f"Using '{label_col}' as label column")
+  
   # Get label names
   label_names = None
-  if hasattr(dataset.features["label"], "names"):
-    label_names = {i: name for i, name in enumerate(dataset.features["label"].names)}
+  if hasattr(dataset.features[label_col], "names"):
+    label_names = {i: name for i, name in enumerate(dataset.features[label_col].names)}
     print(f"Labels: {label_names}")
 
   # Download metadata
@@ -347,9 +353,9 @@ def main():
                                                 seed=args.seed)
 
     splits = {
-        "train": [(ex["image"], ex["label"]) for ex in train_val["train"]],
-        "val": [(ex["image"], ex["label"]) for ex in train_val["test"]],
-        "test": [(ex["image"], ex["label"]) for ex in split["test"]],
+        "train": [(ex["image"], ex[label_col]) for ex in train_val["train"]],
+        "val": [(ex["image"], ex[label_col]) for ex in train_val["test"]],
+        "test": [(ex["image"], ex[label_col]) for ex in split["test"]],
     }
   else:
     # Split by lesion_id
@@ -359,6 +365,7 @@ def main():
         test_size=args.test_size,
         val_size=args.val_size,
         seed=args.seed,
+        label_col=label_col,
     )
 
   # Save as ImageFolder
