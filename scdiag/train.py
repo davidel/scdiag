@@ -27,6 +27,27 @@ from scdiag.hf_proxy import HFDatasetProxy
 _VALID_STATE_FLAGS = {"opt", "sched", "amp", "none"}
 
 
+def filter_state_dict(ckpt_state, model_state):
+  """Filter a checkpoint state dict to only include keys compatible with the model.
+
+  Skips keys whose tensor shape differs between checkpoint and model.
+  Returns ``(filtered_state, skipped)`` where *skipped* is a list of
+  ``(key, reason)`` tuples describing why each key was dropped.
+  """
+  filtered = {}
+  skipped = []
+  for k, v in ckpt_state.items():
+    if k not in model_state:
+      skipped.append((k, "missing in model"))
+    elif v.shape != model_state[k].shape:
+      skipped.append((k,
+          f"shape mismatch: checkpoint {list(v.shape)} "
+          f"vs model {list(model_state[k].shape)}"))
+    else:
+      filtered[k] = v
+  return filtered, skipped
+
+
 def parse_state_flags(flag_value):
   """Parse a comma-separated state flag string into a set of tokens.
 
@@ -713,7 +734,16 @@ def main():
     ckpt = torch.load(resume_path, map_location=device, weights_only=False)
     ckpt_keys = list(ckpt.keys())
     logging.info(f"  Checkpoint keys: {ckpt_keys}")
-    result = model.load_state_dict(ckpt["model_state_dict"], strict=False)
+
+    # Filter checkpoint to skip keys with shape mismatches
+    # (e.g. classifier head when resuming with different num_classes).
+    filtered, skipped = filter_state_dict(
+        ckpt["model_state_dict"], model.state_dict()
+    )
+    if skipped:
+      for k, reason in skipped:
+        logging.warning(f"  Skipped key '{k}': {reason}")
+    result = model.load_state_dict(filtered, strict=False)
     logging.info("  Restored model weights")
     if result.missing_keys:
       logging.warning(f"  Missing keys (randomly initialized): "
@@ -722,13 +752,19 @@ def main():
       logging.warning(f"  Unexpected keys (ignored): "
                       f"{result.unexpected_keys}")
     if "opt" in states_to_load and "optimizer_state_dict" in ckpt:
-      optimizer.load_state_dict(ckpt["optimizer_state_dict"])
-      logging.info("  Restored optimizer state")
+      if skipped:
+        logging.warning("  Skipped optimizer restore (model architecture changed)")
+      else:
+        optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        logging.info("  Restored optimizer state")
     else:
       logging.info("  Skipped optimizer state")
     if "sched" in states_to_load and "scheduler_state_dict" in ckpt:
-      scheduler.load_state_dict(ckpt["scheduler_state_dict"])
-      logging.info("  Restored scheduler state")
+      if skipped:
+        logging.warning("  Skipped scheduler restore (model architecture changed)")
+      else:
+        scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+        logging.info("  Restored scheduler state")
     else:
       logging.info("  Skipped scheduler state")
     if "amp" in states_to_load:
