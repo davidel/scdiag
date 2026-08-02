@@ -651,7 +651,7 @@ def train_one_epoch(
              f" lr={lr_now:.2e} img/s={throughput:.0f}")
       logging.info(msg)
       if gpu:
-        logging.info(f"  [Step {batch_idx + 1}/{total_batches}]{gpu}")
+        logging.info(f"  [Step {batch_idx + 1}/{total_batches}] {gpu}")
       if writer is not None:
         writer.add_scalar("Train/loss", w_loss, global_step)
         writer.add_scalar("Train/top1", w_top1, global_step)
