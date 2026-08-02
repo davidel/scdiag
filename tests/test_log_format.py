@@ -138,9 +138,9 @@ class TestGPUStatsFormat:
       mock_props.return_value.total_memory = 1024 * 1024 * 1024 * 16
       with patch("torch.cuda.utilization", return_value=85):
         result = gpu_stats_str(mock_device)
-    assert "GPU Mem" in result
-    assert "MB" in result
-    assert "GPU Util" in result
+    assert result.startswith("GPU: mem=")
+    assert "res=" in result
+    assert "util=" in result
 
 
 # ---------------------------------------------------------------------------

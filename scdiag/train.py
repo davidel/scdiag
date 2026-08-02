@@ -14,6 +14,7 @@ import torch.nn as nn
 import torch.optim as optim
 import datasets
 from datasets import load_dataset
+from sklearn.metrics import f1_score, precision_recall_fscore_support
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import v2
@@ -567,6 +568,8 @@ def train_one_epoch(
   window_samples = 0
   window_correct = 0
   window_loss = 0.0
+  window_preds = []
+  window_labels = []
 
   for batch_idx, (images, targets) in enumerate(dataloader):
     images, targets = images.to(device), targets.to(device)
@@ -619,6 +622,8 @@ def train_one_epoch(
     window_samples += batch_size
     window_loss += loss.item() * batch_size * args.grad_accum_steps
     window_correct += (logits.argmax(dim=1) == orig_targets).sum().item()
+    window_preds.extend(logits.argmax(dim=1).cpu().tolist())
+    window_labels.extend(orig_targets.cpu().tolist())
 
     # Periodic step-level logging.
     if (batch_idx + 1) % args.log_every == 0 or (batch_idx + 1) == total_batches:
@@ -629,17 +634,28 @@ def train_one_epoch(
       w_loss = window_loss / window_samples if window_samples > 0 else 0.0
       w_top1 = ((window_correct / window_samples) *
                 100.0 if window_samples > 0 else 0.0)
+      # Compute window macro F1.
+      w_macro_f1 = 0.0
+      if window_preds:
+        w_macro_f1 = f1_score(
+            window_labels, window_preds, average="macro", zero_division=0
+        ) * 100.0
+
       avg_loss = total_loss / total_samples
       top1 = (correct_top1 / total_samples) * 100.0
-      msg = (f"  [Step {batch_idx + 1}/{total_batches}] "
-             f"loss={w_loss:.4f} top1={w_top1:.2f}% "
-             f"(avg loss={avg_loss:.4f} top1={top1:.2f}%) "
-             f"lr={lr_now:.2e} {throughput:.0f} img/s"
-             f"{gpu_stats_str(device)}")
+      gpu = gpu_stats_str(device)
+      msg = (f"  [Step {batch_idx + 1}/{total_batches}]"
+             f" loss={w_loss:.4f} ({avg_loss:.4f})"
+             f" top1={w_top1:.2f}% ({top1:.2f}%)"
+             f" macro_f1={w_macro_f1:.2f}%"
+             f" lr={lr_now:.2e} img/s={throughput:.0f}")
       logging.info(msg)
+      if gpu:
+        logging.info(f"  [Step {batch_idx + 1}/{total_batches}]{gpu}")
       if writer is not None:
         writer.add_scalar("Train/loss", w_loss, global_step)
         writer.add_scalar("Train/top1", w_top1, global_step)
+        writer.add_scalar("Train/macro_f1", w_macro_f1, global_step)
         writer.add_scalar("Train/loss_avg", avg_loss, global_step)
         writer.add_scalar("Train/top1_avg", top1, global_step)
         writer.add_scalar("Train/lr", lr_now, global_step)
@@ -660,6 +676,8 @@ def train_one_epoch(
       window_samples = 0
       window_correct = 0
       window_loss = 0.0
+      window_preds = []
+      window_labels = []
 
   avg_loss = total_loss / total_samples
   top1 = (correct_top1 / total_samples) * 100.0
@@ -669,13 +687,18 @@ def train_one_epoch(
   return avg_loss, top1
 
 
-def evaluate_performance(model, dataloader, criterion, device, amp_dtype):
+def evaluate_performance(model, dataloader, criterion, device, amp_dtype,
+                         id2label=None):
   """Evaluate on a validation/test set.
 
-    Returns ``(eval_loss, top1_acc_pct)``.
+    Returns ``(eval_loss, top1_acc_pct, macro_f1, per_class_f1)`` where
+    *per_class_f1* is a dict ``{class_name: f1_score}`` (or ``{}`` if
+    *id2label* is not supplied).
     """
   model.eval()
   eval_loss, correct_top1, total_samples = 0.0, 0, 0
+  all_preds = []
+  all_labels = []
   with torch.no_grad():
     for images, targets in dataloader:
       images, targets = images.to(device), targets.to(device)
@@ -691,8 +714,25 @@ def evaluate_performance(model, dataloader, criterion, device, amp_dtype):
       eval_loss += loss.item() * images.size(0)
       total_samples += targets.size(0)
       correct_top1 += (logits.argmax(dim=1) == targets).sum().item()
+      all_preds.extend(logits.argmax(dim=1).cpu().tolist())
+      all_labels.extend(targets.cpu().tolist())
 
-  return (eval_loss / total_samples, (correct_top1 / total_samples) * 100.0)
+  avg_loss = eval_loss / total_samples
+  top1 = (correct_top1 / total_samples) * 100.0
+
+  # Per-class and macro F1.
+  _, _, f1s, _ = precision_recall_fscore_support(
+      all_labels, all_preds, average=None, zero_division=0
+  )
+  macro_f1 = f1_score(all_labels, all_preds, average="macro", zero_division=0) * 100.0
+
+  per_class_f1 = {}
+  if id2label:
+    for idx, score in enumerate(f1s):
+      name = id2label.get(str(idx), id2label.get(idx, str(idx)))
+      per_class_f1[name] = score * 100.0
+
+  return avg_loss, top1, macro_f1, per_class_f1
 
 
 def main():
@@ -885,12 +925,20 @@ def main():
       writer.add_scalar("Epoch/Loss_Train", train_loss, epoch)
       writer.add_scalar("Epoch/Accuracy_Train_Top1", train_t1, epoch)
 
-      v_loss, v_t1 = evaluate_performance(model, val_loader, criterion, device,
-                                          args.amp_dtype)
+      v_loss, v_t1, v_macro_f1, v_per_class_f1 = evaluate_performance(
+          model, val_loader, criterion, device, args.amp_dtype,
+          id2label=train_proxy.id2label,
+      )
       writer.add_scalar("Epoch/Loss_Val", v_loss, epoch)
       writer.add_scalar("Epoch/Accuracy_Val_Top1", v_t1, epoch)
+      writer.add_scalar("Epoch/Macro_F1_Val", v_macro_f1, epoch)
       logging.info(f"Epoch {epoch + 1} Results -> "
-                   f"Val Loss: {v_loss:.4f} | Top1: {v_t1:.2f}%")
+                   f"Val Loss: {v_loss:.4f} | Top1: {v_t1:.2f}%"
+                   f" | Macro F1: {v_macro_f1:.2f}%")
+      if v_per_class_f1:
+        for cls_name, f1_val in v_per_class_f1.items():
+          writer.add_scalar(f"Epoch/F1_Val/{cls_name}", f1_val, epoch)
+          logging.info(f"  {cls_name}: F1={f1_val:.2f}%")
 
       if v_t1 > best_top1:
         best_top1 = v_t1
