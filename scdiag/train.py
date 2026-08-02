@@ -4,7 +4,9 @@ import argparse
 import gc
 import logging
 import os
+import tempfile
 import time
+import urllib.request
 
 import numpy as np
 import torch
@@ -68,35 +70,91 @@ def parse_state_flags(flag_value):
   return tokens
 
 
-def build_transforms(processor, image_size):
+def load_augmentation_script(path_or_url):
+  """Load a Python script and return its ``create_train_transform`` callable.
+
+  The script must define a ``create_train_transform(image_size, **kwargs)``
+  function that returns a list of ``torchvision.transforms.v2`` transforms.
+
+  Args:
+      path_or_url: Local file path or HTTP/HTTPS URL to the script.
+
+  Returns:
+      The ``create_train_transform`` callable.
+
+  Raises:
+      FileNotFoundError: If a local path does not exist.
+      ValueError: If the script does not define a callable
+          ``create_train_transform``.
+  """
+  namespace = {}
+
+  if path_or_url.startswith(("http://", "https://")):
+    with urllib.request.urlopen(path_or_url) as resp:
+      code = resp.read().decode("utf-8")
+    # Use a named temp file so tracebacks show a meaningful filename.
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".py", delete=False, prefix="aug_"
+    ) as tmp:
+      tmp.write(code)
+      tmp_path = tmp.name
+    try:
+      exec(compile(code, path_or_url, "exec"), namespace)
+    finally:
+      os.unlink(tmp_path)
+  else:
+    with open(path_or_url) as f:
+      code = f.read()
+    exec(compile(code, path_or_url, "exec"), namespace)
+
+  fn = namespace.get("create_train_transform")
+  if fn is None or not callable(fn):
+    raise ValueError(
+        f"Script {path_or_url!r} does not define a callable "
+        "'create_train_transform(image_size, **kwargs)'."
+    )
+  return fn
+
+
+def build_transforms(processor, image_size, train_aug_fn=None):
   """Create train / val augmentation pipelines.
+
+    If *train_aug_fn* is ``None`` the default (hand-picked) augmentation
+    list is used.  Otherwise *train_aug_fn(image_size)* must return a
+    list of ``v2`` transforms; the fixed preprocessing tail is appended
+    automatically.
 
     Includes the processor's normalization (mean / std) so images arrive
     at the model ready for inference.
     """
-  _norm = [
+  _tail = [
+      v2.ToImage(),
+      v2.ToDtype(torch.float32, scale=True),
       v2.Normalize(mean=processor.image_mean, std=processor.image_std),
   ]
 
-  train_augmentations = v2.Compose([
-      v2.RandomResizedCrop(size=(image_size, image_size),
-                           scale=(0.2, 1.0),
-                           antialias=True),
-      v2.RandomHorizontalFlip(p=0.5),
-      v2.RandomVerticalFlip(p=0.5),
-      v2.RandomRotation(degrees=360),
-      v2.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.15, hue=0.05),
-      v2.ElasticTransform(alpha=50.0, sigma=5.0),
-      v2.ToImage(),
-      v2.ToDtype(torch.float32, scale=True),
-      *_norm,
-  ])
+  if train_aug_fn is not None:
+    user_transforms = train_aug_fn(image_size)
+    if not isinstance(user_transforms, list):
+      raise TypeError(
+          "create_train_transform() must return a list of transforms, "
+          f"got {type(user_transforms).__name__}"
+      )
+    train_augmentations = v2.Compose(user_transforms + _tail)
+  else:
+    train_augmentations = v2.Compose([
+        v2.RandomResizedCrop(size=(image_size, image_size),
+                             scale=(0.2, 1.0),
+                             antialias=True),
+        v2.RandomHorizontalFlip(p=0.5),
+        v2.RandomVerticalFlip(p=0.5),
+        v2.RandomRotation(degrees=360),
+        v2.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.15, hue=0.05),
+        v2.ElasticTransform(alpha=50.0, sigma=5.0),
+        *_tail,
+    ])
 
-  val_augmentations = v2.Compose([
-      v2.ToImage(),
-      v2.ToDtype(torch.float32, scale=True),
-      *_norm,
-  ])
+  val_augmentations = v2.Compose(_tail)
 
   return train_augmentations, val_augmentations
 
@@ -202,6 +260,15 @@ def parse_args(argv=None):
       type=int,
       default=448,
       help="Resize images to this size (default: %(default)s)",
+  )
+  parser.add_argument(
+      "--train_augmentation_script",
+      type=str,
+      default=None,
+      help="Path or URL to a Python script defining "
+           "create_train_transform(image_size, **kwargs) -> list of v2 "
+           "transforms. The fixed tail (ToImage, ToDtype, Normalize) is "
+           "appended automatically.",
   )
   parser.add_argument(
       "--epochs",
@@ -648,7 +715,17 @@ def main():
   writer = SummaryWriter(log_dir=log_dir)
 
   processor = AutoImageProcessor.from_pretrained(args.model, cache_dir=args.cache_dir)
-  train_transforms, val_transforms = build_transforms(processor, args.image_size)
+
+  # Resolve custom augmentation script to a callable, if provided.
+  train_aug_fn = None
+  if args.train_augmentation_script:
+    train_aug_fn = load_augmentation_script(args.train_augmentation_script)
+    logging.info(f"Using custom augmentation script: "
+                 f"{args.train_augmentation_script}")
+
+  train_transforms, val_transforms = build_transforms(
+      processor, args.image_size, train_aug_fn
+  )
 
   train_proxy, val_proxy = load_and_split_dataset(
       args.dataset,
