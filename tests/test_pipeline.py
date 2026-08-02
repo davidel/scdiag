@@ -478,6 +478,134 @@ class TestBuildTransforms:
 # ---------------------------------------------------------------------------
 
 
+class TestLoadAugmentationScript:
+  """Tests for load_augmentation_script()."""
+
+  def test_loads_local_script(self, tmp_path):
+    train_mod = _import_train()
+    script = tmp_path / "my_aug.py"
+    script.write_text(
+        "from torchvision.transforms import v2\n"
+        "\n"
+        "def create_train_transform(image_size, **kwargs):\n"
+        "    return [\n"
+        "        v2.RandomHorizontalFlip(p=0.5),\n"
+        "    ]\n"
+    )
+    fn = train_mod.load_augmentation_script(str(script))
+    assert callable(fn)
+    result = fn(224)
+    assert isinstance(result, list)
+    assert len(result) == 1
+
+  def test_missing_create_train_transform_raises(self, tmp_path):
+    train_mod = _import_train()
+    script = tmp_path / "bad_aug.py"
+    script.write_text("def wrong_name():\n    pass\n")
+    with pytest.raises(ValueError, match="does not define a callable"):
+      train_mod.load_augmentation_script(str(script))
+
+  def test_non_callable_raises(self, tmp_path):
+    train_mod = _import_train()
+    script = tmp_path / "bad_aug2.py"
+    script.write_text("create_train_transform = 42\n")
+    with pytest.raises(ValueError, match="does not define a callable"):
+      train_mod.load_augmentation_script(str(script))
+
+  def test_loads_url(self):
+    train_mod = _import_train()
+    url_script = (
+        "from torchvision.transforms import v2\n"
+        "\n"
+        "def create_train_transform(image_size, **kwargs):\n"
+        "    return [v2.RandomVerticalFlip(p=1.0)]\n"
+    )
+    with patch("urllib.request.urlopen") as mock_url:
+      mock_resp = MagicMock()
+      mock_resp.read.return_value = url_script.encode("utf-8")
+      mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+      mock_resp.__exit__ = MagicMock(return_value=False)
+      mock_url.return_value = mock_resp
+
+      fn = train_mod.load_augmentation_script("https://example.com/aug.py")
+      assert callable(fn)
+      result = fn(128)
+      assert isinstance(result, list)
+      assert len(result) == 1
+
+
+class TestBuildTransformsWithCustomAug:
+  """Tests for build_transforms() with a custom train_aug_fn."""
+
+  def _mock_processor(self):
+    mock_processor = MagicMock()
+    mock_processor.image_mean = [0.485, 0.456, 0.406]
+    mock_processor.image_std = [0.229, 0.224, 0.225]
+    return mock_processor
+
+  def test_custom_fn_replaces_train_augs(self):
+    train_mod = _import_train()
+    from torchvision.transforms import v2
+
+    def my_aug(image_size):
+      return [v2.RandomHorizontalFlip(p=1.0)]
+
+    train_t, val_t = train_mod.build_transforms(
+        self._mock_processor(), image_size=64, train_aug_fn=my_aug
+    )
+    assert callable(train_t)
+    assert callable(val_t)
+    # Train transform should produce output (custom aug + tail).
+    # No resize/crop in custom augs, so output matches input size.
+    img = Image.fromarray(
+        np.random.randint(0, 256, (128, 128, 3), dtype=np.uint8)
+    )
+    result = train_t(img)
+    assert isinstance(result, torch.Tensor)
+    assert result.shape == (3, 128, 128)
+
+  def test_custom_fn_empty_list_still_has_tail(self):
+    train_mod = _import_train()
+
+    def empty_aug(image_size):
+      return []
+
+    train_t, _ = train_mod.build_transforms(
+        self._mock_processor(), image_size=64, train_aug_fn=empty_aug
+    )
+    img = Image.fromarray(
+        np.random.randint(0, 256, (128, 128, 3), dtype=np.uint8)
+    )
+    result = train_t(img)
+    assert isinstance(result, torch.Tensor)
+    # No resize/crop, so 128x128 input stays 128x128
+    assert result.shape == (3, 128, 128)
+
+  def test_custom_fn_wrong_return_type_raises(self):
+    train_mod = _import_train()
+
+    def bad_aug(image_size):
+      return "not a list"
+
+    with pytest.raises(TypeError, match="must return a list"):
+      train_mod.build_transforms(
+          self._mock_processor(), image_size=64, train_aug_fn=bad_aug
+      )
+
+  def test_none_fn_uses_default(self):
+    train_mod = _import_train()
+    # Passing train_aug_fn=None should behave like the original default
+    train_t, val_t = train_mod.build_transforms(
+        self._mock_processor(), image_size=64, train_aug_fn=None
+    )
+    img = Image.fromarray(
+        np.random.randint(0, 256, (128, 128, 3), dtype=np.uint8)
+    )
+    result = train_t(img)
+    assert isinstance(result, torch.Tensor)
+    assert result.shape == (3, 64, 64)
+
+
 class TestArgParsing:
 
   def test_defaults(self):
