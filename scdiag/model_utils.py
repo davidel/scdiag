@@ -15,7 +15,7 @@ DTYPE_MAP = {
 }
 
 
-def build_val_transform(processor, image_size: int):
+def build_val_transform(processor, image_size):
   """Validation/inference transform matching train.py's val pipeline."""
 
   resize = v2.Resize(
@@ -35,10 +35,10 @@ def build_val_transform(processor, image_size: int):
 
 
 def load_model_for_inference(
-    model_name: str,
-    checkpoint_path: str,
-    device: str = "cuda",
-    cache_dir: str | None = None,
+    model_name,
+    checkpoint_path,
+    device="cuda",
+    cache_dir=None,
 ):
   """Load a fine-tuned model ready for inference.
 

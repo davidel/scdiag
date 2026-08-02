@@ -78,7 +78,7 @@ def parse_args(argv=None):
   return parser.parse_args(argv)
 
 
-def open_image(source: str) -> Image.Image:
+def open_image(source):
   """Open an image from a file path or URL."""
   if source.startswith(("http://", "https://")):
     import urllib.request
@@ -87,7 +87,7 @@ def open_image(source: str) -> Image.Image:
   return Image.open(source).convert("RGB")
 
 
-def predict_single(model, transform, image: Image.Image, device: str):
+def predict_single(model, transform, image, device):
   """Run inference on one image. Returns (logits, pixel_values) tensor."""
   pixel_values = transform(image).unsqueeze(0).to(device)
   with torch.no_grad():
