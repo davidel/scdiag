@@ -24,11 +24,11 @@ from datasets import load_dataset
 
 def group_split_by_lesion_id(
     dataset,
-    test_size: float = 0.1,
-    val_size: float = 0.1,
-    seed: int = 42,
-    label_col: str = "dx",
-) -> dict:
+    test_size=0.1,
+    val_size=0.1,
+    seed=42,
+    label_col="dx",
+):
   """Split dataset by lesion_id groups to prevent data leakage.
 
   Args:
@@ -111,9 +111,9 @@ def group_split_by_lesion_id(
 
 
 def save_as_imagefolder(
-    splits: dict,
-    output_dir: str,
-    label_names: dict = None,
+    splits,
+    output_dir,
+    label_names=None,
 ):
   """Save splits as ImageFolder structure.
 
