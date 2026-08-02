@@ -127,7 +127,7 @@ def build_transforms(processor, image_size, train_aug_fn=None):
     Includes the processor's normalization (mean / std) so images arrive
     at the model ready for inference.
     """
-  _tail = [
+  tail = [
       v2.ToImage(),
       v2.ToDtype(torch.float32, scale=True),
       v2.Normalize(mean=processor.image_mean, std=processor.image_std),
@@ -140,7 +140,7 @@ def build_transforms(processor, image_size, train_aug_fn=None):
           "create_train_transform() must return a list of transforms, "
           f"got {type(user_transforms).__name__}"
       )
-    train_augmentations = v2.Compose(user_transforms + _tail)
+    train_augmentations = v2.Compose(user_transforms + tail)
   else:
     train_augmentations = v2.Compose([
         v2.RandomResizedCrop(size=(image_size, image_size),
@@ -151,10 +151,10 @@ def build_transforms(processor, image_size, train_aug_fn=None):
         v2.RandomRotation(degrees=360),
         v2.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.15, hue=0.05),
         v2.ElasticTransform(alpha=50.0, sigma=5.0),
-        *_tail,
+        *tail,
     ])
 
-  val_augmentations = v2.Compose(_tail)
+  val_augmentations = v2.Compose(tail)
 
   return train_augmentations, val_augmentations
 
