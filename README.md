@@ -62,6 +62,7 @@ scdiag-train --model google/vit-base-patch16-224 \
 | `--model` | `google/vit-base-patch16-224` | HuggingFace model name or local path |
 | `--dataset` | `marmal88/skin_cancer` | HuggingFace dataset name |
 | `--image_size` | `448` | Augmentation crop size (processor handles final resize) |
+| `--train_augmentation_script` | `None` | Path or URL to a Python script defining `create_train_transform(image_size, **kwargs)` returning a list of v2 transforms. The fixed tail (ToImage, ToDtype, Normalize) is appended automatically. |
 | `--epochs` | `5` | Number of training epochs |
 | `--batch_size` | `32` | Batch size |
 | `--lr` | `3e-5` | Peak learning rate |
