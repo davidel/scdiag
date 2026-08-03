@@ -16,16 +16,21 @@ from scdiag.datasets.hf_proxy import HFDatasetProxy
 
 logger = logging.getLogger(__name__)
 
-
 # ---------------------------------------------------------------------------
 # Individual dataset back-ends
 # ---------------------------------------------------------------------------
 
+
 class _HFDataset:
   """Lazy-loading wrapper around a HuggingFace ``datasets.Dataset``."""
 
-  def __init__(self, name, split="train", image_column=None,
-               cache_dir=None, hf_token=None, min_resolution=None):
+  def __init__(self,
+               name,
+               split="train",
+               image_column=None,
+               cache_dir=None,
+               hf_token=None,
+               min_resolution=None):
     self.name = name
     self.split = split
     self.image_column = image_column
@@ -38,7 +43,9 @@ class _HFDataset:
     from datasets import load_dataset
     logger.info(f"Loading HF dataset '{self.name}' (split={self.split}) …")
     try:
-      ds = load_dataset(self.name, split=self.split, cache_dir=self.cache_dir,
+      ds = load_dataset(self.name,
+                        split=self.split,
+                        cache_dir=self.cache_dir,
                         token=self.hf_token)
     except Exception as exc:
       logger.warning(f"  Failed to load '{self.name}': {exc}")
@@ -53,10 +60,8 @@ class _HFDataset:
     else:
       col = HFDatasetProxy.detect_image_column(ds)
     if col is None:
-      raise ValueError(
-          f"Cannot auto-detect image column in '{self.name}'. "
-          f"Columns: {ds.column_names}. Set 'image_column' explicitly."
-      )
+      raise ValueError(f"Cannot auto-detect image column in '{self.name}'. "
+                       f"Columns: {ds.column_names}. Set 'image_column' explicitly.")
     HFDatasetProxy.normalize_image_column(ds, col)
     self.image_column = col
 
@@ -81,9 +86,7 @@ class _HFDataset:
     image = image.convert("RGB")
     if self.min_resolution is not None:
       if image.width < self.min_resolution or image.height < self.min_resolution:
-        raise IndexError(
-            f"Image too small: {image.size}, min={self.min_resolution}"
-        )
+        raise IndexError(f"Image too small: {image.size}, min={self.min_resolution}")
     return image
 
 
@@ -96,8 +99,7 @@ class _ImageFolderDataset:
     self._extensions = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"}
     self._paths = sorted(
         p for p in self.root_dir.iterdir()
-        if p.suffix.lower() in self._extensions
-    ) if self.root_dir.is_dir() else []
+        if p.suffix.lower() in self._extensions) if self.root_dir.is_dir() else []
 
   def __len__(self):
     return len(self._paths)
@@ -111,6 +113,7 @@ class _ImageFolderDataset:
 # ---------------------------------------------------------------------------
 # Ensemble
 # ---------------------------------------------------------------------------
+
 
 class DermoscopyEnsemble:
   """Concatenation of multiple skin-lesion image datasets.
@@ -139,8 +142,8 @@ class DermoscopyEnsemble:
     self._configs = dataset_configs
     self._cache_dir = cache_dir
     self._hf_token = hf_token
-    self._datasets = []   # lazily populated
-    self._offsets = None   # prefix-sum of lengths
+    self._datasets = []  # lazily populated
+    self._offsets = None  # prefix-sum of lengths
 
   # -- lazy loading -------------------------------------------------------
 
@@ -214,8 +217,10 @@ class DermoscopyEnsemble:
   def summary(self):
     """Return a human-readable summary of the ensemble."""
     self._ensure_loaded()
-    lines = [f"DermoscopyEnsemble: {len(self):,} images from "
-             f"{len(self._datasets)} dataset(s)"]
+    lines = [
+        f"DermoscopyEnsemble: {len(self):,} images from "
+        f"{len(self._datasets)} dataset(s)"
+    ]
     for i, ds in enumerate(self._datasets):
       lines.append(f"  [{i}] {ds.name}: {len(ds):,} images")
     return "\n".join(lines)
