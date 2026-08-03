@@ -30,6 +30,119 @@ from scdiag.hf_proxy import HFDatasetProxy
 _VALID_STATE_FLAGS = {"opt", "sched", "amp", "none"}
 
 
+# ---------------------------------------------------------------------------
+# Loss function and CLI helpers for Phase 1 of the loss revision plan.
+# ---------------------------------------------------------------------------
+
+
+def parse_class_multipliers(s, num_labels, label2id):
+  """Parse a ``--class_multipliers`` string into a ``[num_labels]`` tensor.
+
+  *s* is a comma-separated string of ``NAME=VALUE`` pairs where *NAME* is
+  a label string (e.g. ``melanoma``) or an integer label index and *VALUE*
+  is a float multiplier.  Unspecified classes default to ``1.0``.
+
+  Returns a ``torch.Tensor`` of shape ``[num_labels]``.
+  """
+  import torch
+
+  m = torch.ones(num_labels)
+  if not s or not s.strip():
+    return m
+  for pair in s.split(","):
+    pair = pair.strip()
+    if not pair:
+      continue
+    if "=" not in pair:
+      raise ValueError(
+          f"Invalid --class_multipliers entry: '{pair}'. "
+          "Expected NAME=VALUE (e.g. melanoma=4.0).")
+    name, val = pair.split("=", 1)
+    name, val = name.strip(), val.strip()
+    if name.isdigit():
+      idx = int(name)
+    else:
+      if name not in label2id:
+        raise ValueError(
+            f"Unknown class name '{name}' in --class_multipliers. "
+            f"Available: {list(label2id.keys())}")
+      idx = label2id[name]
+    if not (0 <= idx < num_labels):
+      raise ValueError(
+          f"Label index {idx} out of range [0, {num_labels})")
+    m[idx] = float(val)
+  return m
+
+
+class CombinedFocalLoss(nn.Module):
+  """Cost-sensitive focal loss for multi-class classification.
+
+  Combines inverse-frequency weights, clinical severity multipliers,
+  and focal loss modulation into a single loss function.
+
+  Builds on PyTorch's numerically stable cross-entropy implementation
+  (log-sum-exp trick) rather than reimplementing log_softmax manually.
+  """
+
+  def __init__(self, weights, gamma=2.0, label_smoothing=0.0,
+               reduction='mean'):
+    """
+    Args:
+        weights: [num_classes] W_final = W_freq x M_c, pre-computed at
+                 construction time (constant per class, not per-batch).
+        gamma: Focal loss focusing parameter (higher = more focus on
+               hard examples).  0.0 disables focal modulation and reduces
+               to standard weighted cross-entropy.
+        label_smoothing: Label smoothing factor (0.0 = disabled).
+                         Passed through to F.cross_entropy.
+        reduction: 'mean', 'sum', or 'none'.
+    """
+    super().__init__()
+    self.register_buffer('weights', weights)
+    self.gamma = gamma
+    self.label_smoothing = label_smoothing
+    self.reduction = reduction
+
+  def forward(self, inputs, targets):
+    """
+    Args:
+        inputs: [batch_size, num_classes] raw logits
+        targets: [batch_size] ground truth class indices
+    Returns:
+        Scalar loss (or per-sample losses if reduction='none').
+    """
+    # Use PyTorch's numerically stable CE with reduction='none'.
+    ce_loss = nn.functional.cross_entropy(
+        inputs, targets,
+        weight=self.weights,
+        label_smoothing=self.label_smoothing,
+        reduction='none',
+    )
+
+    if self.gamma == 0:
+      # No focal modulation — standard weighted CE.
+      if self.reduction == 'mean':
+        return ce_loss.mean()
+      elif self.reduction == 'sum':
+        return ce_loss.sum()
+      return ce_loss
+
+    # Focal modulation: down-weight easy examples.
+    # p_t is the model's predicted probability for the true class.
+    with torch.no_grad():
+      prob = torch.nn.functional.softmax(inputs, dim=-1)
+      p_t = prob.gather(1, targets.unsqueeze(1)).squeeze(1)
+      focal_weight = (1 - p_t) ** self.gamma
+
+    loss = focal_weight * ce_loss
+
+    if self.reduction == 'mean':
+      return loss.mean()
+    elif self.reduction == 'sum':
+      return loss.sum()
+    return loss
+
+
 def filter_state_dict(ckpt_state, model_state):
   """Filter a checkpoint state dict to only include keys compatible with the model.
 
@@ -304,6 +417,23 @@ def parse_args(argv=None):
       type=float,
       default=0.0,
       help="Label smoothing (default: %(default)s)",
+  )
+  parser.add_argument(
+      "--focal_gamma",
+      type=float,
+      default=0.0,
+      help="Focal loss gamma (default: %(default)s). "
+           "0.0 disables focal modulation (standard weighted CE).",
+  )
+  parser.add_argument(
+      "--class_multipliers",
+      type=str,
+      default="",
+      help="Comma-separated NAME=VALUE pairs to override per-class "
+           "clinical severity multipliers (M_c). NAME is a label string "
+           "(e.g. melanoma) or integer label index. VALUE is a float. "
+           "Unspecified classes default to 1.0. Example: "
+           "'melanoma=4.0,melanocytic_Nevi=0.5' (default: \"\")",
   )
   parser.add_argument(
       "--grad_accum_steps",
@@ -777,8 +907,20 @@ def main():
   num_labels = train_proxy.num_labels
   logging.info(f"num_labels: {num_labels}")
 
-  class_weights = compute_class_weights(train_proxy.dataset, num_labels).to(device)
-  logging.info(f"Class weights: {class_weights.tolist()}")
+  w_freq = compute_class_weights(train_proxy.dataset, num_labels)
+  logging.info(f"Inverse-frequency weights: {w_freq.tolist()}")
+
+  # Convert proxy label2id (str values) to int values for parse_class_multipliers.
+  label2id_int = {k: int(v) for k, v in train_proxy.label2id.items()}
+
+  # Apply clinical severity multipliers from --class_multipliers.
+  clinical_m = parse_class_multipliers(
+      args.class_multipliers, num_labels, label2id_int,
+  )
+  logging.info(f"Clinical multipliers (M_c): {clinical_m.tolist()}")
+
+  class_weights = (w_freq * clinical_m).to(device)
+  logging.info(f"Final class weights (W_freq x M_c): {class_weights.tolist()}")
 
   if len(train_proxy) < args.batch_size:
     raise ValueError(f"Training set ({len(train_proxy)} samples) is smaller than "
@@ -814,8 +956,17 @@ def main():
   logging.info(f"Model params: {total_params:,} total, {trainable:,} trainable")
   logging.info(f"Model structure:\n{model}")
 
-  criterion = nn.CrossEntropyLoss(weight=class_weights,
-                                  label_smoothing=args.label_smoothing)
+  if args.focal_gamma > 0 and args.label_smoothing > 0:
+    logging.warning(
+        "Both --focal_gamma (%.1f) and --label_smoothing (%.2f) are > 0. "
+        "Focal loss and label smoothing conflict. Proceeding anyway — "
+        "monitor for instability.", args.focal_gamma, args.label_smoothing)
+
+  criterion = CombinedFocalLoss(
+      weights=class_weights,
+      gamma=args.focal_gamma,
+      label_smoothing=args.label_smoothing,
+  )
 
   optimizer = optim.AdamW(model.parameters(),
                           lr=args.lr,
