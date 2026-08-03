@@ -394,7 +394,7 @@ def main(argv=None):
   )
 
   logging.info("Loading model '%s' via registry ...", args.model)
-  base_model, _ = load_model(
+  base_model = load_model(
       args.model,
       num_labels=0,
       id2label={},
