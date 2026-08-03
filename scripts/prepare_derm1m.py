@@ -99,11 +99,23 @@ def main():
 
     token = args.token or os.environ.get("HF_TOKEN")
     output_path = Path(args.output_dir)
+    
+    # Check if output directory already has images
+    image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp", ".gif"}
+    if output_path.exists() and any(f.suffix.lower() in image_exts 
+                                    for f in output_path.rglob("*") if f.is_file()):
+        print(f"Output directory {output_path} already contains images, skipping preparation.")
+        print("Delete it and re-run to refresh, or use a different --output_dir.")
+        return
+    
     output_path.mkdir(parents=True, exist_ok=True)
 
-    if args.skip_download and args.zip_dir:
-        # Use pre-downloaded zips
+    if args.skip_download:
+        if not args.zip_dir:
+            parser.error("--skip_download requires --zip_dir to specify where zips are located")
         zip_dir = Path(args.zip_dir)
+        if not zip_dir.exists():
+            parser.error(f"--zip_dir {zip_dir} does not exist")
         print(f"Using pre-downloaded zips from {zip_dir}")
     else:
         # Download and extract into a temp directory
