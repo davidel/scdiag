@@ -116,6 +116,10 @@ def main():
         zip_dir = Path(args.zip_dir)
         if not zip_dir.exists():
             parser.error(f"--zip_dir {zip_dir} does not exist")
+        # Check for missing zips
+        missing = [z for z in DERM1M_ZIPS if not (zip_dir / z).exists()]
+        if missing:
+            parser.error(f"Missing zip archives in {zip_dir}: {', '.join(missing)}")
         print(f"Using pre-downloaded zips from {zip_dir}")
     else:
         # Download and extract into a temp directory
@@ -125,7 +129,12 @@ def main():
         for zip_name in DERM1M_ZIPS:
             url = f"{BASE_URL}/{zip_name}"
             zip_path = zip_dir / zip_name
-            download_file(url, zip_path, token)
+
+            # Skip if already downloaded (resumable)
+            if zip_path.exists():
+                print(f"  {zip_name} already exists, skipping download")
+            else:
+                download_file(url, zip_path, token)
 
             print(f"  Extracting {zip_name} ...")
             with zipfile.ZipFile(zip_path, "r") as zf:
