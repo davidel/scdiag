@@ -128,25 +128,21 @@ def main():
   else:
     zip_dir = Path(tempfile.mkdtemp(prefix="derm1m_"))
 
-  # Check which zips are present and which need downloading
-  existing = [z for z in DERM1M_ZIPS if (zip_dir / z).exists()]
-  missing = [z for z in DERM1M_ZIPS if not (zip_dir / z).exists()]
+  # Download zips
+  for zip_name in DERM1M_ZIPS:
+    url = f"{BASE_URL}/{zip_name}"
+    zip_path = zip_dir / zip_name
 
-  if existing:
-    print(f"Found {len(existing)} existing zip(s) in {zip_dir}:")
-    for z in existing:
-      print(f"  {z}")
+    if zip_path.exists():
+      if args.skip_download:
+        print(
+            f"  {zip_name} exists, skipping (use without --skip_download to re-download)"
+        )
+        continue
+      else:
+        print(f"  {zip_name} exists, overwriting")
 
-  if missing:
-    if args.skip_download:
-      parser.error(f"Missing zip archives in {zip_dir}: {', '.join(missing)}")
-    print(f"Downloading {len(missing)} missing zip(s) to {zip_dir} ...")
-    for zip_name in missing:
-      url = f"{BASE_URL}/{zip_name}"
-      zip_path = zip_dir / zip_name
-      download_file(url, zip_path, token)
-  else:
-    print(f"All {len(DERM1M_ZIPS)} zip archives present in {zip_dir}")
+    download_file(url, zip_path, token)
 
   # Extract all zips
   for zip_name in DERM1M_ZIPS:
