@@ -91,22 +91,60 @@ class _HFDataset:
 
 
 class _ImageFolderDataset:
-  """Wrapper around a local directory of images (one flat folder)."""
+  """Wrapper around a local ImageFolder directory of images."""
 
-  def __init__(self, root_dir, image_size=448, transform=None):
+  def __init__(self, root_dir, min_resolution=None, cache_dir=None):
     self.name = str(root_dir)
-    self.root_dir = Path(root_dir)
-    self._extensions = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"}
-    self._paths = sorted(
-        p for p in self.root_dir.iterdir()
-        if p.suffix.lower() in self._extensions) if self.root_dir.is_dir() else []
+    self.root_dir = root_dir
+    self.min_resolution = min_resolution
+    self.image_column = "image"
+    self._cache_dir = cache_dir
+    self._ds = None
+
+  def _load(self):
+    from datasets import load_dataset
+    logger.info(f"Loading ImageFolder '{self.root_dir}' ...")
+    try:
+      ds = load_dataset("imagefolder",
+                        data_dir=self.root_dir,
+                        split="train",
+                        cache_dir=self._cache_dir)
+    except Exception:
+      # No train split — fall back to whatever split exists.
+      try:
+        ds = load_dataset("imagefolder",
+                          data_dir=self.root_dir,
+                          cache_dir=self._cache_dir)
+        # If dict of splits, take the first one.
+        if isinstance(ds, dict):
+          ds = next(iter(ds.values()))
+      except Exception as exc:
+        logger.warning(f"  Failed to load '{self.root_dir}': {exc}")
+        return None
+    return ds
+
+  def _ensure_loaded(self):
+    if self._ds is None:
+      self._ds = self._load()
 
   def __len__(self):
-    return len(self._paths)
+    self._ensure_loaded()
+    if self._ds is None:
+      return 0
+    return len(self._ds)
 
   def __getitem__(self, idx):
-    path = self._paths[idx]
-    image = Image.open(path).convert("RGB")
+    self._ensure_loaded()
+    if self._ds is None:
+      raise IndexError(f"Dataset '{self.name}' failed to load")
+    row = self._ds[idx]
+    image = row[self.image_column]
+    if not isinstance(image, Image.Image):
+      image = Image.open(image)
+    image = image.convert("RGB")
+    if self.min_resolution is not None:
+      if image.width < self.min_resolution or image.height < self.min_resolution:
+        raise IndexError(f"Image too small: {image.size}, min={self.min_resolution}")
     return image
 
 
@@ -164,7 +202,9 @@ class DermoscopyEnsemble:
               min_resolution=cfg.get("min_resolution"),
           )
         elif source == "imagefolder":
-          ds = _ImageFolderDataset(root_dir=name)
+          ds = _ImageFolderDataset(root_dir=name,
+                                   min_resolution=cfg.get("min_resolution"),
+                                   cache_dir=self._cache_dir)
         else:
           logger.warning(f"Unknown source '{source}' for dataset '{name}', skipping")
           continue

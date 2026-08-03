@@ -9,27 +9,33 @@ from scdiag.datasets.ensemble import (
 )
 
 
+@pytest.fixture
+def hf_cache(tmp_path):
+  """Return a writable HF cache dir for tests."""
+  return str(tmp_path / "hf_cache")
+
+
 class TestImageFolderDataset:
 
-  def test_loads_images(self, tmp_path):
+  def test_loads_images(self, tmp_path, hf_cache):
     """Create a temporary directory with images and verify loading."""
     for i in range(5):
       img = Image.new("RGB", (64, 64), color=(i * 50, 100, 200))
       img.save(tmp_path / f"img_{i}.png")
-    ds = _ImageFolderDataset(str(tmp_path))
+    ds = _ImageFolderDataset(str(tmp_path), cache_dir=hf_cache)
     assert len(ds) == 5
     img = ds[0]
     assert isinstance(img, Image.Image)
     assert img.mode == "RGB"
 
-  def test_empty_dir(self, tmp_path):
-    ds = _ImageFolderDataset(str(tmp_path))
+  def test_empty_dir(self, tmp_path, hf_cache):
+    ds = _ImageFolderDataset(str(tmp_path), cache_dir=hf_cache)
     assert len(ds) == 0
 
 
 class TestDermoscopyEnsemble:
 
-  def test_imagefolder_ensemble(self, tmp_path):
+  def test_imagefolder_ensemble(self, tmp_path, hf_cache):
     """Ensemble of two local image directories."""
     dir_a = tmp_path / "dataset_a"
     dir_b = tmp_path / "dataset_b"
@@ -41,46 +47,63 @@ class TestDermoscopyEnsemble:
       Image.new("RGB", (64, 64), color=(200, 200, 200)).save(dir_b / f"{i}.png")
 
     configs = [
-        {"name": str(dir_a), "source": "imagefolder"},
-        {"name": str(dir_b), "source": "imagefolder"},
+        {
+            "name": str(dir_a),
+            "source": "imagefolder"
+        },
+        {
+            "name": str(dir_b),
+            "source": "imagefolder"
+        },
     ]
-    ensemble = DermoscopyEnsemble(configs)
+    ensemble = DermoscopyEnsemble(configs, cache_dir=hf_cache)
     assert len(ensemble) == 7
     assert ensemble.num_datasets == 2
 
     # Verify flat indexing crosses dataset boundaries
-    img_a = ensemble[2]   # last image in dir_a
-    img_b = ensemble[3]   # first image in dir_b
+    img_a = ensemble[2]  # last image in dir_a
+    img_b = ensemble[3]  # first image in dir_b
     assert isinstance(img_a, Image.Image)
     assert isinstance(img_b, Image.Image)
 
-  def test_summary(self, tmp_path):
+  def test_summary(self, tmp_path, hf_cache):
     d = tmp_path / "data"
     d.mkdir()
     for i in range(2):
       Image.new("RGB", (64, 64)).save(d / f"{i}.png")
-    ensemble = DermoscopyEnsemble([{"name": str(d), "source": "imagefolder"}])
+    ensemble = DermoscopyEnsemble([{
+        "name": str(d),
+        "source": "imagefolder"
+    }],
+                                  cache_dir=hf_cache)
     s = ensemble.summary()
     assert "2 images" in s
     assert "1 dataset" in s
 
-  def test_graceful_failure(self, tmp_path):
+  def test_graceful_failure(self, tmp_path, hf_cache):
     """Ensemble should skip datasets that fail to load."""
     configs = [
-        {"name": "/nonexistent/path", "source": "imagefolder"},
+        {
+            "name": "/nonexistent/path",
+            "source": "imagefolder"
+        },
     ]
-    ensemble = DermoscopyEnsemble(configs)
+    ensemble = DermoscopyEnsemble(configs, cache_dir=hf_cache)
     assert len(ensemble) == 0
 
   def test_empty_config(self):
     ensemble = DermoscopyEnsemble([])
     assert len(ensemble) == 0
 
-  def test_getitem_out_of_range(self, tmp_path):
+  def test_getitem_out_of_range(self, tmp_path, hf_cache):
     """Out-of-range index should fallback to index 0."""
     d = tmp_path / "data"
     d.mkdir()
     Image.new("RGB", (64, 64)).save(d / "img.png")
-    ensemble = DermoscopyEnsemble([{"name": str(d), "source": "imagefolder"}])
+    ensemble = DermoscopyEnsemble([{
+        "name": str(d),
+        "source": "imagefolder"
+    }],
+                                  cache_dir=hf_cache)
     img = ensemble[9999]  # out of range
     assert isinstance(img, Image.Image)
