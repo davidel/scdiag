@@ -44,9 +44,11 @@ self-supervised pre-training (SimMIM) on multi-source dermoscopy datasets.
 
 ### Self-Supervised Pre-Training (`scdiag-pretrain`)
 
-- **SimMIM masked image modelling** — self-supervised pre-training for ConvViT.
-  Masks 60% of patches, reconstructs raw pixel values via a lightweight MLP
-  decoder. No labels required.
+- **SimMIM masked image modelling** — self-supervised pre-training for any
+  registered scdiag model. Masks 60% of patches, reconstructs raw pixel
+  values via a lightweight MLP decoder. No labels required.
+- **Model-agnostic** — use `--model` to select any backbone registered in the
+  model registry (e.g. `convvit`, or any HuggingFace model ID).
 - **Multi-source dataset ensemble** — stitches together multiple HuggingFace
   datasets (e.g. HAM10000, ISIC challenges, Derm1M) into a single unified
   pre-training corpus with flat indexing and lazy loading.
@@ -154,10 +156,12 @@ momentum, LR schedule, and scaler history from the old run don't interfere.
 
 ## Pre-Training (SimMIM)
 
-Pre-train the ConvViT encoder on unlabeled dermoscopy images before fine-tuning:
+Pre-train any registered model's encoder on unlabeled dermoscopy images before
+fine-tuning:
 
 ```bash
-scdiag-pretrain --datasets HAM10000 "redlessone/Derm1M" \\
+scdiag-pretrain --model convvit \\
+                --datasets HAM10000 "redlessone/Derm1M" \\
                 --image_size 448 \\
                 --batch_size 32 \\
                 --epochs 200 \\
@@ -175,6 +179,7 @@ scdiag-train --model convvit \\
 
 | Argument | Default | Description |
 |---|---|---|
+| `--model` | `convvit` | Model name registered in scdiag (e.g. `convvit`) or HuggingFace model ID. |
 | `--datasets` | (required) | Space-separated dataset names or local paths. HuggingFace IDs or directories. |
 | `--image_size` | `448` | Input image size (square). |
 | `--mask_ratio` | `0.60` | Fraction of patches to mask. |
