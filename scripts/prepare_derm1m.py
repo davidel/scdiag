@@ -155,7 +155,7 @@ def main():
     print(f"    Done")
 
   # Walk the extracted directories and copy images into the output folder.
-  # Flatten everything into a single directory — _ImageFolderDataset only
+  # Flatten everything into a single directory — ImageFolderDataset only
   # scans root_dir.iterdir(), not subdirectories.
   image_count = 0
   for root, _dirs, files in os.walk(zip_dir):
