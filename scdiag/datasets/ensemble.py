@@ -14,8 +14,6 @@ from PIL import Image
 
 from scdiag.datasets.hf_proxy import HFDatasetProxy
 
-logger = logging.getLogger(__name__)
-
 # ---------------------------------------------------------------------------
 # Individual dataset back-ends
 # ---------------------------------------------------------------------------
@@ -41,15 +39,15 @@ class _HFDataset:
 
   def _load(self):
     from datasets import load_dataset
-    logger.info(f"Loading HF dataset '{self.name}' (split={self.split}) …")
+    logging.info(f"Loading HF dataset '{self.name}' (split={self.split}) …")
     try:
       ds = load_dataset(self.name,
                         split=self.split,
                         cache_dir=self.cache_dir,
                         token=self.hf_token)
     except Exception as exc:
-      logger.warning(f"  Failed to load '{self.name}': {exc}")
-      return None
+      logging.warning(f"  Failed to load '{self.name}': {exc}")
+    return None
     self._detect_and_normalize_image_column(ds)
     return ds
 
@@ -103,7 +101,7 @@ class _ImageFolderDataset:
 
   def _load(self):
     from datasets import load_dataset
-    logger.info(f"Loading ImageFolder '{self.root_dir}' ...")
+    logging.info(f"Loading ImageFolder '{self.root_dir}' ...")
     try:
       ds = load_dataset("imagefolder",
                         data_dir=self.root_dir,
@@ -119,7 +117,7 @@ class _ImageFolderDataset:
         if isinstance(ds, dict):
           ds = next(iter(ds.values()))
       except Exception as exc:
-        logger.warning(f"  Failed to load '{self.root_dir}': {exc}")
+        logging.warning(f"  Failed to load '{self.root_dir}': {exc}")
         return None
     return ds
 
@@ -206,17 +204,17 @@ class DermoscopyEnsemble:
                                    min_resolution=cfg.get("min_resolution"),
                                    cache_dir=self._cache_dir)
         else:
-          logger.warning(f"Unknown source '{source}' for dataset '{name}', skipping")
+          logging.warning(f"Unknown source '{source}' for dataset '{name}', skipping")
           continue
         # Probe length to verify the dataset loads
         n = len(ds)
         if n == 0:
-          logger.warning(f"Dataset '{name}' has 0 images, skipping")
+          logging.warning(f"Dataset '{name}' has 0 images, skipping")
           continue
-        logger.info(f"  + {name}: {n:,} images")
+        logging.info(f"  + {name}: {n:,} images")
         self._datasets.append(ds)
       except Exception as exc:
-        logger.warning(f"  Failed to initialize dataset '{name}': {exc}")
+        logging.warning(f"  Failed to initialize dataset '{name}': {exc}")
 
     # Build prefix-sum offsets for flat indexing
     self._rebuild_offsets()
@@ -246,7 +244,7 @@ class DermoscopyEnsemble:
       return self._datasets[ds_idx][local_idx]
     except IndexError:
       # Fallback: return first image from first dataset
-      logger.warning(f"Index {idx} out of range, falling back to index 0")
+      logging.warning(f"Index {idx} out of range, falling back to index 0")
       return self._datasets[0][0]
 
   @property
