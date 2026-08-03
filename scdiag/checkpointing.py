@@ -31,6 +31,35 @@ def parse_state_flags(flag_value: str) -> Set[str]:
   return tokens
 
 
+def checkpoint_dict(model,
+                    optimizer,
+                    scheduler,
+                    epoch,
+                    states_to_save=None,
+                    scaler=None,
+                    **extra):
+  """Build a standard checkpoint dict.
+
+  ``states_to_save`` is a set like ``{"opt", "sched", "amp"}``.
+  If ``None``, everything is saved (backward compat).
+  Any additional keyword arguments are merged into the dict as-is.
+  """
+  d = {
+      "model_state_dict": model.state_dict(),
+      "epoch": epoch,
+  }
+  if hasattr(model, "config") and hasattr(model.config, "id2label"):
+    d["id2label"] = model.config.id2label
+  if states_to_save is None or "opt" in states_to_save:
+    d["optimizer_state_dict"] = optimizer.state_dict()
+  if states_to_save is None or "sched" in states_to_save:
+    d["scheduler_state_dict"] = scheduler.state_dict()
+  if "amp" in states_to_save:
+    d["scaler_state_dict"] = (scaler.state_dict() if scaler is not None else None)
+  d.update(extra)
+  return d
+
+
 def filter_state_dict(ckpt_state, model_state):
   """Filter a checkpoint state dict to only include keys compatible with the model.
 

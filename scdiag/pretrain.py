@@ -30,9 +30,13 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import v2
 from torchvision.transforms.functional import InterpolationMode
 
-from scdiag.checkpointing import parse_state_flags, resume_checkpoint
+from scdiag.checkpointing import (
+    checkpoint_dict,
+    parse_state_flags,
+    resume_checkpoint,
+)
 from scdiag.datasets.ensemble import DermoscopyEnsemble
-from scdiag.gcs_utils import checkpoint_dict, save_checkpoint
+from scdiag.gcs_utils import save_checkpoint
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.logging_utils import setup_logging
 from scdiag.model_utils import DTYPE_MAP, get_backbone

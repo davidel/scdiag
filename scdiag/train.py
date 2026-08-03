@@ -22,13 +22,14 @@ from torchvision.transforms import v2
 from scdiag.models import load_model, load_processor
 
 from scdiag.checkpointing import (
+    checkpoint_dict,
     filter_state_dict,
     parse_state_flags,
     resume_checkpoint,
 )
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.logging_utils import setup_logging
-from scdiag.gcs_utils import save_checkpoint, checkpoint_dict
+from scdiag.gcs_utils import save_checkpoint
 from scdiag.model_utils import DTYPE_MAP
 
 from scdiag.datasets.hf_proxy import HFDatasetProxy
