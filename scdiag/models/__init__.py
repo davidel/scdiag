@@ -11,13 +11,22 @@ from scdiag.models.registry import (
     ModelOutput,
     is_custom_model,
     load_custom_model,
+    load_model,
+    load_processor,
     register_model,
+    register_processor,
 )
+
+# Import built-in custom models so their @register_model decorators run.
+import scdiag.models.convvit  # noqa: F401
 
 __all__ = [
     "REGISTRY",
     "ModelOutput",
     "is_custom_model",
     "load_custom_model",
+    "load_model",
+    "load_processor",
     "register_model",
+    "register_processor",
 ]

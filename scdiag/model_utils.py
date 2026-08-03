@@ -7,9 +7,8 @@ import torch
 from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 from torchvision.transforms.functional import InterpolationMode
-from transformers import AutoImageProcessor, AutoModelForImageClassification
 
-from scdiag.models import is_custom_model, load_custom_model
+from scdiag.models import load_model, load_processor
 
 DTYPE_MAP = {
     "float16": torch.float16,
@@ -25,8 +24,8 @@ def build_val_transform(processor, image_size):
       v2.ToImage(),
       v2.ToDtype(torch.float32, scale=True),
       v2.Normalize(
-          mean=processor.image_mean if hasattr(processor, "image_mean") else [0.485, 0.456, 0.406],
-          std=processor.image_std if hasattr(processor, "image_std") else [0.229, 0.224, 0.225],
+          mean=processor.image_mean,
+          std=processor.image_std,
       ),
   ])
 
@@ -36,93 +35,71 @@ def load_model_for_inference(
     checkpoint_path,
     device="cuda",
     cache_dir=None,
-  ):
+):
   """Load a fine-tuned model ready for inference.
 
-  Args:
-      model_name: HuggingFace model name or local path defining architecture,
-                  or a registered custom model name (e.g. "convvit").
-      checkpoint_path: Path to our .pt checkpoint containing model_state_dict.
-      device: Target device.
-      cache_dir: Optional HF cache directory.
+    Args:
+        model_name: HuggingFace model name or local path defining architecture,
+                    or a registered custom model name (e.g. "convvit").
+        checkpoint_path: Path to our .pt checkpoint containing model_state_dict.
+        device: Target device.
+        cache_dir: Optional HF cache directory.
 
-  Returns:
-      (model, processor) tuple.
-  """
+    Returns:
+        (model, processor) tuple.
+    """
+  import os
+
   ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-  state_dict = ckpt["model_state_dict"]
+  state_dict = ckpt.get("model_state_dict", ckpt)
 
-  # ------------------------------------------------------------------
-  # Custom models — delegate to the registry
-  # ------------------------------------------------------------------
-  if is_custom_model(model_name):
-    # Infer num_labels from a classifier head key, or fall back to
-    # a common head name used by custom models.
-    num_labels = None
-    for key in ("classifier.weight", "head.3.weight", "head.weight"):
-      if key in state_dict:
-        num_labels = state_dict[key].shape[0]
-        break
-    if num_labels is None:
-      raise ValueError(
-          "Cannot infer num_labels from checkpoint. "
-          f"Keys present: {list(state_dict.keys())[:10]}"
-      )
-
-    if "id2label" in ckpt:
-      id2label = ckpt["id2label"]
-      label2id = {v: k for k, v in id2label.items()}
-    else:
-      id2label = {str(i): f"LABEL_{i}" for i in range(num_labels)}
-      label2id = {f"LABEL_{i}": str(i) for i in range(num_labels)}
-      logging.warning(
-          "Checkpoint has no id2label — using generic labels."
-      )
-
-    model, processor = load_custom_model(
-        model_name,
-        num_labels=num_labels,
-        id2label=id2label,
-        label2id=label2id,
-        image_size=224,  # default; will be refined by processor
-        device=torch.device(device),
-        checkpoint_path=checkpoint_path,
-    )
-    model.eval()
-    return model, processor
-
-  # ------------------------------------------------------------------
-  # HuggingFace models (existing path)
-  # ------------------------------------------------------------------
   # Infer num_labels from the checkpoint's classifier head.
-  num_labels = state_dict["classifier.weight"].shape[0]
+  num_labels = None
+  for key in ("classifier.weight", "head.3.weight", "head.weight"):
+    if key in state_dict:
+      num_labels = state_dict[key].shape[0]
+      break
+  if num_labels is None:
+    raise ValueError("Cannot infer num_labels from checkpoint. "
+                     f"Keys present: {list(state_dict.keys())[:10]}")
 
-  processor = AutoImageProcessor.from_pretrained(
-      model_name, cache_dir=cache_dir
-  )
-  model = AutoModelForImageClassification.from_pretrained(
-      model_name, num_labels=num_labels, ignore_mismatched_sizes=True,
-      cache_dir=cache_dir
-  )
-  missing, unexpected = model.load_state_dict(state_dict, strict=False)
-  logging.info(
-      f"Loaded weights from {checkpoint_path}: "
-      f"{len(missing)} missing, {len(unexpected)} unexpected keys"
-  )
-
-  # Restore label mapping.  New checkpoints include id2label; old ones
-  # don't, so we generate generic LABEL_0..LABEL_N matching the classifier.
+  # Load id2label mapping from checkpoint if available.
+  id2label = None
+  label2id = None
   if "id2label" in ckpt:
-    model.config.id2label = ckpt["id2label"]
-    model.config.label2id = {v: k for k, v in ckpt["id2label"].items()}
-  else:
+    id2label = ckpt["id2label"]
+    label2id = {v: k for k, v in id2label.items()}
+
+  # Use the unified registry — it dispatches to HF or custom transparently.
+  model = load_model(
+      model_name,
+      num_labels=num_labels,
+      id2label=id2label,
+      label2id=label2id,
+      image_size=224,
+      device=torch.device(device),
+      checkpoint_path=checkpoint_path,
+      cache_dir=cache_dir,
+  )
+
+  # Restore label mapping if not provided via checkpoint.
+  if id2label is None:
     n = num_labels
     model.config.id2label = {str(i): f"LABEL_{i}" for i in range(n)}
     model.config.label2id = {f"LABEL_{i}": str(i) for i in range(n)}
     logging.warning(
         f"Checkpoint has no id2label — using generic LABEL_0..LABEL_{n - 1}. "
-        "Re-train with the updated code to get proper label names."
-    )
+        "Re-train with the updated code to get proper label names.")
+  else:
+    model.config.id2label = id2label
+    model.config.label2id = label2id
+
+  processor = load_processor(
+      model_name,
+      image_size=224,
+      cache_dir=cache_dir,
+  )
+
   model.to(device).eval()
   return model, processor
 
@@ -130,35 +107,39 @@ def load_model_for_inference(
 def extract_features(outputs):
   """Extract features from a HuggingFace model output.
 
-  If pooler_output is available (already pooled to [N, hidden_size]),
-  use it directly.  Otherwise, apply global average pooling to
-  last_hidden_state.
+    If pooler_output is available (already pooled to [N, hidden_size]),
+    use it directly.  Otherwise, apply global average pooling to
+    last_hidden_state.
 
-  Args:
-      outputs: Model output object (e.g. BaseModelOutputWithPoolingAndNoAttention).
+    Args:
+        outputs: Model output object (e.g. BaseModelOutputWithPoolingAndNoAttention).
 
-  Returns:
-      torch.Tensor of shape [N, hidden_size].
-  """
+    Returns:
+        torch.Tensor of shape [N, hidden_size].
+    """
   if outputs.pooler_output is not None:
     return outputs.pooler_output
   return outputs.last_hidden_state.mean([-2, -1])
 
 
 def extract_backbone_features(model, pixel_values):
-  """Extract features from any model using a uniform interface.
+  """Extract features from the penultimate layer via a forward hook.
 
-  Priority:
-    1. ``model.extract_backbone_features(pixel_values)`` — protocol method
-       used by custom models (and recommended for new HF wrappers).
-    2. Hook-based extraction — registers a temporary forward hook on the
-       classifier head to capture the exact pooled feature vector the
-       model uses for classification.  Works for any HF
-       ``AutoModelForImageClassification`` regardless of architecture.
+    Supports any model that has a ``.classifier`` attribute (common for HF
+    image classifiers and custom wrappers that follow the same convention).
 
-  Returns a ``torch.Tensor`` of shape ``[B, hidden_size]``.
-  """
-  # 1. Protocol method (custom models).
+    1. If the model provides an ``extract_backbone_features(pixel_values)``
+       method (the scdiag protocol), delegate to it.
+    2. Otherwise, attach a one-shot forward-hook to ``model.classifier``
+       to capture the input features just before the classification head.
+
+    The hook is removed after extraction to avoid side-effects.
+
+    Raises:
+        ValueError: if no ``classifier`` attribute is found and the model
+                    does not implement the protocol method.
+    """
+  # Protocol method — custom models and explicitly wrapped HF models.
   if hasattr(model, "extract_backbone_features"):
     out = model.extract_backbone_features(pixel_values)
     if isinstance(out, torch.Tensor):
@@ -170,19 +151,11 @@ def extract_backbone_features(model, pixel_values):
       return last.mean(dim=(2, 3)) if last.ndim == 4 else last
     return extract_features(out)
 
-  # 2. Hook-based: capture the classifier head's input.
+  # Fallback: hook-based extraction via ``model.classifier``.
   classifier = getattr(model, "classifier", None)
   if classifier is None:
-    # Fallback: last child is typically the classification head.
-    children = list(model.children())
-    if children:
-      classifier = children[-1]
-
-  if classifier is None:
-    raise ValueError(
-        "Cannot find a classifier head on this model. "
-        "Implement extract_backbone_features() on the model wrapper."
-    )
+    raise ValueError("Cannot find a classifier head on this model. "
+                     "Implement extract_backbone_features() on the model wrapper.")
 
   captured = []
 
@@ -198,24 +171,24 @@ def extract_backbone_features(model, pixel_values):
   if not captured:
     raise ValueError(
         "Hook did not capture any features. "
-        "The classifier head may not receive a tensor input."
-    )
+        "Ensure the model has a classifier head that is called during forward().")
+
   return captured[0]
 
 
 def collect_features(model, dataset, device, batch_size=128):
   """Extract backbone features for all samples in a dataset.
 
-  Args:
-      model: Any model (HF or custom) in eval mode, on device.
-      dataset: HFDatasetProxy (already has transform applied).
-      device: torch device.
-      batch_size: batch size for feature extraction (default 128).
+    Args:
+        model: Any model (HF or custom) in eval mode, on device.
+        dataset: HFDatasetProxy (already has transform applied).
+        device: torch device.
+        batch_size: batch size for feature extraction (default 128).
 
-  Returns:
-      features: np.ndarray of shape [N, hidden_size], dtype float32.
-      labels: np.ndarray of shape [N], dtype int64.
-  """
+    Returns:
+        features: np.ndarray of shape [N, hidden_size], dtype float32.
+        labels: np.ndarray of shape [N], dtype int64.
+    """
   model.eval()
   loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 

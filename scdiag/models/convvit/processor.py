@@ -64,6 +64,16 @@ class ConvViTProcessor:
     return self._transform(images).unsqueeze(0)
 
   @property
+  def image_mean(self):
+    """HF-compatible normalization mean."""
+    return list(self.mean)
+
+  @property
+  def image_std(self):
+    """HF-compatible normalization std."""
+    return list(self.std)
+
+  @property
   def size(self):
     """Return processor resolution as a dict (HF compatibility)."""
     return {"height": self.image_size, "width": self.image_size}

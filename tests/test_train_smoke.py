@@ -24,9 +24,7 @@ class TinyModel(torch.nn.Module):
   def __init__(self, num_labels=3):
     super().__init__()
     self.fc = torch.nn.Linear(3 * 64 * 64, num_labels)
-    self.config = MockConfig(
-        id2label={str(i): f"class_{i}" for i in range(num_labels)}
-    )
+    self.config = MockConfig(id2label={str(i): f"class_{i}" for i in range(num_labels)})
 
   def forward(self, pixel_values, **kwargs):
     return LogitsOutput(logits=self.fc(pixel_values.flatten(1)))
@@ -42,6 +40,7 @@ class TinyProcessor:
     import torchvision.transforms.functional as F
     import numpy as np
     from PIL import Image as PILImage
+
     if isinstance(image, torch.Tensor):
       image = PILImage.fromarray(
           (image.permute(1, 2, 0).numpy() * 255).astype(np.uint8))
@@ -88,17 +87,20 @@ def test_train_smoke(tmp_path):
       "WARNING",
   ]
 
-  with patch("sys.argv", test_args), \
-       patch("scdiag.train.load_dataset", return_value=ds), \
-       patch(
-           "scdiag.train.AutoImageProcessor.from_pretrained",
-           return_value=TinyProcessor(),
-       ), \
-       patch(
-           "scdiag.train.AutoModelForImageClassification.from_pretrained",
-           return_value=TinyModel(num_labels=3),
-       ):
+  with (
+      patch("sys.argv", test_args),
+      patch("scdiag.train.load_dataset", return_value=ds),
+      patch(
+          "scdiag.train.load_processor",
+          return_value=TinyProcessor(),
+      ),
+      patch(
+          "scdiag.train.load_model",
+          return_value=TinyModel(num_labels=3),
+      ),
+  ):
     from scdiag.train import main
+
     main()
 
   latest = ckpt_base + "_latest.pt"

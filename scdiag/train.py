@@ -18,9 +18,8 @@ from sklearn.metrics import f1_score, precision_recall_fscore_support
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import v2
-from transformers import AutoImageProcessor, AutoModelForImageClassification
 
-from scdiag.models import is_custom_model, load_custom_model
+from scdiag.models import load_model, load_processor
 
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.logging_utils import setup_logging
@@ -39,12 +38,12 @@ _VALID_STATE_FLAGS = {"opt", "sched", "amp", "none"}
 def parse_class_multipliers(s, num_labels, label2id):
   """Parse a ``--class_multipliers`` string into a ``[num_labels]`` tensor.
 
-  *s* is a comma-separated string of ``NAME=VALUE`` pairs where *NAME* is
-  a label string (e.g. ``melanoma``) or an integer label index and *VALUE*
-  is a float multiplier.  Unspecified classes default to ``1.0``.
+    *s* is a comma-separated string of ``NAME=VALUE`` pairs where *NAME* is
+    a label string (e.g. ``melanoma``) or an integer label index and *VALUE*
+    is a float multiplier.  Unspecified classes default to ``1.0``.
 
-  Returns a ``torch.Tensor`` of shape ``[num_labels]``.
-  """
+    Returns a ``torch.Tensor`` of shape ``[num_labels]``.
+    """
   import torch
 
   m = torch.ones(num_labels)
@@ -75,53 +74,53 @@ def parse_class_multipliers(s, num_labels, label2id):
 class CombinedFocalLoss(nn.Module):
   """Cost-sensitive focal loss for multi-class classification.
 
-  Combines inverse-frequency weights, clinical severity multipliers,
-  and focal loss modulation into a single loss function.
+    Combines inverse-frequency weights, clinical severity multipliers,
+    and focal loss modulation into a single loss function.
 
-  Builds on PyTorch's numerically stable cross-entropy implementation
-  (log-sum-exp trick) rather than reimplementing log_softmax manually.
-  """
+    Builds on PyTorch's numerically stable cross-entropy implementation
+    (log-sum-exp trick) rather than reimplementing log_softmax manually.
+    """
 
-  def __init__(self, weights, gamma=2.0, label_smoothing=0.0, reduction='mean'):
+  def __init__(self, weights, gamma=2.0, label_smoothing=0.0, reduction="mean"):
     """
-    Args:
-        weights: [num_classes] W_final = W_freq x M_c, pre-computed at
-                 construction time (constant per class, not per-batch).
-        gamma: Focal loss focusing parameter (higher = more focus on
-               hard examples).  0.0 disables focal modulation and reduces
-               to standard weighted cross-entropy.
-        label_smoothing: Label smoothing factor (0.0 = disabled).
-                         Passed through to F.cross_entropy.
-        reduction: 'mean', 'sum', or 'none'.
-    """
+        Args:
+            weights: [num_classes] W_final = W_freq x M_c, pre-computed at
+                     construction time (constant per class, not per-batch).
+            gamma: Focal loss focusing parameter (higher = more focus on
+                   hard examples).  0.0 disables focal modulation and reduces
+                   to standard weighted cross-entropy.
+            label_smoothing: Label smoothing factor (0.0 = disabled).
+                             Passed through to F.cross_entropy.
+            reduction: 'mean', 'sum', or 'none'.
+        """
     super().__init__()
-    self.register_buffer('weights', weights)
+    self.register_buffer("weights", weights)
     self.gamma = gamma
     self.label_smoothing = label_smoothing
     self.reduction = reduction
 
   def forward(self, inputs, targets):
     """
-    Args:
-        inputs: [batch_size, num_classes] raw logits
-        targets: [batch_size] ground truth class indices
-    Returns:
-        Scalar loss (or per-sample losses if reduction='none').
-    """
+        Args:
+            inputs: [batch_size, num_classes] raw logits
+            targets: [batch_size] ground truth class indices
+        Returns:
+            Scalar loss (or per-sample losses if reduction='none').
+        """
     # Use PyTorch's numerically stable CE with reduction='none'.
     ce_loss = nn.functional.cross_entropy(
         inputs,
         targets,
         weight=self.weights,
         label_smoothing=self.label_smoothing,
-        reduction='none',
+        reduction="none",
     )
 
     if self.gamma == 0:
       # No focal modulation — standard weighted CE.
-      if self.reduction == 'mean':
+      if self.reduction == "mean":
         return ce_loss.mean()
-      elif self.reduction == 'sum':
+      elif self.reduction == "sum":
         return ce_loss.sum()
       return ce_loss
 
@@ -134,9 +133,9 @@ class CombinedFocalLoss(nn.Module):
 
     loss = focal_weight * ce_loss
 
-    if self.reduction == 'mean':
+    if self.reduction == "mean":
       return loss.mean()
-    elif self.reduction == 'sum':
+    elif self.reduction == "sum":
       return loss.sum()
     return loss
 
@@ -144,18 +143,21 @@ class CombinedFocalLoss(nn.Module):
 def filter_state_dict(ckpt_state, model_state):
   """Filter a checkpoint state dict to only include keys compatible with the model.
 
-  Skips keys whose tensor shape differs between checkpoint and model.
-  Returns ``(filtered_state, skipped)`` where *skipped* is a list of
-  ``(key, reason)`` tuples describing why each key was dropped.
-  """
+    Skips keys whose tensor shape differs between checkpoint and model.
+    Returns ``(filtered_state, skipped)`` where *skipped* is a list of
+    ``(key, reason)`` tuples describing why each key was dropped.
+    """
   filtered = {}
   skipped = []
   for k, v in ckpt_state.items():
     if k not in model_state:
       skipped.append((k, "missing in model"))
     elif v.shape != model_state[k].shape:
-      skipped.append((k, f"shape mismatch: checkpoint {list(v.shape)} "
-                      f"vs model {list(model_state[k].shape)}"))
+      skipped.append((
+          k,
+          f"shape mismatch: checkpoint {list(v.shape)} "
+          f"vs model {list(model_state[k].shape)}",
+      ))
     else:
       filtered[k] = v
   return filtered, skipped
@@ -164,10 +166,10 @@ def filter_state_dict(ckpt_state, model_state):
 def parse_state_flags(flag_value):
   """Parse a comma-separated state flag string into a set of tokens.
 
-  Returns a set like ``{"opt", "sched", "amp"}``.
-  If the string contains ``"none"``, returns an empty set.
-  Raises ValueError on invalid tokens or empty input.
-  """
+    Returns a set like ``{"opt", "sched", "amp"}``.
+    If the string contains ``"none"``, returns an empty set.
+    Raises ValueError on invalid tokens or empty input.
+    """
   tokens = {t.strip().lower() for t in flag_value.split(",")}
   if not tokens:
     raise ValueError("state flag string must not be empty")
@@ -183,13 +185,13 @@ def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scale
                       device, states_to_load):
   """Resume training state from an existing checkpoint.
 
-  Looks for *ckpt_latest* first, then *ckpt_best*.  Restores model weights
-  (filtering out shape-mismatched keys), and conditionally restores
-  optimizer, scheduler, and GradScaler states depending on
-  *states_to_load*.
+    Looks for *ckpt_latest* first, then *ckpt_best*.  Restores model weights
+    (filtering out shape-mismatched keys), and conditionally restores
+    optimizer, scheduler, and GradScaler states depending on
+    *states_to_load*.
 
-  Returns ``(start_epoch, best_top1)``.
-  """
+    Returns ``(start_epoch, best_top1)``.
+    """
   resume_path = None
   if os.path.exists(ckpt_latest):
     resume_path = ckpt_latest
@@ -257,20 +259,20 @@ def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scale
 def load_augmentation_script(path_or_url):
   """Load a Python script and return its ``create_train_transform`` callable.
 
-  The script must define a ``create_train_transform(image_size, **kwargs)``
-  function that returns a list of ``torchvision.transforms.v2`` transforms.
+    The script must define a ``create_train_transform(image_size, **kwargs)``
+    function that returns a list of ``torchvision.transforms.v2`` transforms.
 
-  Args:
-      path_or_url: Local file path or HTTP/HTTPS URL to the script.
+    Args:
+        path_or_url: Local file path or HTTP/HTTPS URL to the script.
 
-  Returns:
-      The ``create_train_transform`` callable.
+    Returns:
+        The ``create_train_transform`` callable.
 
-  Raises:
-      FileNotFoundError: If a local path does not exist.
-      ValueError: If the script does not define a callable
-          ``create_train_transform``.
-  """
+    Raises:
+        FileNotFoundError: If a local path does not exist.
+        ValueError: If the script does not define a callable
+            ``create_train_transform``.
+    """
   namespace = {}
 
   if path_or_url.startswith(("http://", "https://")):
@@ -663,12 +665,12 @@ def parse_args(argv=None):
 def train_xgboost_on_backbone(args, train_ds, val_ds, device):
   """Train XGBoost on backbone features after PyTorch training completes.
 
-  Args:
-      args: Parsed CLI args (contains xgb_* hyperparameters, checkpoint paths, etc.)
-      train_ds: Training HF Dataset (raw, before proxy wrapping).
-      val_ds: Validation HF Dataset (raw, before proxy wrapping).
-      device: torch device.
-  """
+    Args:
+        args: Parsed CLI args (contains xgb_* hyperparameters, checkpoint paths, etc.)
+        train_ds: Training HF Dataset (raw, before proxy wrapping).
+        val_ds: Validation HF Dataset (raw, before proxy wrapping).
+        device: torch device.
+    """
   from scdiag.model_utils import (
       build_val_transform,
       collect_features,
@@ -691,8 +693,12 @@ def train_xgboost_on_backbone(args, train_ds, val_ds, device):
   model_best = model_best.to(device)
 
   # 2. Rebuild train and val datasets with val transforms (not train augs)
-  processor = AutoImageProcessor.from_pretrained(args.model)
-  val_transform = build_val_transform(processor, args.image_size)
+  xgb_processor = load_processor(
+      args.model,
+      image_size=args.image_size,
+      cache_dir=args.cache_dir,
+  )
+  val_transform = build_val_transform(xgb_processor, args.image_size)
   train_proxy = HFDatasetProxy(train_ds, transform=val_transform)
   val_proxy = HFDatasetProxy(val_ds, transform=val_transform)
 
@@ -743,10 +749,10 @@ def train_xgboost_on_backbone(args, train_ds, val_ds, device):
 def mixup_data(x, y, alpha=0.2):
   """Apply Mixup to a batch: returns mixed images, and two label sets + lambda.
 
-  Returns ``(mixed_x, y_a, y_b, lam)`` where ``lam`` is the interpolation
-  coefficient sampled from ``Beta(alpha, alpha)``.  When ``alpha <= 0`` the
-  function is a no-op and returns the originals unchanged.
-  """
+    Returns ``(mixed_x, y_a, y_b, lam)`` where ``lam`` is the interpolation
+    coefficient sampled from ``Beta(alpha, alpha)``.  When ``alpha <= 0`` the
+    function is a no-op and returns the originals unchanged.
+    """
   if alpha <= 0:
     return x, y, y, 1.0
   lam = np.random.beta(alpha, alpha)
@@ -804,8 +810,8 @@ def train_one_epoch(
       outputs = model(pixel_values=images)
       logits = outputs.logits
       if use_mixup:
-        loss = (lam * criterion(logits, targets_a) +
-                (1.0 - lam) * criterion(logits, targets_b))
+        loss = lam * criterion(logits, targets_a) + (1.0 - lam) * criterion(
+            logits, targets_b)
         loss = loss / args.grad_accum_steps
       else:
         loss = criterion(logits, targets) / args.grad_accum_steps
@@ -828,8 +834,8 @@ def train_one_epoch(
       optimizer.zero_grad(set_to_none=True)
 
     with torch.no_grad():
-      orig_targets = targets if not use_mixup else (
-          targets_a if lam >= 0.5 else targets_b)
+      orig_targets = (targets if not use_mixup else
+                      (targets_a if lam >= 0.5 else targets_b))
       correct_top1 += (logits.argmax(dim=1) == orig_targets).sum().item()
 
     batch_size = orig_targets.size(0)
@@ -853,8 +859,9 @@ def train_one_epoch(
       # Compute window macro F1.
       w_macro_f1 = 0.0
       if window_preds:
-        w_macro_f1 = f1_score(
-            window_labels, window_preds, average="macro", zero_division=0) * 100.0
+        w_macro_f1 = (
+            f1_score(window_labels, window_preds, average="macro", zero_division=0) *
+            100.0)
 
       avg_loss = total_loss / total_samples
       top1 = (correct_top1 / total_samples) * 100.0
@@ -974,12 +981,12 @@ def main():
   os.makedirs(log_dir, exist_ok=True)
   writer = SummaryWriter(log_dir=log_dir)
 
-  # Load processor — defer to after model construction for custom models.
-  custom_model_flag = is_custom_model(args.model)
-  processor = None
-
-  if not custom_model_flag:
-    processor = AutoImageProcessor.from_pretrained(args.model, cache_dir=args.cache_dir)
+  # Load processor — unified registry dispatches to HF or custom.
+  processor = load_processor(
+      args.model,
+      image_size=args.image_size,
+      cache_dir=args.cache_dir,
+  )
 
   # Resolve custom augmentation script to a callable, if provided.
   train_aug_fn = None
@@ -1037,26 +1044,16 @@ def main():
       pin_memory=(device.type == "cuda"),
   )
 
-  if custom_model_flag:
-    model, processor = load_custom_model(
-        args.model,
-        num_labels=num_labels,
-        id2label=train_proxy.id2label,
-        label2id=train_proxy.label2id,
-        image_size=args.image_size,
-        device=device,
-        checkpoint_path=args.checkpoint,
-    )
-  else:
-    model = AutoModelForImageClassification.from_pretrained(
-        args.model,
-        num_labels=num_labels,
-        id2label=train_proxy.id2label,
-        label2id=train_proxy.label2id,
-        ignore_mismatched_sizes=True,
-        cache_dir=args.cache_dir,
-    )
-    model.to(device)
+  model = load_model(
+      args.model,
+      num_labels=num_labels,
+      id2label=train_proxy.id2label,
+      label2id=train_proxy.label2id,
+      image_size=args.image_size,
+      device=device,
+      checkpoint_path=args.checkpoint,
+      cache_dir=args.cache_dir,
+  )
 
   total_params = sum(p.numel() for p in model.parameters())
   trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -1067,7 +1064,10 @@ def main():
     logging.warning(
         "Both --focal_gamma (%.1f) and --label_smoothing (%.2f) are > 0. "
         "Focal loss and label smoothing conflict. Proceeding anyway — "
-        "monitor for instability.", args.focal_gamma, args.label_smoothing)
+        "monitor for instability.",
+        args.focal_gamma,
+        args.label_smoothing,
+    )
 
   criterion = CombinedFocalLoss(
       weights=class_weights,

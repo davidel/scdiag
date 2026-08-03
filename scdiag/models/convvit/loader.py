@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import torch
 import torch.nn as nn
 
-from scdiag.models.registry import ModelOutput, register_model
+from scdiag.models.registry import ModelOutput, register_model, register_processor
 from scdiag.models.convvit.model import CustomPatchTransformer
 from scdiag.models.convvit.processor import ConvViTProcessor
 
@@ -75,7 +75,7 @@ def load_convvit(
     checkpoint_path=None,
     **kwargs,
 ):
-  """Instantiate ConvViT + processor and return (model, processor).
+  """Instantiate ConvViT model.
 
     Parameters
     ----------
@@ -153,11 +153,15 @@ def load_convvit(
   wrapped = ConvViTForClassification(model, config)
   wrapped.to(device)
 
-  processor = ConvViTProcessor(image_size=image_size)
-
   logging.info(
       "ConvViT ready — params: %.1fM",
       sum(p.numel() for p in wrapped.parameters()) / 1e6,
   )
 
-  return wrapped, processor
+  return wrapped
+
+
+@register_processor("convvit")
+def load_convvit_processor(*, image_size=224, **kwargs):
+  """Return a ConvViTProcessor for the given *image_size*."""
+  return ConvViTProcessor(image_size=image_size)
