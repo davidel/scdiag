@@ -21,12 +21,13 @@ from torchvision.transforms import v2
 
 from scdiag.models import load_model, load_processor
 
+from scdiag.checkpointing import filter_state_dict, resume_checkpoint
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.logging_utils import setup_logging
 from scdiag.gcs_utils import save_checkpoint, checkpoint_dict
 from scdiag.model_utils import DTYPE_MAP
 
-from scdiag.hf_proxy import HFDatasetProxy
+from scdiag.datasets.hf_proxy import HFDatasetProxy
 
 _VALID_STATE_FLAGS = {"opt", "sched", "amp", "none"}
 
@@ -140,28 +141,6 @@ class CombinedFocalLoss(nn.Module):
     return loss
 
 
-def filter_state_dict(ckpt_state, model_state):
-  """Filter a checkpoint state dict to only include keys compatible with the model.
-
-    Skips keys whose tensor shape differs between checkpoint and model.
-    Returns ``(filtered_state, skipped)`` where *skipped* is a list of
-    ``(key, reason)`` tuples describing why each key was dropped.
-    """
-  filtered = {}
-  skipped = []
-  for k, v in ckpt_state.items():
-    if k not in model_state:
-      skipped.append((k, "missing in model"))
-    elif v.shape != model_state[k].shape:
-      skipped.append((
-          k,
-          f"shape mismatch: checkpoint {list(v.shape)} "
-          f"vs model {list(model_state[k].shape)}",
-      ))
-    else:
-      filtered[k] = v
-  return filtered, skipped
-
 
 def parse_state_flags(flag_value):
   """Parse a comma-separated state flag string into a set of tokens.
@@ -180,80 +159,6 @@ def parse_state_flags(flag_value):
     return set()
   return tokens
 
-
-def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scaler,
-                      device, states_to_load):
-  """Resume training state from an existing checkpoint.
-
-    Looks for *ckpt_latest* first, then *ckpt_best*.  Restores model weights
-    (filtering out shape-mismatched keys), and conditionally restores
-    optimizer, scheduler, and GradScaler states depending on
-    *states_to_load*.
-
-    Returns ``(start_epoch, best_top1)``.
-    """
-  resume_path = None
-  if os.path.exists(ckpt_latest):
-    resume_path = ckpt_latest
-  elif os.path.exists(ckpt_best):
-    resume_path = ckpt_best
-
-  if not resume_path:
-    return 0, 0.0
-
-  logging.info(f"Resuming from checkpoint: {resume_path}")
-  ckpt = torch.load(resume_path, map_location=device, weights_only=False)
-  logging.info(f"  Checkpoint keys: {list(ckpt.keys())}")
-
-  # Filter checkpoint to skip keys with shape mismatches
-  # (e.g. classifier head when resuming with different num_classes).
-  filtered, skipped = filter_state_dict(
-      ckpt["model_state_dict"],
-      model.state_dict(),
-  )
-  if skipped:
-    for k, reason in skipped:
-      logging.warning(f"  Skipped key '{k}': {reason}")
-
-  result = model.load_state_dict(filtered, strict=False)
-  logging.info("  Restored model weights")
-  if result.missing_keys:
-    logging.warning(f"  Missing keys (randomly initialized): "
-                    f"{result.missing_keys}")
-  if result.unexpected_keys:
-    logging.warning(f"  Unexpected keys (ignored): "
-                    f"{result.unexpected_keys}")
-
-  if "opt" in states_to_load and "optimizer_state_dict" in ckpt:
-    if skipped:
-      logging.warning("  Skipped optimizer restore (model architecture changed)")
-    else:
-      optimizer.load_state_dict(ckpt["optimizer_state_dict"])
-      logging.info("  Restored optimizer state")
-  else:
-    logging.info("  Skipped optimizer state")
-
-  if "sched" in states_to_load and "scheduler_state_dict" in ckpt:
-    if skipped:
-      logging.warning("  Skipped scheduler restore (model architecture changed)")
-    else:
-      scheduler.load_state_dict(ckpt["scheduler_state_dict"])
-      logging.info("  Restored scheduler state")
-  else:
-    logging.info("  Skipped scheduler state")
-
-  if "amp" in states_to_load:
-    scaler_dict = ckpt.get("scaler_state_dict")
-    if scaler_dict is not None and scaler is not None:
-      scaler.load_state_dict(scaler_dict)
-      logging.info("  Restored GradScaler state")
-    else:
-      logging.info("  Skipped GradScaler state")
-
-  start_epoch = ckpt.get("epoch", -1) + 1
-  best_top1 = ckpt.get("best_top1", 0.0)
-  logging.info(f"  Resumed at epoch {start_epoch}, best_top1={best_top1:.2f}%")
-  return start_epoch, best_top1
 
 
 def load_augmentation_script(path_or_url):
@@ -423,27 +328,27 @@ def compute_class_weights(train_dataset, num_labels):
 
 def parse_args(argv=None):
   parser = argparse.ArgumentParser(
-      description="Fine-tune a HuggingFace image-classification model.")
+      description="Fine-tune a HuggingFace image-classification model.",
+      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
   parser.add_argument(
       "--model",
       type=str,
       default="google/vit-base-patch16-224",
-      help="HuggingFace model name or path (default: "
-      "%(default)s)",
+      help="HuggingFace model name or path.",
   )
   parser.add_argument(
       "--dataset",
       type=str,
       default="marmal88/skin_cancer",
       help=
-      "HuggingFace dataset name, or 'imagefolder/PATH' for local ImageFolder datasets (default: %(default)s)",
+      "HuggingFace dataset name, or 'imagefolder/PATH' for local ImageFolder datasets.",
   )
   parser.add_argument(
       "--image_size",
       type=int,
       default=448,
-      help="Resize images to this size (default: %(default)s)",
+      help="Resize images to this size.",
   )
   parser.add_argument(
       "--train_augmentation_script",
@@ -458,42 +363,42 @@ def parse_args(argv=None):
       "--epochs",
       type=int,
       default=5,
-      help="Number of training epochs (default: %(default)s)",
+      help="Number of training epochs.",
   )
   parser.add_argument("--batch_size",
                       type=int,
                       default=32,
-                      help="Batch size (default: %(default)s)")
+                      help="Batch size.")
   parser.add_argument(
       "--lr",
       type=float,
       default=3e-5,
-      help="Peak learning rate (default: %(default)s)",
+      help="Peak learning rate.",
   )
   parser.add_argument(
       "--weight_decay",
       type=float,
       default=0.01,
-      help="Weight decay (default: %(default)s)",
+      help="Weight decay.",
   )
   parser.add_argument(
       "--warmup_epochs",
       type=int,
       default=2,
-      help="Linear warmup epochs (default: %(default)s)",
+      help="Linear warmup epochs.",
   )
   parser.add_argument(
       "--label_smoothing",
       type=float,
       default=0.0,
-      help="Label smoothing (default: %(default)s)",
+      help="Label smoothing.",
   )
   parser.add_argument(
       "--focal_gamma",
       type=float,
       default=0.0,
-      help="Focal loss gamma (default: %(default)s). "
-      "0.0 disables focal modulation (standard weighted CE).",
+      help="Focal loss gamma. 0.0 disables focal modulation "
+      "(standard weighted CE).",
   )
   parser.add_argument(
       "--class_multipliers",
@@ -503,22 +408,21 @@ def parse_args(argv=None):
       "clinical severity multipliers (M_c). NAME is a label string "
       "(e.g. melanoma) or integer label index. VALUE is a float. "
       "Unspecified classes default to 1.0. Example: "
-      "'melanoma=4.0,melanocytic_Nevi=0.5' (default: \"\")",
+      "'melanoma=4.0,melanocytic_Nevi=0.5'.",
   )
   parser.add_argument(
       "--grad_accum_steps",
       type=int,
       default=1,
-      help="Gradient accumulation steps (default: %(default)s)",
+      help="Gradient accumulation steps.",
   )
   parser.add_argument(
       "--amp_dtype",
       type=str,
       default=None,
       choices=["float16", "bfloat16"],
-      help="AMP dtype for mixed precision (default: None = "
-      "disabled). float16 requires GradScaler; bfloat16 "
-      "is recommended for Ampere+ GPUs.",
+      help="AMP dtype for mixed precision. float16 requires "
+      "GradScaler; bfloat16 is recommended for Ampere+ GPUs.",
   )
 
   parser.add_argument(
@@ -526,137 +430,141 @@ def parse_args(argv=None):
       type=str,
       default="scdiag",
       help="Base path for checkpoints. '_latest.pt' and "
-      "'_best.pt' are appended automatically "
-      "(default: %(default)s)",
+      "'_best.pt' are appended automatically.",
   )
 
   parser.add_argument(
       "--log_dir",
       type=str,
       default=None,
-      help="TensorBoard log directory (default: "
-      "<dir_of_latest_ckpt>/logs)",
+      help="TensorBoard log directory. Defaults to "
+      "<dir_of_latest_ckpt>/logs.",
   )
   parser.add_argument(
       "--log_every",
       type=int,
       default=20,
-      help="Log every N steps (default: %(default)s)",
+      help="Log every N steps.",
   )
   parser.add_argument(
       "--save_every",
       type=int,
       default=500,
-      help="Save checkpoint every N steps "
-      "(default: %(default)s)",
+      help="Save checkpoint every N steps.",
   )
   parser.add_argument(
       "--num_workers",
       type=int,
       default=2,
-      help="DataLoader worker processes (default: %(default)s)",
+      help="DataLoader worker processes.",
   )
   parser.add_argument(
       "--log_level",
       type=str,
       default="INFO",
       choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-      help="Minimum logging level (default: %(default)s)",
+      help="Minimum logging level.",
   )
 
   parser.add_argument(
       "--state_save",
       type=str,
       default="opt,sched,amp",
-      help="Comma-separated list of states to save in checkpoints. "
-      "One or more of: opt, sched, amp, none (default: %(default)s)",
+      help="Comma-separated list of states to save in "
+      "checkpoints. One or more of: opt, sched, amp, none.",
   )
   parser.add_argument(
       "--state_load",
       type=str,
       default="opt,sched,amp",
       help="Comma-separated list of states to restore from checkpoint "
-      "on resume. One or more of: opt, sched, amp, none "
-      "(default: %(default)s)",
+      "on resume. One or more of: opt, sched, amp, none.",
   )
 
   parser.add_argument(
       "--mixup_alpha",
       type=float,
       default=0.0,
-      help="Mixup alpha (default: 0.0 = disabled). "
-      "Recommended: 0.2 for skin lesion classification",
+      help="Mixup alpha. Recommended: 0.2 for skin lesion classification.",
   )
 
   parser.add_argument(
       "--cache_dir",
       type=str,
       default=None,
-      help="Cache directory for downloaded datasets",
+      help="Cache directory for downloaded datasets.",
   )
+  parser.add_argument(
+      "--pretrained_encoder",
+      type=str,
+      default=None,
+      help="Path to a SimMIM pre-training checkpoint. Encoder weights are "
+      "loaded (with shape-mismatched keys skipped) before training starts. "
+      "Typically produced by scdiag-pretrain.",
+  )
+
   parser.add_argument(
       "--gcs_checkpoint",
       type=str,
       default=None,
       help="GCS URI to sync checkpoints to "
-      "(format: gs://BUCKET/PREFIX)",
+      "(format: gs://BUCKET/PREFIX).",
   )
 
-  # XGBoost
-  g = parser.add_argument_group("xgboost")
-  g.add_argument(
+  xgb_group = parser.add_argument_group("xgboost")
+  xgb_group.add_argument(
       "--xgboost_model",
       default=None,
       help="Output path for XGBoost model. If set, train XGBoost on "
-      "backbone features after training completes (default: disabled)",
+      "backbone features after training completes.",
   )
-  g.add_argument(
+  xgb_group.add_argument(
       "--xgb_max_depth",
       type=int,
       default=6,
-      help="XGBoost max tree depth (default: %(default)s)",
+      help="XGBoost max tree depth.",
   )
-  g.add_argument(
+  xgb_group.add_argument(
       "--xgb_n_estimators",
       type=int,
       default=200,
-      help="XGBoost number of trees (default: %(default)s)",
+      help="XGBoost number of trees.",
   )
-  g.add_argument(
+  xgb_group.add_argument(
       "--xgb_learning_rate",
       type=float,
       default=0.1,
-      help="XGBoost learning rate (default: %(default)s)",
+      help="XGBoost learning rate.",
   )
-  g.add_argument(
+  xgb_group.add_argument(
       "--xgb_subsample",
       type=float,
       default=0.8,
-      help="XGBoost row sampling ratio (default: %(default)s)",
+      help="XGBoost row sampling ratio.",
   )
-  g.add_argument(
+  xgb_group.add_argument(
       "--xgb_colsample_bytree",
       type=float,
       default=0.8,
-      help="XGBoost column sampling ratio (default: %(default)s)",
+      help="XGBoost column sampling ratio.",
   )
-  g.add_argument(
+  xgb_group.add_argument(
       "--xgb_min_child_weight",
       type=int,
       default=1,
-      help="XGBoost min child weight (default: %(default)s)",
+      help="XGBoost min child weight.",
   )
-  g.add_argument(
+  xgb_group.add_argument(
       "--xgb_gamma",
       type=float,
       default=0.0,
-      help="XGBoost min split loss (default: %(default)s)",
+      help="XGBoost min split loss.",
   )
-  g.add_argument(
+  xgb_group.add_argument(
       "--xgb_reg_alpha",
       type=float,
       default=0.0,
-      help="XGBoost L1 regularization (default: %(default)s)",
+      help="XGBoost L1 regularization.",
   )
 
   return parser.parse_args(argv)
@@ -676,7 +584,7 @@ def train_xgboost_on_backbone(args, train_ds, val_ds, device):
       collect_features,
       load_model_for_inference,
   )
-  from scdiag.hf_proxy import HFDatasetProxy
+  from scdiag.datasets.hf_proxy import HFDatasetProxy
   from scdiag.xgb_utils import train_xgboost, eval_xgboost
 
   logging.info("=" * 60)
@@ -1054,6 +962,18 @@ def main():
       checkpoint_path=args.checkpoint,
       cache_dir=args.cache_dir,
   )
+
+  # Optionally load SimMIM pre-trained encoder weights
+  if args.pretrained_encoder:
+    from scdiag.checkpointing import load_checkpoint_weights
+    logging.info(f"Loading pre-trained encoder from: {args.pretrained_encoder}")
+    load_checkpoint_weights(
+        args.pretrained_encoder,
+        model,
+        device=device,
+        strict=False,
+        exclude_prefixes=["head.", "cls_guided_pool.", "classifier."],
+    )
 
   total_params = sum(p.numel() for p in model.parameters())
   trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)

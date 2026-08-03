@@ -1,9 +1,12 @@
 # scdiag
 
 Fine-tune HuggingFace image-classification models for skin-lesion classification
-(and other image datasets) with a simple hand-rolled PyTorch training loop.
+(and other image datasets) with a hand-rolled PyTorch training loop. Supports
+self-supervised pre-training (SimMIM) on multi-source dermoscopy datasets.
 
 ## Features
+
+### Supervised Fine-Tuning (`scdiag-train`)
 
 - **Any HuggingFace image classification dataset** — auto-detects image and
   label columns, handles filepath-based images, ClassLabel casting, and
@@ -18,6 +21,8 @@ Fine-tune HuggingFace image-classification models for skin-lesion classification
   prioritizing rare or clinically critical classes (e.g. melanoma detection).
 - **Mixup** — optional Mixup regularization (`--mixup_alpha`) for reducing
   overfitting on small datasets.
+- **Pre-trained encoder loading** — load SimMIM pre-trained encoder weights via
+  `--pretrained_encoder` to boost downstream performance on small datasets.
 - **Custom model registry** — use any HuggingFace `AutoModelForImageClassification`
   model, or register custom architectures via the `scdiag.models` registry.
   First custom model: **ConvViT** (ConvNeXtV2 stem + ViT encoder with
@@ -36,6 +41,20 @@ Fine-tune HuggingFace image-classification models for skin-lesion classification
   tree-based classifier performance.
 - **TensorBoard** logging.
 - **GCS sync** — optional checkpoint upload to Google Cloud Storage.
+
+### Self-Supervised Pre-Training (`scdiag-pretrain`)
+
+- **SimMIM masked image modelling** — self-supervised pre-training for ConvViT.
+  Masks 60% of patches, reconstructs raw pixel values via a lightweight MLP
+  decoder. No labels required.
+- **Multi-source dataset ensemble** — stitches together multiple HuggingFace
+  datasets (e.g. HAM10000, ISIC challenges, Derm1M) into a single unified
+  pre-training corpus with flat indexing and lazy loading.
+- **Mixed precision** — AMP support (`float16` or `bfloat16`).
+- **Configurable architecture** — decoder depth, mask ratio, image size, and
+  all training hyperparameters are exposed via CLI.
+- **Reconstruction visualisation** — periodic TensorBoard logging of original,
+  masked, and reconstructed images for qualitative monitoring.
 
 ## Installation
 
@@ -133,6 +152,51 @@ classifier head (different `num_classes`) is reinitialised and trained from
 scratch.  All three `--ignore_*` flags are recommended so the optimizer
 momentum, LR schedule, and scaler history from the old run don't interfere.
 
+## Pre-Training (SimMIM)
+
+Pre-train the ConvViT encoder on unlabeled dermoscopy images before fine-tuning:
+
+```bash
+scdiag-pretrain --datasets HAM10000 "redlessone/Derm1M" \\
+                --image_size 448 \\
+                --batch_size 32 \\
+                --epochs 200 \\
+                --checkpoint ./checkpoints/convvit_simmim
+```
+
+Then load the pre-trained encoder during supervised fine-tuning:
+
+```bash
+scdiag-train --model convvit \\
+             --dataset marmal88/skin_cancer \\
+             --pretrained_encoder ./checkpoints/convvit_simmim_latest.pt \\
+             --epochs 100
+```
+
+| Argument | Default | Description |
+|---|---|---|
+| `--datasets` | (required) | Space-separated dataset names or local paths. HuggingFace IDs or directories. |
+| `--image_size` | `448` | Input image size (square). |
+| `--mask_ratio` | `0.60` | Fraction of patches to mask. |
+| `--decoder_dim` | `768` | Decoder hidden dimension. |
+| `--decoder_depth` | `2` | Number of Linear→GELU layers in decoder. |
+| `--batch_size` | `32` | Per-GPU batch size. |
+| `--epochs` | `200` | Total pre-training epochs. |
+| `--lr` | `1e-4` | Peak learning rate for AdamW. |
+| `--amp_dtype` | `float16` | Mixed precision dtype (`float16`, `bfloat16`, `none`). |
+| `--log_level` | `INFO` | Minimum logging level. |
+
+### Dataset Ensemble
+
+`scdiag-pretrain` stitches multiple datasets into a single pre-training corpus:
+
+- **HuggingFace datasets** — any HF dataset ID (e.g. `HAM10000`, `redlessone/Derm1M`).
+  Gated datasets require `--hf_token` or `HF_TOKEN` env var.
+- **Local image directories** — pass a path to a folder of images.
+- **ISIC Archive datasets** — pre-download via `isic-cli` and pass the directory.
+
+Datasets are loaded lazily and gracefully skipped if they fail to load.
+
 ## Inference
 
 ```bash
@@ -201,6 +265,10 @@ scdiag-train --model convvit --image_size 224 ...
 | Name | Description | `--model` value |
 |---|---|---|
 | ConvViT | ConvNeXtV2 stem + 12-layer ViT encoder with CLS-guided attention pooling | `convvit` |
+
+ConvViT supports SimMIM self-supervised pre-training via `scdiag-pretrain`.
+Pre-trained encoder weights can be loaded into the supervised training pipeline
+via `--pretrained_encoder`.
 
 ## Development
 

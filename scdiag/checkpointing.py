@@ -1,0 +1,156 @@
+"""Shared checkpoint save/load utilities.
+
+Extracted from ``train.py`` to avoid code duplication with ``pretrain.py``.
+Both scripts import these functions rather than maintaining separate copies.
+"""
+
+import logging
+import os
+
+import torch
+
+
+def filter_state_dict(ckpt_state, model_state):
+  """Filter a checkpoint state dict to only include keys compatible with the model.
+
+    Skips keys whose tensor shape differs between checkpoint and model.
+    Returns ``(filtered_state, skipped)`` where *skipped* is a list of
+    ``(key, reason)`` tuples describing why each key was dropped.
+    """
+  filtered = {}
+  skipped = []
+  for k, v in ckpt_state.items():
+    if k not in model_state:
+      skipped.append((k, "missing in model"))
+    elif v.shape != model_state[k].shape:
+      skipped.append((
+          k,
+          f"shape mismatch: checkpoint {list(v.shape)} "
+          f"vs model {list(model_state[k].shape)}",
+      ))
+    else:
+      filtered[k] = v
+  return filtered, skipped
+
+
+def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler,
+                      scaler, device, states_to_load):
+  """Resume training state from an existing checkpoint.
+
+    Looks for *ckpt_latest* first, then *ckpt_best*.  Restores model weights
+    (filtering out shape-mismatched keys), and conditionally restores
+    optimizer, scheduler, and GradScaler states depending on
+    *states_to_load*.
+
+    Returns ``(start_epoch, best_metric)``.
+    """
+  resume_path = None
+  if os.path.exists(ckpt_latest):
+    resume_path = ckpt_latest
+  elif os.path.exists(ckpt_best):
+    resume_path = ckpt_best
+
+  if not resume_path:
+    return 0, 0.0
+
+  logging.info(f"Resuming from checkpoint: {resume_path}")
+  ckpt = torch.load(resume_path, map_location=device, weights_only=False)
+  logging.info(f"  Checkpoint keys: {list(ckpt.keys())}")
+
+  # Filter checkpoint to skip keys with shape mismatches
+  # (e.g. classifier head when resuming with different num_classes).
+  filtered, skipped = filter_state_dict(
+      ckpt["model_state_dict"],
+      model.state_dict(),
+  )
+  if skipped:
+    for k, reason in skipped:
+      logging.warning(f"  Skipped key '{k}': {reason}")
+
+  result = model.load_state_dict(filtered, strict=False)
+  logging.info("  Restored model weights")
+  if result.missing_keys:
+    logging.warning(f"  Missing keys (randomly initialized): "
+                    f"{result.missing_keys}")
+  if result.unexpected_keys:
+    logging.warning(f"  Unexpected keys (ignored): "
+                    f"{result.unexpected_keys}")
+
+  if "opt" in states_to_load and "optimizer_state_dict" in ckpt:
+    if skipped:
+      logging.warning("  Skipped optimizer restore (model architecture changed)")
+    else:
+      optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+      logging.info("  Restored optimizer state")
+  else:
+    logging.info("  Skipped optimizer state")
+
+  if "sched" in states_to_load and "scheduler_state_dict" in ckpt:
+    if skipped:
+      logging.warning("  Skipped scheduler restore (model architecture changed)")
+    else:
+      scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+      logging.info("  Restored scheduler state")
+  else:
+    logging.info("  Skipped scheduler state")
+
+  if "amp" in states_to_load:
+    scaler_dict = ckpt.get("scaler_state_dict")
+    if scaler_dict is not None and scaler is not None:
+      scaler.load_state_dict(scaler_dict)
+      logging.info("  Restored GradScaler state")
+    else:
+      logging.info("  Skipped GradScaler state")
+
+  start_epoch = ckpt.get("epoch", -1) + 1
+  best_metric = ckpt.get("best_top1", ckpt.get("best_metric", 0.0))
+  logging.info(f"  Resumed at epoch {start_epoch}, best_metric={best_metric}")
+  return start_epoch, best_metric
+
+
+
+def load_checkpoint_weights(path, model, device="cpu", strict=False,
+                            exclude_prefixes=None):
+  """Load model weights from a checkpoint, with optional key filtering.
+
+    Useful for loading a pre-trained encoder into a model that may have
+    different head/pooling layers (e.g. loading SimMIM encoder weights
+    into a ConvViTForClassification).
+
+    Args:
+        path: Path to the checkpoint file.
+        model: The model to load weights into.
+        device: Device to map tensors to.
+        strict: If True, raise on missing/unexpected keys.
+        exclude_prefixes: Optional list of key prefixes to skip
+            (e.g. ``["decoder.", "head."]``).
+
+    Returns:
+        A ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys``.
+    """
+  ckpt = torch.load(path, map_location=device, weights_only=False)
+
+  # Accept either raw state_dict or wrapped checkpoint
+  if "model_state_dict" in ckpt:
+    state = ckpt["model_state_dict"]
+  else:
+    state = ckpt
+
+  if exclude_prefixes:
+    state = {
+        k: v for k, v in state.items()
+        if not any(k.startswith(p) for p in exclude_prefixes)
+    }
+
+  filtered, skipped = filter_state_dict(state, model.state_dict())
+  if skipped:
+    for k, reason in skipped:
+      logging.warning(f"  Skipped key '{k}': {reason}")
+
+  result = model.load_state_dict(filtered, strict=strict)
+  logging.info(f"  Loaded weights from {path}")
+  if result.missing_keys:
+    logging.warning(f"  Missing keys: {result.missing_keys}")
+  if result.unexpected_keys:
+    logging.warning(f"  Unexpected keys: {result.unexpected_keys}")
+  return result

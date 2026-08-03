@@ -25,6 +25,7 @@ dev = ["pytest", "ruff"]
 
 [project.scripts]
 scdiag-train = "scdiag.train:main"
+scdiag-pretrain = "scdiag.pretrain:main"
 scdiag-infer = "scdiag.infer:main"
 
 [tool.setuptools.packages.find]
