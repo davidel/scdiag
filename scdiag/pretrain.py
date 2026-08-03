@@ -372,7 +372,7 @@ def main(argv=None):
   device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
   logging.info(f"Using device: {device}")
   if torch.cuda.is_available():
-    logging.info(gpu_stats_str())
+    logging.info(gpu_stats_str(device))
 
   logging.info("Building dataset ...")
   dataset = build_pretrain_dataset(args)
