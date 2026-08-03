@@ -39,28 +39,30 @@ BASE_URL = "https://huggingface.co/datasets/redlessone/Derm1M/resolve/main"
 
 
 def download_file(url, dest_path, token=None):
-  """Download a file with progress reporting."""
-  headers = {}
-  if token:
-    headers["Authorization"] = f"Bearer {token}"
-
-  print(f"  Downloading {os.path.basename(dest_path)} ...")
-  resp = requests.get(url, headers=headers, stream=True, timeout=30)
-  resp.raise_for_status()
-
-  total = int(resp.headers.get("content-length", 0))
-  downloaded = 0
-
-  with open(dest_path, "wb") as f:
-    for chunk in resp.iter_content(chunk_size=1024 * 1024):
-      f.write(chunk)
-      downloaded += len(chunk)
-      if total > 0 and downloaded % (100 * 1024 * 1024) < 1024 * 1024:
-        pct = (downloaded / total) * 100
-        print(f"    {pct:5.1f}%  ({downloaded / 1024**3:.2f} GB / "
-              f"{total / 1024**3:.2f} GB)")
-
-  print(f"    Done  ({downloaded / 1024**3:.2f} GB)")
+  """Download a file using huggingface_hub for better performance."""
+  from huggingface_hub import hf_hub_download
+  
+  # Extract repo_id and filename from URL
+  # URL format: https://huggingface.co/datasets/redlessone/Derm1M/resolve/main/IIYI.zip
+  parts = url.split("/datasets/")[-1].split("/resolve/")
+  repo_id = parts[0]  # redlessone/Derm1M
+  filename = parts[1].split("/", 1)[1] if "/" in parts[1] else parts[1]
+  
+  print(f"  Downloading {filename} ...")
+  downloaded_path = hf_hub_download(
+    repo_id=repo_id,
+    filename=filename,
+    repo_type="dataset",
+    local_dir=os.path.dirname(dest_path),
+    token=token,
+  )
+  
+  # Move to expected location if different
+  if Path(downloaded_path) != dest_path:
+    import shutil
+    shutil.move(downloaded_path, dest_path)
+  
+  print(f"    Done  ({dest_path.stat().st_size / 1024**3:.2f} GB)")
 
 
 def collect_images_from_dir(src_dir):
