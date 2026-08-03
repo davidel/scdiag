@@ -13,6 +13,9 @@ Fine-tune HuggingFace image-classification models for skin-lesion classification
 - **Gradient accumulation** — effective batch size = `batch_size * grad_accum_steps`.
 - **Linear warmup + cosine annealing** learning rate schedule.
 - **Class-weighted loss** with inverse-frequency weighting and label smoothing.
+- **Cost-sensitive focal loss** — combined focal modulation and per-class
+  clinical severity multipliers (`--focal_gamma`, `--class_multipliers`) for
+  prioritizing rare or clinically critical classes (e.g. melanoma detection).
 - **Mixup** — optional Mixup regularization (`--mixup_alpha`) for reducing
   overfitting on small datasets.
 - **Strong augmentations** — random rotation, elastic deformation, aggressive
@@ -69,6 +72,8 @@ scdiag-train --model google/vit-base-patch16-224 \
 | `--weight_decay` | `0.01` | Weight decay |
 | `--warmup_epochs` | `2` | Linear warmup epochs |
 | `--label_smoothing` | `0.0` | Label smoothing factor |
+| `--focal_gamma` | `0.0` | Focal loss gamma (`0` = disabled). Down-weights easy examples so the optimizer focuses on hard-to-classify samples. |
+| `--class_multipliers` | `""` | Comma-separated `NAME=VALUE` pairs overriding per-class clinical severity multipliers. `NAME` is a label string or integer index; `VALUE` is a float. Unspecified classes default to `1.0`. Example: `"melanoma=3.0,melanocytic_Nevi=1.0"` |
 | `--grad_accum_steps` | `1` | Gradient accumulation steps |
 | `--amp_dtype` | `None` | Mixed precision: `float16` or `bfloat16` |
 | `--checkpoint` | `scdiag` | Checkpoint base path (`_latest.pt` / `_best.pt` appended) |
