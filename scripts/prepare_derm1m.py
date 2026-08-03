@@ -22,20 +22,28 @@ from pathlib import Path
 
 import requests
 
-# Derm1M zip archives hosted on HuggingFace.
-DERM1M_ZIPS = [
-    "IIYI.zip",
-    "edu.zip",
-    "note.zip",
-    "public.zip",
-    "pubmed.zip",
-    "reddit.zip",
-    "twitter.zip",
-    "validation_data.zip",
-    "youtube.zip",
-]
+# All zip file extensions we look for in the Derm1M dataset repo.
+_ZIP_EXT = ".zip"
+_DEFAULT_REPO_ID = "redlessone/Derm1M"
 
 BASE_URL = "https://huggingface.co/datasets/redlessone/Derm1M/resolve/main"
+
+
+def fetch_zip_names(repo_id=_DEFAULT_REPO_ID, token=None):
+  """Fetch the list of zip archive names from a HuggingFace dataset repo.
+
+  Uses the HuggingFace API to dynamically discover zip files instead
+  of maintaining a hardcoded list.
+  """
+  from huggingface_hub import HfApi  # noqa: lazy import
+
+  api = HfApi()
+  all_files = api.list_repo_files(repo_id=repo_id, repo_type="dataset", token=token)
+  zips = sorted(f for f in all_files if f.endswith(_ZIP_EXT) and not f.startswith("."))
+  if not zips:
+    raise RuntimeError(f"No zip files found in {repo_id}. Check the repo name or "
+                       "access token.")
+  return zips
 
 
 def download_file(url, dest_path, token=None):
@@ -130,8 +138,12 @@ def main():
   else:
     zip_dir = Path(tempfile.mkdtemp(prefix="derm1m_"))
 
+  # Fetch the list of zips dynamically from the HF repo
+  zip_names = fetch_zip_names(token=token)
+  print(f"Found {len(zip_names)} zip archives: {', '.join(zip_names)}")
+
   # Download zips
-  for zip_name in DERM1M_ZIPS:
+  for zip_name in zip_names:
     url = f"{BASE_URL}/{zip_name}"
     zip_path = zip_dir / zip_name
 
@@ -147,7 +159,7 @@ def main():
     download_file(url, zip_path, token)
 
   # Extract all zips
-  for zip_name in DERM1M_ZIPS:
+  for zip_name in zip_names:
     zip_path = zip_dir / zip_name
     print(f"  Extracting {zip_name} ...")
     with zipfile.ZipFile(zip_path, "r") as zf:
