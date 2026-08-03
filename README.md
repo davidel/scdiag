@@ -211,12 +211,32 @@ scdiag-train --model convvit \
 
 `scdiag-pretrain` stitches multiple datasets into a single pre-training corpus:
 
-- **HuggingFace datasets** — any HF dataset ID (e.g. `HAM10000`, `redlessone/Derm1M`).
-  Gated datasets require `--hf_token` or `HF_TOKEN` env var.
-- **Local image directories** — pass a path to a folder of images.
-- **ISIC Archive datasets** — pre-download via `isic-cli` and pass the directory.
+- **HuggingFace datasets** — any HF dataset ID that returns decoded image
+  data (e.g. `HAM10000`).  Gated datasets require `--hf_token` or `HF_TOKEN`
+  env var.
+- **Local image directories** — pass a path to a folder of images
+  (ImageFolder format).
 
 Datasets are loaded lazily and gracefully skipped if they fail to load.
+
+### Preparing Datasets
+
+Some datasets (like Derm1M) store images inside zip archives and require a
+preparation step before they can be used for pre-training:
+
+```bash
+python scripts/prepare_derm1m.py --output_dir ./derm1m_images --token hf_XXX
+```
+
+Then use the extracted directory as a local dataset:
+
+```bash
+scdiag-pretrain --datasets ./derm1m_images /content/ham10000_grouped \
+                --image_size 448 --batch_size 32 ...
+```
+
+See `scripts/prepare_ham10000.py` for another example that prepares the
+HAM10000 dataset with lesion-id-grouped splits.
 
 ## Inference
 
