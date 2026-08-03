@@ -77,7 +77,10 @@ def build_pretrain_dataset(args):
     name = name.strip()
     if not name:
       continue
-    if os.path.isdir(name):
+    if name.startswith("imagefolder/"):
+      data_dir = name.split("/", 1)[1]
+      configs.append({"name": data_dir, "source": "imagefolder"})
+    elif os.path.isdir(name):
       configs.append({"name": name, "source": "imagefolder"})
     else:
       configs.append({
