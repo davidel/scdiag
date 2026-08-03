@@ -14,10 +14,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
 # ---------------------------------------------------------------------------
 # Patchify / unpatchify
 # ---------------------------------------------------------------------------
+
 
 def patchify(images, patch_size=16):
   """Convert images to per-patch pixel vectors.
@@ -58,6 +58,7 @@ def unpatchify(patches, patch_size=16, img_size=448, channels=3):
 # Masking
 # ---------------------------------------------------------------------------
 
+
 def random_mask(batch_size, num_patches, mask_ratio=0.60, device=None):
   """Generate independent random per-patch masks.
 
@@ -77,6 +78,7 @@ def random_mask(batch_size, num_patches, mask_ratio=0.60, device=None):
 # Loss
 # ---------------------------------------------------------------------------
 
+
 def simmim_loss(pred, target, mask):
   """SimMIM masked pixel reconstruction loss (MSE).
 
@@ -89,8 +91,8 @@ def simmim_loss(pred, target, mask):
         Scalar loss (mean over masked patches and channels).
     """
   # Per-patch, per-channel squared error
-  loss = (pred - target) ** 2           # (B, N, D)
-  loss = loss.mean(dim=-1)              # (B, N) — average over D
+  loss = (pred - target)**2  # (B, N, D)
+  loss = loss.mean(dim=-1)  # (B, N) — average over D
   loss = (loss * mask.float()).sum() / mask.float().sum().clamp(min=1)
   return loss
 
@@ -98,6 +100,7 @@ def simmim_loss(pred, target, mask):
 # ---------------------------------------------------------------------------
 # SimMIM wrapper
 # ---------------------------------------------------------------------------
+
 
 class ConvViTSimMIM(nn.Module):
   """SimMIM wrapper around the ConvViT encoder.
@@ -125,11 +128,11 @@ class ConvViTSimMIM(nn.Module):
 
   def __init__(self, encoder, decoder_dim=768, decoder_depth=2):
     super().__init__()
-    # Accept both raw CustomPatchTransformer and ConvViTForClassification wrapper
-    if hasattr(encoder, "model"):
-      self.encoder = encoder.model   # unwrap
-    else:
-      self.encoder = encoder
+    # Unwrap any wrapper (ConvViTForClassification, HF model, etc.)
+    # via the scdiag get_backbone() protocol when available.
+    from scdiag.model_utils import get_backbone
+
+    self.encoder = get_backbone(encoder)
     embed_dim = self.encoder.pos_embedding.shape[-1]
 
     # --- mask token (one learned vector shared across all positions) ---
@@ -165,10 +168,10 @@ class ConvViTSimMIM(nn.Module):
     B = images.shape[0]
 
     # 1. Reconstruction target (raw pixels, patchified)
-    target = patchify(images, patch_size=16)        # (B, N, D)
+    target = patchify(images, patch_size=16)  # (B, N, D)
 
     # 2. Conv stem — runs on ALL patches (conv needs spatial context)
-    x = self.encoder.patch_embed(images)             # (B, N, D)
+    x = self.encoder.patch_embed(images)  # (B, N, D)
 
     # 3. Scatter mask token into masked positions
     mask_tokens = self.mask_token.expand(B, x.shape[1], -1)  # (B, N, D)
@@ -176,7 +179,7 @@ class ConvViTSimMIM(nn.Module):
 
     # 4. Prepend CLS token + positional embeddings
     cls = self.encoder.cls_token.expand(B, -1, -1) + self.encoder.cls_pos
-    x = torch.cat([cls, x], dim=1)                  # (B, 1+N, D)
+    x = torch.cat([cls, x], dim=1)  # (B, 1+N, D)
     x = x + self.encoder.pos_embedding[:, :x.shape[1], :]
     x = self.encoder.pos_drop(x)
 
@@ -186,9 +189,9 @@ class ConvViTSimMIM(nn.Module):
     x = self.encoder.ln_norm(x)
 
     # 6. Drop CLS → spatial tokens only
-    spatial = x[:, 1:, :]                            # (B, N, D)
+    spatial = x[:, 1:, :]  # (B, N, D)
 
     # 7. Decode
-    pred = self.decoder(spatial)                     # (B, N, D)
+    pred = self.decoder(spatial)  # (B, N, D)
 
     return pred, target

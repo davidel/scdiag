@@ -468,7 +468,7 @@ class TestExtractBackboneFeatures:
     """Raises ValueError if no classifier head is found."""
     model = torch.nn.Linear(10, 5)  # bare Linear, no .classifier attr
 
-    with pytest.raises(ValueError, match="Cannot find a classifier head"):
+    with pytest.raises(ValueError, match="Cannot extract backbone features"):
       extract_backbone_features(model, torch.randn(1, 10))
 
   def test_hook_cleans_up(self):

@@ -34,14 +34,14 @@ from scdiag.checkpointing import resume_checkpoint, save_checkpoint
 from scdiag.datasets.ensemble import DermoscopyEnsemble
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.logging_utils import setup_logging
+from scdiag.model_utils import DTYPE_MAP, get_backbone
 from scdiag.models.convvit.simmim import (
     ConvViTSimMIM,
     patchify,
     random_mask,
     simmim_loss,
 )
-from scdiag.models.convvit.loader import load_convvit
-from scdiag.model_utils import DTYPE_MAP
+from scdiag.models.registry import load_model
 
 
 def build_pretrain_transform(image_size=448):
@@ -107,7 +107,8 @@ def log_reconstruction(model, loader, writer, epoch, device, num_samples=8):
   _, _, H, W = images.shape
   patch_size = 16
   num_patches = (H // patch_size) * (W // patch_size)
-  mask = random_mask(images.shape[0], num_patches,
+  mask = random_mask(images.shape[0],
+                     num_patches,
                      mask_ratio=getattr(model, "_last_mask_ratio", 0.60),
                      device=device)
 
@@ -131,8 +132,15 @@ def log_reconstruction(model, loader, writer, epoch, device, num_samples=8):
   model.train()
 
 
-def train_one_epoch(model, loader, optimizer, device, amp_dtype, epoch,
-                    global_step, writer, log_every=50):
+def train_one_epoch(model,
+                    loader,
+                    optimizer,
+                    device,
+                    amp_dtype,
+                    epoch,
+                    global_step,
+                    writer,
+                    log_every=50):
   """Run one epoch of SimMIM pre-training.
 
     Returns ``(avg_loss, global_step)``.
@@ -152,7 +160,9 @@ def train_one_epoch(model, loader, optimizer, device, amp_dtype, epoch,
   for step, images in enumerate(loader):
     images = images.to(device, non_blocking=True)
 
-    mask = random_mask(images.shape[0], num_patches, mask_ratio=mask_ratio,
+    mask = random_mask(images.shape[0],
+                       num_patches,
+                       mask_ratio=mask_ratio,
                        device=device)
 
     with torch.amp.autocast(
@@ -223,71 +233,118 @@ def parse_args(argv=None):
       formatter_class=argparse.ArgumentDefaultsHelpFormatter,
   )
 
-  parser.add_argument("--datasets", nargs="+", required=True,
+  parser.add_argument("--model",
+                      type=str,
+                      default="convvit",
+                      help="Model name registered in the scdiag registry "
+                      "(e.g. 'convvit' or an HuggingFace model ID).")
+  parser.add_argument("--datasets",
+                      nargs="+",
+                      required=True,
                       help="Dataset names or local paths to include in ensemble. "
-                           "Use HuggingFace IDs (e.g. 'HAM10000') or directories.")
-  parser.add_argument("--cache_dir", type=str, default=None,
+                      "Use HuggingFace IDs (e.g. 'HAM10000') or directories.")
+  parser.add_argument("--cache_dir",
+                      type=str,
+                      default=None,
                       help="HuggingFace datasets cache directory")
-  parser.add_argument("--hf_token", type=str, default=None,
+  parser.add_argument("--hf_token",
+                      type=str,
+                      default=None,
                       help="HuggingFace token for gated datasets (or set HF_TOKEN "
-                           "env var)")
-  parser.add_argument("--image_size", type=int, default=448,
+                      "env var)")
+  parser.add_argument("--image_size",
+                      type=int,
+                      default=448,
                       help="Input image size (square)")
-  parser.add_argument("--num_workers", type=int, default=4,
-                      help="DataLoader workers")
+  parser.add_argument("--num_workers", type=int, default=4, help="DataLoader workers")
 
-  parser.add_argument("--mask_ratio", type=float, default=0.60,
+  parser.add_argument("--mask_ratio",
+                      type=float,
+                      default=0.60,
                       help="Fraction of patches to mask (SimMIM default: 0.60)")
-  parser.add_argument("--decoder_dim", type=int, default=768,
+  parser.add_argument("--decoder_dim",
+                      type=int,
+                      default=768,
                       help="Decoder hidden dimension")
-  parser.add_argument("--decoder_depth", type=int, default=2,
+  parser.add_argument("--decoder_depth",
+                      type=int,
+                      default=2,
                       help="Number of Linear->GELU layers in decoder")
 
-  parser.add_argument("--batch_size", type=int, default=32,
+  parser.add_argument("--batch_size",
+                      type=int,
+                      default=32,
                       help="Per-GPU batch size. Reduce if OOM on "
-                           "consumer GPUs at 448px.")
-  parser.add_argument("--epochs", type=int, default=200,
+                      "consumer GPUs at 448px.")
+  parser.add_argument("--epochs",
+                      type=int,
+                      default=200,
                       help="Total pre-training epochs.")
-  parser.add_argument("--lr", type=float, default=1e-4,
+  parser.add_argument("--lr",
+                      type=float,
+                      default=1e-4,
                       help="Peak learning rate for AdamW. Linear warmup "
-                           "from 1%% of this value.")
-  parser.add_argument("--weight_decay", type=float, default=0.05,
+                      "from 1%% of this value.")
+  parser.add_argument("--weight_decay",
+                      type=float,
+                      default=0.05,
                       help="AdamW weight decay.")
-  parser.add_argument("--warmup_epochs", type=int, default=10,
+  parser.add_argument("--warmup_epochs",
+                      type=int,
+                      default=10,
                       help="Linear warmup epochs before cosine schedule.")
-  parser.add_argument("--grad_clip", type=float, default=1.0,
+  parser.add_argument("--grad_clip",
+                      type=float,
+                      default=1.0,
                       help="Max gradient norm for clipping.")
-  parser.add_argument("--amp_dtype", type=str, default="float16",
+  parser.add_argument("--amp_dtype",
+                      type=str,
+                      default="float16",
                       choices=["float16", "bfloat16", "none"],
                       help="Mixed precision dtype. Use 'none' to disable AMP.")
 
-  parser.add_argument("--checkpoint", type=str,
+  parser.add_argument("--checkpoint",
+                      type=str,
                       default="./checkpoints/convvit_simmim",
                       help="Checkpoint path prefix (without extension). "
-                           "_latest.pt and _best.pt suffixes are appended "
-                           "automatically.")
-  parser.add_argument("--gcs_checkpoint", type=str, default=None,
+                      "_latest.pt and _best.pt suffixes are appended "
+                      "automatically.")
+  parser.add_argument("--gcs_checkpoint",
+                      type=str,
+                      default=None,
                       help="GCS URI to sync checkpoints to "
-                           "(format: gs://BUCKET/PREFIX). Requires "
-                           "google-cloud-storage package.")
-  parser.add_argument("--resume", action="store_true", default=True,
+                      "(format: gs://BUCKET/PREFIX). Requires "
+                      "google-cloud-storage package.")
+  parser.add_argument("--resume",
+                      action="store_true",
+                      default=True,
                       help="Resume training from latest checkpoint if one "
-                           "exists.")
-  parser.add_argument("--no_resume", dest="resume", action="store_false",
+                      "exists.")
+  parser.add_argument("--no_resume",
+                      dest="resume",
+                      action="store_false",
                       help="Start training from scratch, ignoring any "
-                           "existing checkpoints.")
+                      "existing checkpoints.")
 
-  parser.add_argument("--log_level", type=str, default="INFO",
+  parser.add_argument("--log_level",
+                      type=str,
+                      default="INFO",
                       choices=["DEBUG", "INFO", "WARNING", "ERROR"],
                       help="Minimum logging level.")
-  parser.add_argument("--log_dir", type=str, default=None,
+  parser.add_argument("--log_dir",
+                      type=str,
+                      default=None,
                       help="TensorBoard log directory. Defaults to "
-                           "<checkpoint_dir>/logs if not specified.")
-  parser.add_argument("--log_every", type=int, default=50,
+                      "<checkpoint_dir>/logs if not specified.")
+  parser.add_argument("--log_every",
+                      type=int,
+                      default=50,
                       help="Log training metrics every N optimization steps.")
-  parser.add_argument("--vis_every", type=int, default=10,
+  parser.add_argument("--vis_every",
+                      type=int,
+                      default=10,
                       help="Log reconstruction visualisation to TensorBoard "
-                           "every N epochs.")
+                      "every N epochs.")
 
   args = parser.parse_args(argv)
 
@@ -328,16 +385,16 @@ def main(argv=None):
       drop_last=True,
   )
 
-  logging.info("Building ConvViT encoder ...")
-  encoder = load_convvit(
-      image_size=args.image_size,
+  logging.info("Loading model '%s' via registry ...", args.model)
+  base_model, _ = load_model(
+      args.model,
       num_labels=0,
       id2label={},
       label2id={},
+      image_size=args.image_size,
       device=device,
   )
-  encoder.head = torch.nn.Identity()
-  encoder.cls_guided_pool = torch.nn.Identity()
+  encoder = get_backbone(base_model)
 
   model = ConvViTSimMIM(
       encoder,
@@ -348,8 +405,10 @@ def main(argv=None):
   model._last_mask_ratio = args.mask_ratio
 
   num_params = sum(p.numel() for p in model.parameters()) / 1e6
-  logging.info(f"Model params: {num_params:.1f}M "
-               f"(encoder: ~86M + decoder: ~{num_params - 86:.1f}M)")
+  enc_params = sum(p.numel() for p in encoder.parameters()) / 1e6
+  logging.info(
+      f"Model params: {num_params:.1f}M "
+      f"(encoder: {enc_params:.1f}M + decoder: {num_params - enc_params:.1f}M)")
 
   optimizer = optim.AdamW(
       model.parameters(),
@@ -360,7 +419,9 @@ def main(argv=None):
 
   if args.warmup_epochs > 0:
     scheduler_warmup = optim.lr_scheduler.LinearLR(
-        optimizer, start_factor=0.01, total_iters=args.warmup_epochs,
+        optimizer,
+        start_factor=0.01,
+        total_iters=args.warmup_epochs,
     )
     scheduler_cosine = optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
@@ -374,7 +435,9 @@ def main(argv=None):
     )
   else:
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=args.epochs, eta_min=args.lr * 0.01,
+        optimizer,
+        T_max=args.epochs,
+        eta_min=args.lr * 0.01,
     )
 
   start_epoch = 0
@@ -382,8 +445,14 @@ def main(argv=None):
     ckpt_latest = args.checkpoint + "_latest.pt"
     ckpt_best = args.checkpoint + "_best.pt"
     start_epoch, _ = resume_checkpoint(
-        ckpt_latest, ckpt_best, model, optimizer, scheduler, scaler=None,
-        device=device, states_to_load={"opt", "sched"},
+        ckpt_latest,
+        ckpt_best,
+        model,
+        optimizer,
+        scheduler,
+        scaler=None,
+        device=device,
+        states_to_load={"opt", "sched"},
     )
 
   os.makedirs(args.log_dir, exist_ok=True)
@@ -393,8 +462,15 @@ def main(argv=None):
   try:
     for epoch in range(start_epoch, args.epochs):
       avg_loss, global_step = train_one_epoch(
-          model, loader, optimizer, device, args.amp_dtype, epoch,
-          global_step, writer, log_every=args.log_every,
+          model,
+          loader,
+          optimizer,
+          device,
+          args.amp_dtype,
+          epoch,
+          global_step,
+          writer,
+          log_every=args.log_every,
       )
       writer.add_scalar("Train/loss_epoch", avg_loss, epoch)
       scheduler.step()

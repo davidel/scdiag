@@ -15,6 +15,59 @@ DTYPE_MAP = {
     "bfloat16": torch.bfloat16,
 }
 
+# ---------------------------------------------------------------------------
+# Backbone extraction
+# ---------------------------------------------------------------------------
+
+
+def _find_head_module(model):
+  """Locate the classification head on a model.
+
+    Searches for common head attribute names in the order most HF and
+    custom models use them.  Returns ``(attr_name, module)`` or ``None``.
+    """
+  for attr in ("classifier", "head", "fc"):
+    mod = getattr(model, attr, None)
+    if mod is not None and isinstance(mod, torch.nn.Module):
+      return attr, mod
+  return None
+
+
+def get_backbone(model):
+  """Return the backbone encoder as a standalone ``nn.Module``.
+
+    The returned module should accept raw patch / feature inputs and
+    produce the penultimate representations (i.e. everything *before*
+    the classification head).
+
+    Resolution order
+    ----------------
+    1. If *model* exposes a ``get_backbone()`` method (scdiag protocol),
+       delegate to it.
+    2. If *model* has a ``.model`` attribute (e.g.
+       ``ConvViTForClassification``), return ``model.model``.
+    3. Otherwise (HF model), find the classification head via
+       ``_find_head_module``, replace it with ``Identity``, and return
+       the model itself as the backbone.
+    """
+  # 1. Explicit protocol
+  if hasattr(model, "get_backbone") and callable(model.get_backbone):
+    return model.get_backbone()
+
+  # 2. Wrapper with .model attribute
+  if hasattr(model, "model") and isinstance(model.model, torch.nn.Module):
+    return model.model
+
+  # 3. HF-style model — neutralise the head and return the model itself
+  head = _find_head_module(model)
+  if head is not None:
+    attr_name, _ = head
+    setattr(model, attr_name, torch.nn.Identity())
+    logging.info("Replaced model.%s with Identity for backbone extraction.", attr_name)
+  else:
+    logging.warning("No classification head found; returning model as-is.")
+  return model
+
 
 def build_val_transform(processor, image_size):
   """Build validation transform: Resize → CenterCrop → Processor."""
@@ -139,39 +192,50 @@ def extract_backbone_features(model, pixel_values):
         ValueError: if no ``classifier`` attribute is found and the model
                     does not implement the protocol method.
     """
-  # Protocol method — custom models and explicitly wrapped HF models.
-  if hasattr(model, "extract_backbone_features"):
+  # 1. Scdiag protocol
+  if hasattr(model, "extract_backbone_features") and callable(
+      model.extract_backbone_features):
     out = model.extract_backbone_features(pixel_values)
     if isinstance(out, torch.Tensor):
-      if out.ndim == 4:  # [B, C, H, W] → GAP
-        return out.mean(dim=(2, 3))
-      return out  # already [B, D]
+      return out.mean(dim=(2, 3)) if out.ndim == 4 else out
     if isinstance(out, list):
       last = out[-1]
       return last.mean(dim=(2, 3)) if last.ndim == 4 else last
     return extract_features(out)
 
-  # Fallback: hook-based extraction via ``model.classifier``.
-  classifier = getattr(model, "classifier", None)
-  if classifier is None:
-    raise ValueError("Cannot find a classifier head on this model. "
-                     "Implement extract_backbone_features() on the model wrapper.")
+  # 2. HF hidden states
+  try:
+    out = model(pixel_values=pixel_values, output_hidden_states=True)
+    if hasattr(out, "hidden_states") and out.hidden_states:
+      last = out.hidden_states[-1]  # (B, N, D) or (B, D, H, W)
+      if last.ndim == 4:
+        return last.mean(dim=(2, 3))  # spatial average-pool
+      if last.ndim == 3:
+        return last[:, 0]  # CLS token
+      return last
+  except TypeError:
+    pass  # model doesn't accept output_hidden_states
 
+  # 3. Hook-based fallback via the classification head
+  head = _find_head_module(model)
+  if head is None:
+    raise ValueError("Cannot extract backbone features — no classification head found "
+                     "and the model does not implement extract_backbone_features().")
+  _, head_module = head
   captured = []
 
   def _hook(module, inp, out):
     captured.append(inp[0])
 
-  handle = classifier.register_forward_hook(_hook)
+  handle = head_module.register_forward_hook(_hook)
   try:
     model(pixel_values=pixel_values)
   finally:
     handle.remove()
 
   if not captured:
-    raise ValueError(
-        "Hook did not capture any features. "
-        "Ensure the model has a classifier head that is called during forward().")
+    raise ValueError("Hook did not capture any features. "
+                     "Ensure the model's head module is called during forward().")
 
   return captured[0]
 
