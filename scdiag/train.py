@@ -184,6 +184,80 @@ def parse_state_flags(flag_value):
   return tokens
 
 
+def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler,
+                      scaler, device, states_to_load):
+  """Resume training state from an existing checkpoint.
+
+  Looks for *ckpt_latest* first, then *ckpt_best*.  Restores model weights
+  (filtering out shape-mismatched keys), and conditionally restores
+  optimizer, scheduler, and GradScaler states depending on
+  *states_to_load*.
+
+  Returns ``(start_epoch, best_top1)``.
+  """
+  resume_path = None
+  if os.path.exists(ckpt_latest):
+    resume_path = ckpt_latest
+  elif os.path.exists(ckpt_best):
+    resume_path = ckpt_best
+
+  if not resume_path:
+    return 0, 0.0
+
+  logging.info(f"Resuming from checkpoint: {resume_path}")
+  ckpt = torch.load(resume_path, map_location=device, weights_only=False)
+  logging.info(f"  Checkpoint keys: {list(ckpt.keys())}")
+
+  # Filter checkpoint to skip keys with shape mismatches
+  # (e.g. classifier head when resuming with different num_classes).
+  filtered, skipped = filter_state_dict(
+      ckpt["model_state_dict"], model.state_dict(),
+  )
+  if skipped:
+    for k, reason in skipped:
+      logging.warning(f"  Skipped key '{k}': {reason}")
+
+  result = model.load_state_dict(filtered, strict=False)
+  logging.info("  Restored model weights")
+  if result.missing_keys:
+    logging.warning(f"  Missing keys (randomly initialized): "
+                    f"{result.missing_keys}")
+  if result.unexpected_keys:
+    logging.warning(f"  Unexpected keys (ignored): "
+                    f"{result.unexpected_keys}")
+
+  if "opt" in states_to_load and "optimizer_state_dict" in ckpt:
+    if skipped:
+      logging.warning("  Skipped optimizer restore (model architecture changed)")
+    else:
+      optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+      logging.info("  Restored optimizer state")
+  else:
+    logging.info("  Skipped optimizer state")
+
+  if "sched" in states_to_load and "scheduler_state_dict" in ckpt:
+    if skipped:
+      logging.warning("  Skipped scheduler restore (model architecture changed)")
+    else:
+      scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+      logging.info("  Restored scheduler state")
+  else:
+    logging.info("  Skipped scheduler state")
+
+  if "amp" in states_to_load:
+    scaler_dict = ckpt.get("scaler_state_dict")
+    if scaler_dict is not None and scaler is not None:
+      scaler.load_state_dict(scaler_dict)
+      logging.info("  Restored GradScaler state")
+    else:
+      logging.info("  Skipped GradScaler state")
+
+  start_epoch = ckpt.get("epoch", -1) + 1
+  best_top1 = ckpt.get("best_top1", 0.0)
+  logging.info(f"  Resumed at epoch {start_epoch}, best_top1={best_top1:.2f}%")
+  return start_epoch, best_top1
+
+
 def load_augmentation_script(path_or_url):
   """Load a Python script and return its ``create_train_transform`` callable.
 
@@ -992,63 +1066,11 @@ def main():
 
   ckpt_latest = args.checkpoint + "_latest.pt"
   ckpt_best = args.checkpoint + "_best.pt"
-  start_epoch = 0
-  best_top1 = 0.0
 
-  resume_path = None
-  if os.path.exists(ckpt_latest):
-    resume_path = ckpt_latest
-  elif os.path.exists(ckpt_best):
-    resume_path = ckpt_best
-
-  if resume_path:
-    logging.info(f"Resuming from checkpoint: {resume_path}")
-    ckpt = torch.load(resume_path, map_location=device, weights_only=False)
-    ckpt_keys = list(ckpt.keys())
-    logging.info(f"  Checkpoint keys: {ckpt_keys}")
-
-    # Filter checkpoint to skip keys with shape mismatches
-    # (e.g. classifier head when resuming with different num_classes).
-    filtered, skipped = filter_state_dict(
-        ckpt["model_state_dict"], model.state_dict()
-    )
-    if skipped:
-      for k, reason in skipped:
-        logging.warning(f"  Skipped key '{k}': {reason}")
-    result = model.load_state_dict(filtered, strict=False)
-    logging.info("  Restored model weights")
-    if result.missing_keys:
-      logging.warning(f"  Missing keys (randomly initialized): "
-                      f"{result.missing_keys}")
-    if result.unexpected_keys:
-      logging.warning(f"  Unexpected keys (ignored): "
-                      f"{result.unexpected_keys}")
-    if "opt" in states_to_load and "optimizer_state_dict" in ckpt:
-      if skipped:
-        logging.warning("  Skipped optimizer restore (model architecture changed)")
-      else:
-        optimizer.load_state_dict(ckpt["optimizer_state_dict"])
-        logging.info("  Restored optimizer state")
-    else:
-      logging.info("  Skipped optimizer state")
-    if "sched" in states_to_load and "scheduler_state_dict" in ckpt:
-      if skipped:
-        logging.warning("  Skipped scheduler restore (model architecture changed)")
-      else:
-        scheduler.load_state_dict(ckpt["scheduler_state_dict"])
-        logging.info("  Restored scheduler state")
-    else:
-      logging.info("  Skipped scheduler state")
-    if "amp" in states_to_load:
-      scaler_dict = ckpt.get("scaler_state_dict")
-      if scaler_dict is not None and scaler is not None:
-        scaler.load_state_dict(scaler_dict)
-        logging.info("  Restored GradScaler state")
-      else:
-        logging.info("  Skipped GradScaler state")
-    start_epoch = ckpt.get("epoch", -1) + 1
-    best_top1 = ckpt.get("best_top1", 0.0)
-    logging.info(f"  Resumed at epoch {start_epoch}, best_top1={best_top1:.2f}%")
+  start_epoch, best_top1 = resume_checkpoint(
+      ckpt_latest, ckpt_best, model, optimizer, scheduler,
+      scaler, device, states_to_load,
+  )
 
   completed_epoch = start_epoch - 1  # last fully completed (-1 = none yet)
   try:
