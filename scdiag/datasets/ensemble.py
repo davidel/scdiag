@@ -12,6 +12,8 @@ from pathlib import Path
 
 from PIL import Image
 
+from scdiag.datasets.hf_proxy import HFDatasetProxy
+
 logger = logging.getLogger(__name__)
 
 
@@ -41,27 +43,22 @@ class _HFDataset:
     except Exception as exc:
       logger.warning(f"  Failed to load '{self.name}': {exc}")
       return None
-    self._detect_image_column(ds)
+    self._detect_and_normalize_image_column(ds)
     return ds
 
-  def _detect_image_column(self, ds):
+  def _detect_and_normalize_image_column(self, ds):
+    """Detect the image column and ensure it returns decoded PIL images."""
     if self.image_column is not None:
-      return
-    for candidate in ("image", "img", "pixels", "pixel_values", "image_array"):
-      if candidate in ds.column_names:
-        self.image_column = candidate
-        return
-    # Fallback: first column whose dtype is a Image type
-    features = ds.features
-    for name, feat in features.items():
-      if hasattr(feat, "decode") and hasattr(feat, "_type"):
-        if feat._type == "Image":
-          self.image_column = name
-          return
-    raise ValueError(
-        f"Cannot auto-detect image column in '{self.name}'. "
-        f"Columns: {ds.column_names}. Set 'image_column' explicitly."
-    )
+      col = self.image_column
+    else:
+      col = HFDatasetProxy.detect_image_column(ds)
+    if col is None:
+      raise ValueError(
+          f"Cannot auto-detect image column in '{self.name}'. "
+          f"Columns: {ds.column_names}. Set 'image_column' explicitly."
+      )
+    HFDatasetProxy.normalize_image_column(ds, col)
+    self.image_column = col
 
   def _ensure_loaded(self):
     if self._ds is None:
