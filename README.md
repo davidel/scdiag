@@ -157,14 +157,24 @@ momentum, LR schedule, and scaler history from the old run don't interfere.
 ## Pre-Training (SimMIM)
 
 Pre-train any registered model's encoder on unlabeled dermoscopy images before
-fine-tuning:
+fine-tuning. The SimMIM framework masks a configurable fraction of image
+patches and trains the encoder to reconstruct the original pixel values via a
+lightweight MLP decoder.
 
 ```bash
 scdiag-pretrain --model convvit \\
                 --datasets HAM10000 "redlessone/Derm1M" \\
+                --cache_dir ~/.cache/huggingface \\
+                --hf_token hf_XXXX \\
                 --image_size 448 \\
                 --batch_size 32 \\
                 --epochs 200 \\
+                --lr 1e-4 \\
+                --warmup_epochs 10 \\
+                --mask_ratio 0.60 \\
+                --decoder_dim 768 \\
+                --decoder_depth 2 \\
+                --amp_dtype bfloat16 \\
                 --checkpoint ./checkpoints/convvit_simmim
 ```
 
@@ -182,15 +192,20 @@ scdiag-train --model convvit \\
 | `--model` | `convvit` | Model name registered in scdiag (e.g. `convvit`) or HuggingFace model ID. |
 | `--datasets` | (required) | Space-separated dataset names or local paths. HuggingFace IDs or directories. |
 | `--cache_dir` | `None` | HuggingFace cache directory for dataset and model downloads. |
+| `--hf_token` | `None` | HuggingFace token for gated datasets (or set `HF_TOKEN` env var). |
 | `--image_size` | `448` | Input image size (square). |
-| `--mask_ratio` | `0.60` | Fraction of patches to mask. |
+| `--mask_ratio` | `0.60` | Fraction of patches to mask (SimMIM default: 0.60). |
 | `--decoder_dim` | `768` | Decoder hidden dimension. |
 | `--decoder_depth` | `2` | Number of Linear→GELU layers in decoder. |
 | `--batch_size` | `32` | Per-GPU batch size. |
 | `--epochs` | `200` | Total pre-training epochs. |
 | `--lr` | `1e-4` | Peak learning rate for AdamW. |
+| `--warmup_epochs` | `10` | Number of linear warmup epochs. |
 | `--amp_dtype` | `float16` | Mixed precision dtype (`float16`, `bfloat16`, `none`). |
+| `--num_workers` | `4` | DataLoader worker processes. |
+| `--checkpoint` | (required) | Checkpoint path prefix (saves `_latest.pt` and `_best.pt`). |
 | `--log_level` | `INFO` | Minimum logging level. |
+| `--vis_every` | `10` | Log reconstruction visualisation to TensorBoard every N epochs. |
 
 ### Dataset Ensemble
 
