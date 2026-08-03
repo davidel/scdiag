@@ -30,8 +30,9 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import v2
 from torchvision.transforms.functional import InterpolationMode
 
-from scdiag.checkpointing import resume_checkpoint, save_checkpoint
+from scdiag.checkpointing import resume_checkpoint
 from scdiag.datasets.ensemble import DermoscopyEnsemble
+from scdiag.gcs_utils import save_checkpoint
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.logging_utils import setup_logging
 from scdiag.model_utils import DTYPE_MAP, get_backbone
@@ -376,6 +377,10 @@ def main(argv=None):
   logging.info("Building dataset ...")
   dataset = build_pretrain_dataset(args)
   logging.info(f"Total images: {len(dataset):,}")
+  if len(dataset) == 0:
+    logging.error("No images loaded from any dataset. "
+                  "Check --datasets, --hf_token, and --cache_dir.")
+    return
   loader = DataLoader(
       dataset,
       batch_size=args.batch_size,
