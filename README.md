@@ -18,6 +18,13 @@ Fine-tune HuggingFace image-classification models for skin-lesion classification
   prioritizing rare or clinically critical classes (e.g. melanoma detection).
 - **Mixup** — optional Mixup regularization (`--mixup_alpha`) for reducing
   overfitting on small datasets.
+- **Custom model registry** — use any HuggingFace `AutoModelForImageClassification`
+  model, or register custom architectures via the `scdiag.models` registry.
+  First custom model: **ConvViT** (ConvNeXtV2 stem + ViT encoder with
+  CLS-guided attention pooling). Use `--model convvit` to select it.
+- **Hook-based feature extraction** — XGBoost backbone features are extracted
+  via a forward hook on the classifier head, making feature extraction
+  architecture-agnostic (works for ConvNeXtV2, ViT, ResNet, Swin, etc.).
 - **Strong augmentations** — random rotation, elastic deformation, aggressive
   cropping, and color jitter tuned for dermoscopy images.
 - **Checkpointing** — saves `_latest.pt` and `_best.pt` (by validation accuracy).
@@ -62,7 +69,7 @@ scdiag-train --model google/vit-base-patch16-224 \
 
 | Argument | Default | Description |
 |---|---|---|
-| `--model` | `google/vit-base-patch16-224` | HuggingFace model name or local path |
+| `--model` | `google/vit-base-patch16-224` | HuggingFace model name, local path, or custom model name (e.g. `convvit`) |
 | `--dataset` | `marmal88/skin_cancer` | HuggingFace dataset name |
 | `--image_size` | `448` | Augmentation crop size (processor handles final resize) |
 | `--train_augmentation_script` | `None` | Path or URL to a Python script defining `create_train_transform(image_size, **kwargs)` returning a list of v2 transforms. The fixed tail (ToImage, ToDtype, Normalize) is appended automatically. |
@@ -160,6 +167,40 @@ PyTorch and XGBoost predictions:
   ]
 }
 ```
+
+## Custom Models
+
+scdiag supports any HuggingFace `AutoModelForImageClassification` model out of
+the box.  You can also register custom model architectures:
+
+```bash
+# Use a HuggingFace model
+scdiag-train --model facebook/convnextv2-base-22-22k-384 ...
+
+# Use the built-in ConvViT (ConvNeXtV2 stem + ViT encoder)
+scdiag-train --model convvit --image_size 224 ...
+```
+
+### Adding a custom model
+
+1. Create `scdiag/models/{name}/` with:
+   - `model.py` — the `nn.Module` architecture
+   - `processor.py` — image processor (must have `__call__(images)` → tensor)
+   - `loader.py` — `@register_model("{name}")` decorated loader function
+     returning `(model, processor)`
+   - `__init__.py` — re-export public symbols
+2. Add the import to `scdiag/models/__init__.py`
+3. The model must satisfy the protocol:
+   - `forward(pixel_values=images)` → object with `.logits`
+   - `config.id2label` / `config.label2id` accessible
+   - `extract_backbone_features(pixel_values)` for XGBoost (optional —
+     hook-based fallback works for HF models automatically)
+
+### Built-in custom models
+
+| Name | Description | `--model` value |
+|---|---|---|
+| ConvViT | ConvNeXtV2 stem + 12-layer ViT encoder with CLS-guided attention pooling | `convvit` |
 
 ## Development
 
