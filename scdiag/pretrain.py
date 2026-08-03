@@ -467,6 +467,7 @@ def main(argv=None):
   os.makedirs(args.log_dir, exist_ok=True)
   writer = SummaryWriter(log_dir=args.log_dir)
 
+  completed_epoch = start_epoch - 1  # last fully completed (-1 = none yet)
   global_step = start_epoch * len(loader)
   try:
     for epoch in range(start_epoch, args.epochs):
@@ -483,13 +484,14 @@ def main(argv=None):
       )
       writer.add_scalar("Train/loss_epoch", avg_loss, epoch)
       scheduler.step()
+      completed_epoch = epoch
 
       save_checkpoint(
           {
               "model_state_dict": model.state_dict(),
               "optimizer_state_dict": optimizer.state_dict(),
               "scheduler_state_dict": scheduler.state_dict(),
-              "epoch": epoch,
+              "epoch": completed_epoch,
               "loss": avg_loss,
           },
           args.checkpoint + "_latest.pt",
@@ -507,7 +509,7 @@ def main(argv=None):
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "scheduler_state_dict": scheduler.state_dict(),
-            "epoch": epoch if "epoch" in dir() else 0,
+            "epoch": completed_epoch,
             "loss": avg_loss if "avg_loss" in dir() else 0.0,
         },
         args.checkpoint + "_latest.pt",
