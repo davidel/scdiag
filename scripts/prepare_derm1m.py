@@ -41,27 +41,27 @@ BASE_URL = "https://huggingface.co/datasets/redlessone/Derm1M/resolve/main"
 def download_file(url, dest_path, token=None):
   """Download a file using huggingface_hub for better performance."""
   from huggingface_hub import hf_hub_download
-  
+
   # Extract repo_id and filename from URL
   # URL format: https://huggingface.co/datasets/redlessone/Derm1M/resolve/main/IIYI.zip
   parts = url.split("/datasets/")[-1].split("/resolve/")
   repo_id = parts[0]  # redlessone/Derm1M
   filename = parts[1].split("/", 1)[1] if "/" in parts[1] else parts[1]
-  
+
   print(f"  Downloading {filename} ...")
   downloaded_path = hf_hub_download(
-    repo_id=repo_id,
-    filename=filename,
-    repo_type="dataset",
-    local_dir=os.path.dirname(dest_path),
-    token=token,
+      repo_id=repo_id,
+      filename=filename,
+      repo_type="dataset",
+      local_dir=os.path.dirname(dest_path),
+      token=token,
   )
-  
+
   # Move to expected location if different
   if Path(downloaded_path) != dest_path:
     import shutil
     shutil.move(downloaded_path, dest_path)
-  
+
   print(f"    Done  ({dest_path.stat().st_size / 1024**3:.2f} GB)")
 
 
@@ -155,9 +155,8 @@ def main():
     print(f"    Done")
 
   # Walk the extracted directories and copy images into the output folder.
-  # The zip files extract into sub-directories (IIYI/, ISIC/, youtube/ etc.)
-  # with image files inside them.  We copy everything into a flat output
-  # directory preserving relative structure.
+  # Flatten everything into a single directory — _ImageFolderDataset only
+  # scans root_dir.iterdir(), not subdirectories.
   image_count = 0
   for root, _dirs, files in os.walk(zip_dir):
     root_path = Path(root)
@@ -167,10 +166,11 @@ def main():
           ".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp", ".gif"
       }:
         continue
-      # Compute relative path from zip_dir to preserve subdirectory structure
-      rel = fpath.relative_to(zip_dir)
-      dest = output_path / rel
-      dest.parent.mkdir(parents=True, exist_ok=True)
+      dest = output_path / fname
+      # Handle filename collisions by prefixing with parent dir name
+      if dest.exists():
+        parent_name = fpath.parent.name
+        dest = output_path / f"{parent_name}_{fname}"
       shutil.copy2(fpath, dest)
       image_count += 1
       if image_count % 10000 == 0:
