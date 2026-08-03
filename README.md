@@ -162,28 +162,28 @@ patches and trains the encoder to reconstruct the original pixel values via a
 lightweight MLP decoder.
 
 ```bash
-scdiag-pretrain --model convvit \\
-                --datasets HAM10000 "redlessone/Derm1M" \\
-                --cache_dir ~/.cache/huggingface \\
-                --hf_token hf_XXXX \\
-                --image_size 448 \\
-                --batch_size 32 \\
-                --epochs 200 \\
-                --lr 1e-4 \\
-                --warmup_epochs 10 \\
-                --mask_ratio 0.60 \\
-                --decoder_dim 768 \\
-                --decoder_depth 2 \\
-                --amp_dtype bfloat16 \\
+scdiag-pretrain --model convvit \
+                --datasets HAM10000 "redlessone/Derm1M" \
+                --cache_dir ~/.cache/huggingface \
+                --hf_token hf_XXXX \
+                --image_size 448 \
+                --batch_size 32 \
+                --epochs 200 \
+                --lr 1e-4 \
+                --warmup_epochs 10 \
+                --mask_ratio 0.60 \
+                --decoder_dim 768 \
+                --decoder_depth 2 \
+                --amp_dtype bfloat16 \
                 --checkpoint ./checkpoints/convvit_simmim
 ```
 
 Then load the pre-trained encoder during supervised fine-tuning:
 
 ```bash
-scdiag-train --model convvit \\
-             --dataset marmal88/skin_cancer \\
-             --pretrained_encoder ./checkpoints/convvit_simmim_latest.pt \\
+scdiag-train --model convvit \
+             --dataset marmal88/skin_cancer \
+             --pretrained_encoder ./checkpoints/convvit_simmim_latest.pt \
              --epochs 100
 ```
 
