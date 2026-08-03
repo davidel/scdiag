@@ -25,7 +25,13 @@ import requests
 # Derm1M zip archives hosted on HuggingFace.
 DERM1M_ZIPS = [
     "IIYI.zip",
-    "ISIC.zip",
+    "edu.zip",
+    "note.zip",
+    "public.zip",
+    "pubmed.zip",
+    "reddit.zip",
+    "twitter.zip",
+    "validation_data.zip",
     "youtube.zip",
 ]
 
