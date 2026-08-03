@@ -181,6 +181,7 @@ scdiag-train --model convvit \\
 |---|---|---|
 | `--model` | `convvit` | Model name registered in scdiag (e.g. `convvit`) or HuggingFace model ID. |
 | `--datasets` | (required) | Space-separated dataset names or local paths. HuggingFace IDs or directories. |
+| `--cache_dir` | `None` | HuggingFace cache directory for dataset and model downloads. |
 | `--image_size` | `448` | Input image size (square). |
 | `--mask_ratio` | `0.60` | Fraction of patches to mask. |
 | `--decoder_dim` | `768` | Decoder hidden dimension. |

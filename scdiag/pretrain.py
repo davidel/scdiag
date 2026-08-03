@@ -392,6 +392,7 @@ def main(argv=None):
       id2label={},
       label2id={},
       image_size=args.image_size,
+      cache_dir=args.cache_dir,
       device=device,
   )
   encoder = get_backbone(base_model)
