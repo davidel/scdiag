@@ -88,12 +88,14 @@ def main():
         help="HuggingFace API token (or set HF_TOKEN env var)",
     )
     parser.add_argument(
-        "--skip_download", action="store_true",
-        help="Skip downloading zips (use if already extracted elsewhere)",
+        "--zip_dir", type=str, default=None,
+        help="Directory to store zip archives. Existing zips are reused, "
+             "missing ones are downloaded. If omitted, a temp directory is used.",
     )
     parser.add_argument(
-        "--zip_dir", type=str, default=None,
-        help="Directory containing pre-downloaded zip files (with --skip_download)",
+        "--skip_download", action="store_true",
+        help="Fail instead of downloading missing zips (use with --zip_dir "
+             "to verify all archives are present before proceeding)",
     )
     args = parser.parse_args()
 
@@ -110,36 +112,40 @@ def main():
     
     output_path.mkdir(parents=True, exist_ok=True)
 
-    if args.skip_download:
-        if not args.zip_dir:
-            parser.error("--skip_download requires --zip_dir to specify where zips are located")
+    # Determine zip directory
+    if args.zip_dir:
         zip_dir = Path(args.zip_dir)
-        if not zip_dir.exists():
-            parser.error(f"--zip_dir {zip_dir} does not exist")
-        # Check for missing zips
-        missing = [z for z in DERM1M_ZIPS if not (zip_dir / z).exists()]
-        if missing:
-            parser.error(f"Missing zip archives in {zip_dir}: {', '.join(missing)}")
-        print(f"Using pre-downloaded zips from {zip_dir}")
+        zip_dir.mkdir(parents=True, exist_ok=True)
     else:
-        # Download and extract into a temp directory
         zip_dir = Path(tempfile.mkdtemp(prefix="derm1m_"))
-        print(f"Downloading Derm1M zip archives to {zip_dir} ...")
 
-        for zip_name in DERM1M_ZIPS:
+    # Check which zips are present and which need downloading
+    existing = [z for z in DERM1M_ZIPS if (zip_dir / z).exists()]
+    missing = [z for z in DERM1M_ZIPS if not (zip_dir / z).exists()]
+
+    if existing:
+        print(f"Found {len(existing)} existing zip(s) in {zip_dir}:")
+        for z in existing:
+            print(f"  {z}")
+
+    if missing:
+        if args.skip_download:
+            parser.error(f"Missing zip archives in {zip_dir}: {', '.join(missing)}")
+        print(f"Downloading {len(missing)} missing zip(s) to {zip_dir} ...")
+        for zip_name in missing:
             url = f"{BASE_URL}/{zip_name}"
             zip_path = zip_dir / zip_name
+            download_file(url, zip_path, token)
+    else:
+        print(f"All {len(DERM1M_ZIPS)} zip archives present in {zip_dir}")
 
-            # Skip if already downloaded (resumable)
-            if zip_path.exists():
-                print(f"  {zip_name} already exists, skipping download")
-            else:
-                download_file(url, zip_path, token)
-
-            print(f"  Extracting {zip_name} ...")
-            with zipfile.ZipFile(zip_path, "r") as zf:
-                zf.extractall(zip_dir)
-            print(f"    Done")
+    # Extract all zips
+    for zip_name in DERM1M_ZIPS:
+        zip_path = zip_dir / zip_name
+        print(f"  Extracting {zip_name} ...")
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            zf.extractall(zip_dir)
+        print(f"    Done")
 
     # Walk the extracted directories and copy images into the output folder.
     # The zip files extract into sub-directories (IIYI/, ISIC/, youtube/ etc.)
