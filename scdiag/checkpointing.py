@@ -6,8 +6,29 @@ Both scripts import these functions rather than maintaining separate copies.
 
 import logging
 import os
+from typing import Set
 
 import torch
+
+_VALID_STATE_FLAGS = {"opt", "sched", "amp", "none"}
+
+
+def parse_state_flags(flag_value: str) -> Set[str]:
+  """Parse a comma-separated state flag string into a set of tokens.
+
+  Returns a set like ``{"opt", "sched", "amp"}``.
+  If the string contains ``"none"``, returns an empty set.
+  Raises ValueError on invalid tokens or empty input.
+  """
+  tokens = {t.strip().lower() for t in flag_value.split(",")}
+  if not tokens:
+    raise ValueError("state flag string must not be empty")
+  invalid = tokens - _VALID_STATE_FLAGS
+  if invalid:
+    raise ValueError(f"Invalid state flag(s): {invalid}. Allowed: {_VALID_STATE_FLAGS}")
+  if "none" in tokens:
+    return set()
+  return tokens
 
 
 def filter_state_dict(ckpt_state, model_state):
@@ -33,8 +54,8 @@ def filter_state_dict(ckpt_state, model_state):
   return filtered, skipped
 
 
-def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler,
-                      scaler, device, states_to_load):
+def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scaler,
+                      device, states_to_load):
   """Resume training state from an existing checkpoint.
 
     Looks for *ckpt_latest* first, then *ckpt_best*.  Restores model weights
@@ -108,8 +129,10 @@ def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler,
   return start_epoch, best_metric
 
 
-
-def load_checkpoint_weights(path, model, device="cpu", strict=False,
+def load_checkpoint_weights(path,
+                            model,
+                            device="cpu",
+                            strict=False,
                             exclude_prefixes=None):
   """Load model weights from a checkpoint, with optional key filtering.
 
@@ -138,7 +161,8 @@ def load_checkpoint_weights(path, model, device="cpu", strict=False,
 
   if exclude_prefixes:
     state = {
-        k: v for k, v in state.items()
+        k: v
+        for k, v in state.items()
         if not any(k.startswith(p) for p in exclude_prefixes)
     }
 

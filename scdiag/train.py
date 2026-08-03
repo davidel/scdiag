@@ -21,15 +21,17 @@ from torchvision.transforms import v2
 
 from scdiag.models import load_model, load_processor
 
-from scdiag.checkpointing import filter_state_dict, resume_checkpoint
+from scdiag.checkpointing import (
+    filter_state_dict,
+    parse_state_flags,
+    resume_checkpoint,
+)
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.logging_utils import setup_logging
 from scdiag.gcs_utils import save_checkpoint, checkpoint_dict
 from scdiag.model_utils import DTYPE_MAP
 
 from scdiag.datasets.hf_proxy import HFDatasetProxy
-
-_VALID_STATE_FLAGS = {"opt", "sched", "amp", "none"}
 
 # ---------------------------------------------------------------------------
 # Loss function and CLI helpers for Phase 1 of the loss revision plan.
@@ -139,26 +141,6 @@ class CombinedFocalLoss(nn.Module):
     elif self.reduction == "sum":
       return loss.sum()
     return loss
-
-
-
-def parse_state_flags(flag_value):
-  """Parse a comma-separated state flag string into a set of tokens.
-
-    Returns a set like ``{"opt", "sched", "amp"}``.
-    If the string contains ``"none"``, returns an empty set.
-    Raises ValueError on invalid tokens or empty input.
-    """
-  tokens = {t.strip().lower() for t in flag_value.split(",")}
-  if not tokens:
-    raise ValueError("state flag string must not be empty")
-  invalid = tokens - _VALID_STATE_FLAGS
-  if invalid:
-    raise ValueError(f"Invalid state flag(s): {invalid}. Allowed: {_VALID_STATE_FLAGS}")
-  if "none" in tokens:
-    return set()
-  return tokens
-
 
 
 def load_augmentation_script(path_or_url):
@@ -365,10 +347,7 @@ def parse_args(argv=None):
       default=5,
       help="Number of training epochs.",
   )
-  parser.add_argument("--batch_size",
-                      type=int,
-                      default=32,
-                      help="Batch size.")
+  parser.add_argument("--batch_size", type=int, default=32, help="Batch size.")
   parser.add_argument(
       "--lr",
       type=float,

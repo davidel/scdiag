@@ -30,9 +30,9 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import v2
 from torchvision.transforms.functional import InterpolationMode
 
-from scdiag.checkpointing import resume_checkpoint
+from scdiag.checkpointing import parse_state_flags, resume_checkpoint
 from scdiag.datasets.ensemble import DermoscopyEnsemble
-from scdiag.gcs_utils import save_checkpoint
+from scdiag.gcs_utils import checkpoint_dict, save_checkpoint
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.logging_utils import setup_logging
 from scdiag.model_utils import DTYPE_MAP, get_backbone
@@ -329,6 +329,16 @@ def parse_args(argv=None):
                       action="store_false",
                       help="Start training from scratch, ignoring any "
                       "existing checkpoints.")
+  parser.add_argument("--state_save",
+                      type=str,
+                      default="opt,sched",
+                      help="Comma-separated states to save in checkpoints. "
+                      "Allowed: opt, sched, amp, none.")
+  parser.add_argument("--state_load",
+                      type=str,
+                      default="opt,sched",
+                      help="Comma-separated states to restore from checkpoints. "
+                      "Allowed: opt, sched, amp, none.")
 
   parser.add_argument("--log_level",
                       type=str,
@@ -449,6 +459,9 @@ def main(argv=None):
         eta_min=args.lr * 0.01,
     )
 
+  states_to_save = parse_state_flags(args.state_save)
+  states_to_load = parse_state_flags(args.state_load)
+
   start_epoch = 0
   if args.resume:
     ckpt_latest = args.checkpoint + "_latest.pt"
@@ -461,7 +474,7 @@ def main(argv=None):
         scheduler,
         scaler=None,
         device=device,
-        states_to_load={"opt", "sched"},
+        states_to_load=states_to_load,
     )
 
   os.makedirs(args.log_dir, exist_ok=True)
@@ -487,13 +500,14 @@ def main(argv=None):
       completed_epoch = epoch
 
       save_checkpoint(
-          {
-              "model_state_dict": model.state_dict(),
-              "optimizer_state_dict": optimizer.state_dict(),
-              "scheduler_state_dict": scheduler.state_dict(),
-              "epoch": completed_epoch,
-              "loss": avg_loss,
-          },
+          checkpoint_dict(
+              model,
+              optimizer,
+              scheduler,
+              completed_epoch,
+              states_to_save=states_to_save,
+              loss=avg_loss,
+          ),
           args.checkpoint + "_latest.pt",
           gcs_uri=args.gcs_checkpoint,
       )
@@ -505,13 +519,14 @@ def main(argv=None):
     logging.warning("Interrupt detected!")
   finally:
     save_checkpoint(
-        {
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "scheduler_state_dict": scheduler.state_dict(),
-            "epoch": completed_epoch,
-            "loss": avg_loss if "avg_loss" in dir() else 0.0,
-        },
+        checkpoint_dict(
+            model,
+            optimizer,
+            scheduler,
+            completed_epoch,
+            states_to_save=states_to_save,
+            loss=avg_loss if "avg_loss" in dir() else 0.0,
+        ),
         args.checkpoint + "_latest.pt",
         gcs_uri=args.gcs_checkpoint,
     )
