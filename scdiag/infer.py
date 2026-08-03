@@ -15,8 +15,7 @@ from scdiag.model_utils import build_val_transform, load_model_for_inference
 
 def parse_args(argv=None):
   parser = argparse.ArgumentParser(
-      description="Classify images with a fine-tuned HF model."
-  )
+      description="Classify images with a fine-tuned HF model.")
   parser.add_argument(
       "--model",
       required=True,
@@ -152,10 +151,9 @@ def main(argv=None):
 
     # XGBoost inference
     if xgb_model is not None:
-      from scdiag.model_utils import extract_features
+      from scdiag.model_utils import extract_backbone_features
       with torch.no_grad():
-        backbone_out = model.convnextv2(pixel_values)
-        features = extract_features(backbone_out)
+        features = extract_backbone_features(model, pixel_values)
       xgb_probs = xgb_model.predict_proba(features.cpu().numpy())[0]
       xgb_predictions = []
       for idx in np.argsort(xgb_probs)[::-1].tolist():

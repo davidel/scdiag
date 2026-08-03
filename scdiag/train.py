@@ -20,6 +20,8 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import v2
 from transformers import AutoImageProcessor, AutoModelForImageClassification
 
+from scdiag.models import is_custom_model, load_custom_model
+
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.logging_utils import setup_logging
 from scdiag.gcs_utils import save_checkpoint, checkpoint_dict
@@ -28,7 +30,6 @@ from scdiag.model_utils import DTYPE_MAP
 from scdiag.hf_proxy import HFDatasetProxy
 
 _VALID_STATE_FLAGS = {"opt", "sched", "amp", "none"}
-
 
 # ---------------------------------------------------------------------------
 # Loss function and CLI helpers for Phase 1 of the loss revision plan.
@@ -54,22 +55,19 @@ def parse_class_multipliers(s, num_labels, label2id):
     if not pair:
       continue
     if "=" not in pair:
-      raise ValueError(
-          f"Invalid --class_multipliers entry: '{pair}'. "
-          "Expected NAME=VALUE (e.g. melanoma=4.0).")
+      raise ValueError(f"Invalid --class_multipliers entry: '{pair}'. "
+                       "Expected NAME=VALUE (e.g. melanoma=4.0).")
     name, val = pair.split("=", 1)
     name, val = name.strip(), val.strip()
     if name.isdigit():
       idx = int(name)
     else:
       if name not in label2id:
-        raise ValueError(
-            f"Unknown class name '{name}' in --class_multipliers. "
-            f"Available: {list(label2id.keys())}")
+        raise ValueError(f"Unknown class name '{name}' in --class_multipliers. "
+                         f"Available: {list(label2id.keys())}")
       idx = label2id[name]
     if not (0 <= idx < num_labels):
-      raise ValueError(
-          f"Label index {idx} out of range [0, {num_labels})")
+      raise ValueError(f"Label index {idx} out of range [0, {num_labels})")
     m[idx] = float(val)
   return m
 
@@ -84,8 +82,7 @@ class CombinedFocalLoss(nn.Module):
   (log-sum-exp trick) rather than reimplementing log_softmax manually.
   """
 
-  def __init__(self, weights, gamma=2.0, label_smoothing=0.0,
-               reduction='mean'):
+  def __init__(self, weights, gamma=2.0, label_smoothing=0.0, reduction='mean'):
     """
     Args:
         weights: [num_classes] W_final = W_freq x M_c, pre-computed at
@@ -113,7 +110,8 @@ class CombinedFocalLoss(nn.Module):
     """
     # Use PyTorch's numerically stable CE with reduction='none'.
     ce_loss = nn.functional.cross_entropy(
-        inputs, targets,
+        inputs,
+        targets,
         weight=self.weights,
         label_smoothing=self.label_smoothing,
         reduction='none',
@@ -132,7 +130,7 @@ class CombinedFocalLoss(nn.Module):
     with torch.no_grad():
       prob = torch.nn.functional.softmax(inputs, dim=-1)
       p_t = prob.gather(1, targets.unsqueeze(1)).squeeze(1)
-      focal_weight = (1 - p_t) ** self.gamma
+      focal_weight = (1 - p_t)**self.gamma
 
     loss = focal_weight * ce_loss
 
@@ -156,9 +154,8 @@ def filter_state_dict(ckpt_state, model_state):
     if k not in model_state:
       skipped.append((k, "missing in model"))
     elif v.shape != model_state[k].shape:
-      skipped.append((k,
-          f"shape mismatch: checkpoint {list(v.shape)} "
-          f"vs model {list(model_state[k].shape)}"))
+      skipped.append((k, f"shape mismatch: checkpoint {list(v.shape)} "
+                      f"vs model {list(model_state[k].shape)}"))
     else:
       filtered[k] = v
   return filtered, skipped
@@ -176,16 +173,14 @@ def parse_state_flags(flag_value):
     raise ValueError("state flag string must not be empty")
   invalid = tokens - _VALID_STATE_FLAGS
   if invalid:
-    raise ValueError(
-        f"Invalid state flag(s): {invalid}. Allowed: {_VALID_STATE_FLAGS}"
-    )
+    raise ValueError(f"Invalid state flag(s): {invalid}. Allowed: {_VALID_STATE_FLAGS}")
   if "none" in tokens:
     return set()
   return tokens
 
 
-def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler,
-                      scaler, device, states_to_load):
+def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scaler,
+                      device, states_to_load):
   """Resume training state from an existing checkpoint.
 
   Looks for *ckpt_latest* first, then *ckpt_best*.  Restores model weights
@@ -211,7 +206,8 @@ def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler,
   # Filter checkpoint to skip keys with shape mismatches
   # (e.g. classifier head when resuming with different num_classes).
   filtered, skipped = filter_state_dict(
-      ckpt["model_state_dict"], model.state_dict(),
+      ckpt["model_state_dict"],
+      model.state_dict(),
   )
   if skipped:
     for k, reason in skipped:
@@ -281,9 +277,10 @@ def load_augmentation_script(path_or_url):
     with urllib.request.urlopen(path_or_url) as resp:
       code = resp.read().decode("utf-8")
     # Use a named temp file so tracebacks show a meaningful filename.
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".py", delete=False, prefix="aug_"
-    ) as tmp:
+    with tempfile.NamedTemporaryFile(mode="w",
+                                     suffix=".py",
+                                     delete=False,
+                                     prefix="aug_") as tmp:
       tmp.write(code)
       tmp_path = tmp.name
     try:
@@ -297,10 +294,8 @@ def load_augmentation_script(path_or_url):
 
   fn = namespace.get("create_train_transform")
   if fn is None or not callable(fn):
-    raise ValueError(
-        f"Script {path_or_url!r} does not define a callable "
-        "'create_train_transform(image_size, **kwargs)'."
-    )
+    raise ValueError(f"Script {path_or_url!r} does not define a callable "
+                     "'create_train_transform(image_size, **kwargs)'.")
   return fn
 
 
@@ -324,10 +319,8 @@ def build_transforms(processor, image_size, train_aug_fn=None):
   if train_aug_fn is not None:
     user_transforms = train_aug_fn(image_size)
     if not isinstance(user_transforms, list):
-      raise TypeError(
-          "create_train_transform() must return a list of transforms, "
-          f"got {type(user_transforms).__name__}"
-      )
+      raise TypeError("create_train_transform() must return a list of transforms, "
+                      f"got {type(user_transforms).__name__}")
     train_augmentations = v2.Compose(user_transforms + tail)
   else:
     train_augmentations = v2.Compose([
@@ -441,7 +434,8 @@ def parse_args(argv=None):
       "--dataset",
       type=str,
       default="marmal88/skin_cancer",
-      help="HuggingFace dataset name, or 'imagefolder/PATH' for local ImageFolder datasets (default: %(default)s)",
+      help=
+      "HuggingFace dataset name, or 'imagefolder/PATH' for local ImageFolder datasets (default: %(default)s)",
   )
   parser.add_argument(
       "--image_size",
@@ -454,9 +448,9 @@ def parse_args(argv=None):
       type=str,
       default=None,
       help="Path or URL to a Python script defining "
-           "create_train_transform(image_size, **kwargs) -> list of v2 "
-           "transforms. The fixed tail (ToImage, ToDtype, Normalize) is "
-           "appended automatically.",
+      "create_train_transform(image_size, **kwargs) -> list of v2 "
+      "transforms. The fixed tail (ToImage, ToDtype, Normalize) is "
+      "appended automatically.",
   )
   parser.add_argument(
       "--epochs",
@@ -497,17 +491,17 @@ def parse_args(argv=None):
       type=float,
       default=0.0,
       help="Focal loss gamma (default: %(default)s). "
-           "0.0 disables focal modulation (standard weighted CE).",
+      "0.0 disables focal modulation (standard weighted CE).",
   )
   parser.add_argument(
       "--class_multipliers",
       type=str,
       default="",
       help="Comma-separated NAME=VALUE pairs to override per-class "
-           "clinical severity multipliers (M_c). NAME is a label string "
-           "(e.g. melanoma) or integer label index. VALUE is a float. "
-           "Unspecified classes default to 1.0. Example: "
-           "'melanoma=4.0,melanocytic_Nevi=0.5' (default: \"\")",
+      "clinical severity multipliers (M_c). NAME is a label string "
+      "(e.g. melanoma) or integer label index. VALUE is a float. "
+      "Unspecified classes default to 1.0. Example: "
+      "'melanoma=4.0,melanocytic_Nevi=0.5' (default: \"\")",
   )
   parser.add_argument(
       "--grad_accum_steps",
@@ -609,40 +603,57 @@ def parse_args(argv=None):
   # XGBoost
   g = parser.add_argument_group("xgboost")
   g.add_argument(
-      "--xgboost_model", default=None,
+      "--xgboost_model",
+      default=None,
       help="Output path for XGBoost model. If set, train XGBoost on "
       "backbone features after training completes (default: disabled)",
   )
   g.add_argument(
-      "--xgb_max_depth", type=int, default=6,
+      "--xgb_max_depth",
+      type=int,
+      default=6,
       help="XGBoost max tree depth (default: %(default)s)",
   )
   g.add_argument(
-      "--xgb_n_estimators", type=int, default=200,
+      "--xgb_n_estimators",
+      type=int,
+      default=200,
       help="XGBoost number of trees (default: %(default)s)",
   )
   g.add_argument(
-      "--xgb_learning_rate", type=float, default=0.1,
+      "--xgb_learning_rate",
+      type=float,
+      default=0.1,
       help="XGBoost learning rate (default: %(default)s)",
   )
   g.add_argument(
-      "--xgb_subsample", type=float, default=0.8,
+      "--xgb_subsample",
+      type=float,
+      default=0.8,
       help="XGBoost row sampling ratio (default: %(default)s)",
   )
   g.add_argument(
-      "--xgb_colsample_bytree", type=float, default=0.8,
+      "--xgb_colsample_bytree",
+      type=float,
+      default=0.8,
       help="XGBoost column sampling ratio (default: %(default)s)",
   )
   g.add_argument(
-      "--xgb_min_child_weight", type=int, default=1,
+      "--xgb_min_child_weight",
+      type=int,
+      default=1,
       help="XGBoost min child weight (default: %(default)s)",
   )
   g.add_argument(
-      "--xgb_gamma", type=float, default=0.0,
+      "--xgb_gamma",
+      type=float,
+      default=0.0,
       help="XGBoost min split loss (default: %(default)s)",
   )
   g.add_argument(
-      "--xgb_reg_alpha", type=float, default=0.0,
+      "--xgb_reg_alpha",
+      type=float,
+      default=0.0,
       help="XGBoost L1 regularization (default: %(default)s)",
   )
 
@@ -659,7 +670,9 @@ def train_xgboost_on_backbone(args, train_ds, val_ds, device):
       device: torch device.
   """
   from scdiag.model_utils import (
-      build_val_transform, collect_features, load_model_for_inference,
+      build_val_transform,
+      collect_features,
+      load_model_for_inference,
   )
   from scdiag.hf_proxy import HFDatasetProxy
   from scdiag.xgb_utils import train_xgboost, eval_xgboost
@@ -671,9 +684,10 @@ def train_xgboost_on_backbone(args, train_ds, val_ds, device):
   # 1. Load the best checkpoint into a fresh model
   best_ckpt_path = args.checkpoint + "_best.pt"
   logging.info(f"Loading best checkpoint: {best_ckpt_path}")
-  model_best, _ = load_model_for_inference(
-      args.model, best_ckpt_path, "cpu", cache_dir=args.cache_dir
-  )
+  model_best, _ = load_model_for_inference(args.model,
+                                           best_ckpt_path,
+                                           "cpu",
+                                           cache_dir=args.cache_dir)
   model_best = model_best.to(device)
 
   # 2. Rebuild train and val datasets with val transforms (not train augs)
@@ -684,15 +698,11 @@ def train_xgboost_on_backbone(args, train_ds, val_ds, device):
 
   # 3. Collect features
   logging.info("Extracting train features...")
-  train_features, train_labels = collect_features(
-      model_best, train_proxy, device
-  )
+  train_features, train_labels = collect_features(model_best, train_proxy, device)
   logging.info(f"  Train features shape: {train_features.shape}")
 
   logging.info("Extracting val features...")
-  val_features, val_labels = collect_features(
-      model_best, val_proxy, device
-  )
+  val_features, val_labels = collect_features(model_best, val_proxy, device)
   logging.info(f"  Val features shape: {val_features.shape}")
 
   # 4. Free the model — XGBoost doesn't need it anymore
@@ -715,7 +725,9 @@ def train_xgboost_on_backbone(args, train_ds, val_ds, device):
   )
 
   # 6. Evaluate on val set
-  val_metrics = eval_xgboost(xgb_model, val_features, val_labels,
+  val_metrics = eval_xgboost(xgb_model,
+                             val_features,
+                             val_labels,
                              id2label=train_proxy.id2label)
   logging.info(f"XGBoost val accuracy: {val_metrics['accuracy']:.2%}")
   for cls, acc in val_metrics["per_class_accuracy"].items():
@@ -842,8 +854,7 @@ def train_one_epoch(
       w_macro_f1 = 0.0
       if window_preds:
         w_macro_f1 = f1_score(
-            window_labels, window_preds, average="macro", zero_division=0
-        ) * 100.0
+            window_labels, window_preds, average="macro", zero_division=0) * 100.0
 
       avg_loss = total_loss / total_samples
       top1 = (correct_top1 / total_samples) * 100.0
@@ -891,7 +902,11 @@ def train_one_epoch(
   return avg_loss, top1
 
 
-def evaluate_performance(model, dataloader, criterion, device, amp_dtype,
+def evaluate_performance(model,
+                         dataloader,
+                         criterion,
+                         device,
+                         amp_dtype,
                          id2label=None):
   """Evaluate on a validation/test set.
 
@@ -925,9 +940,10 @@ def evaluate_performance(model, dataloader, criterion, device, amp_dtype,
   top1 = (correct_top1 / total_samples) * 100.0
 
   # Per-class and macro F1.
-  _, _, f1s, _ = precision_recall_fscore_support(
-      all_labels, all_preds, average=None, zero_division=0
-  )
+  _, _, f1s, _ = precision_recall_fscore_support(all_labels,
+                                                 all_preds,
+                                                 average=None,
+                                                 zero_division=0)
   macro_f1 = f1_score(all_labels, all_preds, average="macro", zero_division=0) * 100.0
 
   per_class_f1 = {}
@@ -958,7 +974,12 @@ def main():
   os.makedirs(log_dir, exist_ok=True)
   writer = SummaryWriter(log_dir=log_dir)
 
-  processor = AutoImageProcessor.from_pretrained(args.model, cache_dir=args.cache_dir)
+  # Load processor — defer to after model construction for custom models.
+  custom_model_flag = is_custom_model(args.model)
+  processor = None
+
+  if not custom_model_flag:
+    processor = AutoImageProcessor.from_pretrained(args.model, cache_dir=args.cache_dir)
 
   # Resolve custom augmentation script to a callable, if provided.
   train_aug_fn = None
@@ -967,9 +988,8 @@ def main():
     logging.info(f"Using custom augmentation script: "
                  f"{args.train_augmentation_script}")
 
-  train_transforms, val_transforms = build_transforms(
-      processor, args.image_size, train_aug_fn
-  )
+  train_transforms, val_transforms = build_transforms(processor, args.image_size,
+                                                      train_aug_fn)
 
   train_proxy, val_proxy = load_and_split_dataset(
       args.dataset,
@@ -989,7 +1009,9 @@ def main():
 
   # Apply clinical severity multipliers from --class_multipliers.
   clinical_m = parse_class_multipliers(
-      args.class_multipliers, num_labels, label2id_int,
+      args.class_multipliers,
+      num_labels,
+      label2id_int,
   )
   logging.info(f"Clinical multipliers (M_c): {clinical_m.tolist()}")
 
@@ -1015,15 +1037,26 @@ def main():
       pin_memory=(device.type == "cuda"),
   )
 
-  model = AutoModelForImageClassification.from_pretrained(
-      args.model,
-      num_labels=num_labels,
-      id2label=train_proxy.id2label,
-      label2id=train_proxy.label2id,
-      ignore_mismatched_sizes=True,
-      cache_dir=args.cache_dir,
-  )
-  model.to(device)
+  if custom_model_flag:
+    model, processor = load_custom_model(
+        args.model,
+        num_labels=num_labels,
+        id2label=train_proxy.id2label,
+        label2id=train_proxy.label2id,
+        image_size=args.image_size,
+        device=device,
+        checkpoint_path=args.checkpoint,
+    )
+  else:
+    model = AutoModelForImageClassification.from_pretrained(
+        args.model,
+        num_labels=num_labels,
+        id2label=train_proxy.id2label,
+        label2id=train_proxy.label2id,
+        ignore_mismatched_sizes=True,
+        cache_dir=args.cache_dir,
+    )
+    model.to(device)
 
   total_params = sum(p.numel() for p in model.parameters())
   trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -1068,8 +1101,14 @@ def main():
   ckpt_best = args.checkpoint + "_best.pt"
 
   start_epoch, best_top1 = resume_checkpoint(
-      ckpt_latest, ckpt_best, model, optimizer, scheduler,
-      scaler, device, states_to_load,
+      ckpt_latest,
+      ckpt_best,
+      model,
+      optimizer,
+      scheduler,
+      scaler,
+      device,
+      states_to_load,
   )
 
   completed_epoch = start_epoch - 1  # last fully completed (-1 = none yet)
@@ -1099,7 +1138,11 @@ def main():
       writer.add_scalar("Epoch/Accuracy_Train_Top1", train_t1, epoch)
 
       v_loss, v_t1, v_macro_f1, v_per_class_f1 = evaluate_performance(
-          model, val_loader, criterion, device, args.amp_dtype,
+          model,
+          val_loader,
+          criterion,
+          device,
+          args.amp_dtype,
           id2label=train_proxy.id2label,
       )
       writer.add_scalar("Epoch/Loss_Val", v_loss, epoch)
@@ -1159,9 +1202,7 @@ def main():
 
     if args.xgboost_model:
       # Access raw HF datasets (before proxy wrapping) for XGBoost.
-      train_xgboost_on_backbone(
-          args, train_proxy.dataset, val_proxy.dataset, device
-      )
+      train_xgboost_on_backbone(args, train_proxy.dataset, val_proxy.dataset, device)
 
 
 if __name__ == "__main__":
