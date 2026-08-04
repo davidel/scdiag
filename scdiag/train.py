@@ -431,9 +431,9 @@ def parse_args(argv=None):
   )
   parser.add_argument(
       "--grad_monitor",
-      action=argparse.BooleanOptionalAction,
-      default=False,
-      help="Enable gradient health monitoring during training.",
+      type=int,
+      default=-1,
+      help="Log gradient stats every N steps. -1 (default) = disabled.",
   )
   parser.add_argument(
       "--save_every",
@@ -825,9 +825,6 @@ def train_one_epoch(
       logging.info(msg)
       if gpu:
         logging.info(f"  [Step {batch_idx + 1}/{total_batches}] {gpu}")
-      grad_report = monitor.report() if monitor is not None else None
-      if grad_report:
-        logging.info(grad_report)
       if writer is not None:
         writer.add_scalar("Train/loss", w_loss, global_step)
         writer.add_scalar("Train/top1", w_top1, global_step)
@@ -1079,9 +1076,9 @@ def main():
 
   completed_epoch = start_epoch - 1  # last fully completed (-1 = none yet)
   grad_monitor = None
-  if args.grad_monitor:
-    grad_monitor = GradMonitor(model, log_every=args.log_every)
-    logging.info("Gradient monitoring enabled.")
+  if args.grad_monitor >= 0:
+    grad_monitor = GradMonitor(model, log_every=args.grad_monitor)
+    logging.info(f"Gradient monitoring enabled (every {args.grad_monitor} steps).")
   try:
     for epoch in range(start_epoch, args.epochs):
       effective_batch = args.batch_size * args.grad_accum_steps
