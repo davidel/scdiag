@@ -58,7 +58,8 @@ def build_pretrain_transform(image_size=448):
       v2.CenterCrop(image_size),
       v2.RandomHorizontalFlip(p=0.5),
       v2.RandomVerticalFlip(p=0.5),
-      v2.ToTensor(),
+      v2.ToImage(),
+      v2.ToDtype(torch.float32, scale=True),
   ])
 
 
