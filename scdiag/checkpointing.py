@@ -12,13 +12,73 @@ import torch
 _VALID_STATE_FLAGS = {"opt", "sched", "amp", "none"}
 
 
+def _format_bytes(num_bytes):
+  """Convert a byte count into a human-readable string (KB, MB, GB)."""
+  if num_bytes < 1024:
+    return f"{num_bytes} B"
+  elif num_bytes < 1024**2:
+    return f"{num_bytes / 1024:.2f} KB"
+  elif num_bytes < 1024**3:
+    return f"{num_bytes / 1024**2:.2f} MB"
+  else:
+    return f"{num_bytes / 1024**3:.2f} GB"
+
+
+def log_model_params(model):
+  """Log every parameter name, shape, element count, and memory size.
+
+    Finishes with a summary line showing total parameter count and total
+    memory consumed by the model's parameters.  All columns are
+    dynamically aligned into a tabular layout.
+    """
+  params = list(model.named_parameters())
+  if not params:
+    logging.info("Model has no parameters.")
+    return
+
+  # Pre-compute display values to determine column widths.
+  rows = []
+  for name, param in params:
+    numel = param.numel()
+    param_bytes = numel * param.element_size()
+    shape_str = str(tuple(param.shape))
+    rows.append((name, shape_str, numel, param_bytes))
+
+  # Column widths (header labels are included in the min width).
+  name_w = max(len(r[0]) for r in rows)
+  shape_w = max(len(r[1]) for r in rows)
+  params_w = max(len(f"{r[2]:,d}") for r in rows)
+  size_w = max(len(_format_bytes(r[3])) for r in rows)
+
+  # Header.
+  header = (f"  {'Parameter':<{name_w}}  {'Shape':>{shape_w}}  "
+            f"{'Params':>{params_w}}  {'Size':>{size_w}}")
+  sep = "  " + "-" * (len(header) - 2)
+
+  logging.info("Model parameter details:")
+  logging.info(header)
+  logging.info(sep)
+
+  total_params = 0
+  total_bytes = 0
+  for name, shape_str, numel, param_bytes in rows:
+    total_params += numel
+    total_bytes += param_bytes
+    logging.info(f"  {name:<{name_w}}  {shape_str:>{shape_w}}  "
+                 f"{numel:>{params_w},d}  {_format_bytes(param_bytes):>{size_w}}")
+
+  logging.info(sep)
+  logging.info(f"  {'TOTAL':<{name_w}}  {'':>{shape_w}}  "
+               f"{total_params:>{params_w},d}  {_format_bytes(total_bytes):>{size_w}}")
+
+
 def parse_state_flags(flag_value):
   """Parse a comma-separated state flag string into a set of tokens.
 
-  Returns a set like ``{"opt", "sched", "amp"}``.
-  If the string contains ``"none"``, returns an empty set.
-  Raises ValueError on invalid tokens or empty input.
-  """
+    Returns a set like ``{"opt", "sched", "amp"}``.
+    If the string contains ``"none"``, returns an empty set.
+    Raises ValueError on invalid tokens or empty input.
+    """
   tokens = {t.strip().lower() for t in flag_value.split(",")}
   if not tokens:
     raise ValueError("state flag string must not be empty")
@@ -39,10 +99,10 @@ def checkpoint_dict(model,
                     **extra):
   """Build a standard checkpoint dict.
 
-  ``states_to_save`` is a set like ``{"opt", "sched", "amp"}``.
-  If ``None``, everything is saved (backward compat).
-  Any additional keyword arguments are merged into the dict as-is.
-  """
+    ``states_to_save`` is a set like ``{"opt", "sched", "amp"}``.
+    If ``None``, everything is saved (backward compat).
+    Any additional keyword arguments are merged into the dict as-is.
+    """
   d = {
       "model_state_dict": model.state_dict(),
       "epoch": epoch,
@@ -54,7 +114,7 @@ def checkpoint_dict(model,
   if states_to_save is None or "sched" in states_to_save:
     d["scheduler_state_dict"] = scheduler.state_dict()
   if "amp" in states_to_save:
-    d["scaler_state_dict"] = (scaler.state_dict() if scaler is not None else None)
+    d["scaler_state_dict"] = scaler.state_dict() if scaler is not None else None
   d.update(extra)
   return d
 
@@ -124,6 +184,8 @@ def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scale
   if result.unexpected_keys:
     logging.warning(f"  Unexpected keys (ignored): "
                     f"{result.unexpected_keys}")
+
+  log_model_params(model)
 
   if "opt" in states_to_load and "optimizer_state_dict" in ckpt:
     if skipped:
