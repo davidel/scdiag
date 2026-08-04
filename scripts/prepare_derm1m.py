@@ -169,6 +169,8 @@ def main():
   # Walk the extracted directories and copy images into the output folder.
   # Flatten everything into a single directory — ImageFolderDataset only
   # scans root_dir.iterdir(), not subdirectories.
+  # All files are renamed to IMG_XXXXXXXX.ext (zero-padded sequential number)
+  # to avoid unicode / special-character filenames from the zip archives.
   image_count = 0
   for root, _dirs, files in os.walk(zip_dir):
     root_path = Path(root)
@@ -178,13 +180,10 @@ def main():
           ".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp", ".gif"
       }:
         continue
-      dest = output_path / fname
-      # Handle filename collisions by prefixing with parent dir name
-      if dest.exists():
-        parent_name = fpath.parent.name
-        dest = output_path / f"{parent_name}_{fname}"
-      shutil.copy2(fpath, dest)
       image_count += 1
+      ext = fpath.suffix.lower()
+      dest = output_path / f"IMG_{image_count:08d}{ext}"
+      shutil.copy2(fpath, dest)
       if image_count % 10000 == 0:
         print(f"  Copied {image_count:,} images ...")
 
