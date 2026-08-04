@@ -30,6 +30,20 @@ class GlogFormatter(logging.Formatter):
     return "\n".join(f"{hdr} {line}" for line in lines)
 
 
+def fatal(msg, exc=RuntimeError):
+  """Log *msg* at CRITICAL level and raise *exc*.
+
+  Use this for unrecoverable errors where the program must stop immediately.
+  The exception is always raised after logging so the caller never continues.
+
+  Args:
+      msg: Message to log and include in the exception.
+      exc: Exception class to raise (default: ``RuntimeError``).
+  """
+  logging.critical(msg)
+  raise exc(msg)
+
+
 def setup_logging(level="INFO"):
   """Configure root logger with glog-style formatting.
 

@@ -39,7 +39,7 @@ from scdiag.cli_utils import KVPairAction
 from scdiag.datasets.ensemble import DermoscopyEnsemble
 from scdiag.gcs_utils import save_checkpoint
 from scdiag.gpu_utils import gpu_stats_str
-from scdiag.logging_utils import setup_logging
+from scdiag.logging_utils import fatal, setup_logging
 from scdiag.model_utils import DTYPE_MAP, get_backbone
 from scdiag.optim_factory import create_optimizer, create_scheduler
 from scdiag.models.convvit.simmim import (
@@ -435,9 +435,8 @@ def main(argv=None):
   dataset = build_pretrain_dataset(args)
   logging.info(f"Total images: {len(dataset):,}")
   if len(dataset) == 0:
-    logging.error("No images loaded from any dataset. "
-                  "Check --datasets, --hf_token, and --cache_dir.")
-    return
+    fatal("No images loaded from any dataset. "
+          "Check --datasets, --hf_token, and --cache_dir.")
   loader = DataLoader(
       dataset,
       batch_size=args.batch_size,
