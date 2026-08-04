@@ -41,6 +41,7 @@ from scdiag.gcs_utils import save_checkpoint
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.logging_utils import fatal, setup_logging
 from scdiag.model_utils import DTYPE_MAP, get_backbone
+from scdiag.grad_monitor import GradMonitor
 from scdiag.optim_factory import create_optimizer, create_scheduler
 from scdiag.models.convvit.simmim import (
     ConvViTSimMIM,
@@ -151,7 +152,8 @@ def train_one_epoch(model,
                     epoch,
                     global_step,
                     writer,
-                    log_every=50):
+                    log_every=50,
+                    monitor=None):
   """Run one epoch of SimMIM pre-training.
 
     Returns ``(avg_loss, global_step)``.
@@ -185,6 +187,8 @@ def train_one_epoch(model,
       loss = simmim_loss(pred, target, mask)
 
     loss.backward()
+    if monitor is not None:
+      monitor.step(global_step)
     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
     optimizer.step()
     optimizer.zero_grad(set_to_none=True)
@@ -210,6 +214,9 @@ def train_one_epoch(model,
       logging.info(msg)
       if gpu:
         logging.info(f"  [Step {step + 1}/{total_batches}] {gpu}")
+      grad_report = monitor.report() if monitor is not None else None
+      if grad_report:
+        logging.info(grad_report)
       if writer is not None:
         writer.add_scalar("Train/loss_step", w_loss, global_step)
         writer.add_scalar("Train/loss_avg", avg_loss_so_far, global_step)
@@ -327,15 +334,10 @@ def parse_args(argv=None):
                       "(format: gs://BUCKET/PREFIX). Requires "
                       "google-cloud-storage package.")
   parser.add_argument("--resume",
-                      action="store_true",
+                      action=argparse.BooleanOptionalAction,
                       default=True,
                       help="Resume training from latest checkpoint if one "
                       "exists.")
-  parser.add_argument("--no_resume",
-                      dest="resume",
-                      action="store_false",
-                      help="Start training from scratch, ignoring any "
-                      "existing checkpoints.")
   parser.add_argument("--state_save",
                       type=str,
                       default="opt,sched",
@@ -361,6 +363,10 @@ def parse_args(argv=None):
                       type=int,
                       default=50,
                       help="Log training metrics every N optimization steps.")
+  parser.add_argument("--grad_monitor",
+                      action=argparse.BooleanOptionalAction,
+                      default=False,
+                      help="Enable gradient health monitoring during pre-training.")
   parser.add_argument("--vis_every",
                       type=int,
                       default=10,
@@ -514,6 +520,10 @@ def main(argv=None):
 
   completed_epoch = start_epoch - 1  # last fully completed (-1 = none yet)
   global_step = start_epoch * len(loader)
+  grad_monitor = None
+  if args.grad_monitor:
+    grad_monitor = GradMonitor(model, log_every=args.log_every)
+    logging.info("Gradient monitoring enabled.")
   try:
     for epoch in range(start_epoch, args.epochs):
       avg_loss, global_step = train_one_epoch(
@@ -526,6 +536,7 @@ def main(argv=None):
           global_step,
           writer,
           log_every=args.log_every,
+          monitor=grad_monitor,
       )
       writer.add_scalar("Train/loss_epoch", avg_loss, epoch)
       scheduler.step()

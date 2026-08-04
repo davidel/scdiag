@@ -32,6 +32,7 @@ from scdiag.gpu_utils import gpu_stats_str
 from scdiag.logging_utils import setup_logging
 from scdiag.gcs_utils import save_checkpoint
 from scdiag.model_utils import DTYPE_MAP
+from scdiag.grad_monitor import GradMonitor
 from scdiag.optim_factory import create_optimizer, create_scheduler
 
 from scdiag.datasets.hf_proxy import HFDatasetProxy
@@ -429,6 +430,12 @@ def parse_args(argv=None):
       help="Log every N steps.",
   )
   parser.add_argument(
+      "--grad_monitor",
+      action=argparse.BooleanOptionalAction,
+      default=False,
+      help="Enable gradient health monitoring during training.",
+  )
+  parser.add_argument(
       "--save_every",
       type=int,
       default=500,
@@ -716,6 +723,7 @@ def train_one_epoch(
     best_top1,
     args,
     writer=None,
+    monitor=None,
 ):
   """Train for one epoch.
 
@@ -760,6 +768,9 @@ def train_one_epoch(
       scaler.scale(loss).backward()
     else:
       loss.backward()
+
+    if monitor is not None:
+      monitor.step(epoch * total_batches + batch_idx)
 
     # Step optimizer only every grad_accum_steps batches (or at end of epoch).
     if (batch_idx + 1) % args.grad_accum_steps == 0 or (batch_idx + 1) == total_batches:
@@ -814,6 +825,9 @@ def train_one_epoch(
       logging.info(msg)
       if gpu:
         logging.info(f"  [Step {batch_idx + 1}/{total_batches}] {gpu}")
+      grad_report = monitor.report() if monitor is not None else None
+      if grad_report:
+        logging.info(grad_report)
       if writer is not None:
         writer.add_scalar("Train/loss", w_loss, global_step)
         writer.add_scalar("Train/top1", w_top1, global_step)
@@ -1064,6 +1078,10 @@ def main():
   )
 
   completed_epoch = start_epoch - 1  # last fully completed (-1 = none yet)
+  grad_monitor = None
+  if args.grad_monitor:
+    grad_monitor = GradMonitor(model, log_every=args.log_every)
+    logging.info("Gradient monitoring enabled.")
   try:
     for epoch in range(start_epoch, args.epochs):
       effective_batch = args.batch_size * args.grad_accum_steps
@@ -1083,6 +1101,7 @@ def main():
           best_top1,
           args,
           writer=writer,
+          monitor=grad_monitor,
       )
 
       scheduler.step()
