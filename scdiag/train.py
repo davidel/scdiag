@@ -27,10 +27,12 @@ from scdiag.checkpointing import (
     parse_state_flags,
     resume_checkpoint,
 )
+from scdiag.cli_utils import KVPairAction
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.logging_utils import setup_logging
 from scdiag.gcs_utils import save_checkpoint
 from scdiag.model_utils import DTYPE_MAP
+from scdiag.optim_factory import create_optimizer, create_scheduler
 
 from scdiag.datasets.hf_proxy import HFDatasetProxy
 
@@ -547,6 +549,55 @@ def parse_args(argv=None):
       help="XGBoost L1 regularization.",
   )
 
+  # --- Configurable overrides ------------------------------------------------
+  parser.add_argument(
+      "--model_arg",
+      nargs="+",
+      action=KVPairAction,
+      default={},
+      metavar="KEY=VALUE",
+      help="Override model configuration (repeatable). "
+      "Example: --model_arg depth=6 num_heads=8",
+  )
+  parser.add_argument(
+      "--proc_arg",
+      nargs="+",
+      action=KVPairAction,
+      default={},
+      metavar="KEY=VALUE",
+      help="Override processor configuration (repeatable).",
+  )
+  parser.add_argument(
+      "--optimizer",
+      type=str,
+      default="adamw",
+      help="Optimizer name: adamw (default), adam, sgd.",
+  )
+  parser.add_argument(
+      "--opt_arg",
+      nargs="+",
+      action=KVPairAction,
+      default={},
+      metavar="KEY=VALUE",
+      help="Extra optimizer kwargs (repeatable). "
+      "Example: --opt_arg betas=0.9,0.999 momentum=0.9",
+  )
+  parser.add_argument(
+      "--scheduler",
+      type=str,
+      default="cosine",
+      help="Scheduler name: cosine (default), cosine_warmup, step, constant.",
+  )
+  parser.add_argument(
+      "--sched_arg",
+      nargs="+",
+      action=KVPairAction,
+      default={},
+      metavar="KEY=VALUE",
+      help="Extra scheduler kwargs (repeatable). "
+      "Example: --sched_arg T_max=50 eta_min=1e-6",
+  )
+
   return parser.parse_args(argv)
 
 
@@ -585,6 +636,7 @@ def train_xgboost_on_backbone(args, train_ds, val_ds, device):
       args.model,
       image_size=args.image_size,
       cache_dir=args.cache_dir,
+      **args.proc_arg,
   )
   val_transform = build_val_transform(xgb_processor, args.image_size)
   train_proxy = HFDatasetProxy(train_ds, transform=val_transform)
@@ -874,6 +926,7 @@ def main():
       args.model,
       image_size=args.image_size,
       cache_dir=args.cache_dir,
+      **args.proc_arg,
   )
 
   # Resolve custom augmentation script to a callable, if provided.
@@ -941,6 +994,7 @@ def main():
       device=device,
       checkpoint_path=args.checkpoint,
       cache_dir=args.cache_dir,
+      **args.model_arg,
   )
 
   # Optionally load SimMIM pre-trained encoder weights
@@ -975,27 +1029,25 @@ def main():
       label_smoothing=args.label_smoothing,
   )
 
-  optimizer = optim.AdamW(model.parameters(),
-                          lr=args.lr,
-                          weight_decay=args.weight_decay)
+  optimizer = create_optimizer(
+      model.parameters(),
+      name=args.optimizer,
+      lr=args.lr,
+      weight_decay=args.weight_decay,
+      **args.opt_arg,
+  )
 
   scaler = (torch.amp.GradScaler("cuda")
             if args.amp_dtype == torch.float16 and device.type == "cuda" else None)
 
-  if args.warmup_epochs > 0:
-    scheduler_warmup = optim.lr_scheduler.LinearLR(optimizer,
-                                                   start_factor=0.01,
-                                                   total_iters=args.warmup_epochs)
-    scheduler_cosine = optim.lr_scheduler.CosineAnnealingLR(optimizer,
-                                                            T_max=args.epochs -
-                                                            args.warmup_epochs)
-    scheduler = optim.lr_scheduler.SequentialLR(
-        optimizer,
-        [scheduler_warmup, scheduler_cosine],
-        milestones=[args.warmup_epochs],
-    )
-  else:
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+  scheduler = create_scheduler(
+      optimizer,
+      name=args.scheduler,
+      epochs=args.epochs,
+      warmup_epochs=args.warmup_epochs,
+      base_lr=args.lr,
+      **args.sched_arg,
+  )
 
   ckpt_latest = args.checkpoint + "_latest.pt"
   ckpt_best = args.checkpoint + "_best.pt"

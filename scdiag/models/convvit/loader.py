@@ -102,29 +102,45 @@ def load_convvit(
         Target device for the model.
     checkpoint_path : str or None
         Optional path to a ``.pt`` checkpoint to load weights from.
+    **kwargs
+        Extra configuration overrides (e.g. ``depth=6``, ``num_heads=8``,
+        ``dropout=0.2``).  Typically passed via ``--model_arg`` from the
+        command line.
     """
+  # Allow CLI / caller overrides via --model_arg (e.g. depth=6 num_heads=8).
   config = SimpleNamespace(
-      id2label=id2label,
-      label2id=label2id,
-      num_labels=num_labels,
       image_size=image_size,
-  )
-
-  logging.info(
-      "Building ConvViT  (image_size=%d, num_labels=%d)",
-      image_size,
-      num_labels,
-  )
-
-  model = CustomPatchTransformer(
-      num_classes=num_labels,
-      img_size=image_size,
       embed_dim=768,
       num_heads=12,
       depth=12,
       dropout=0.0,
       drop_path_rate=0.1,
       num_conv_layers=4,
+      num_labels=num_labels,
+      id2label=id2label,
+      label2id=label2id,
+      **kwargs,
+  )
+
+  logging.info(
+      "Building ConvViT  (image_size=%d, num_labels=%d, depth=%d, "
+      "num_heads=%d, embed_dim=%d)",
+      config.image_size,
+      config.num_labels,
+      config.depth,
+      config.num_heads,
+      config.embed_dim,
+  )
+
+  model = CustomPatchTransformer(
+      num_classes=config.num_labels,
+      img_size=config.image_size,
+      embed_dim=config.embed_dim,
+      num_heads=config.num_heads,
+      depth=config.depth,
+      dropout=config.dropout,
+      drop_path_rate=config.drop_path_rate,
+      num_conv_layers=config.num_conv_layers,
   )
 
   # ------------------------------------------------------------------

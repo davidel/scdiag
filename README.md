@@ -125,6 +125,12 @@ scdiag-train --model google/vit-base-patch16-224 \
 | `--xgb_min_child_weight` | `1` | XGBoost min child weight |
 | `--xgb_gamma` | `0.0` | XGBoost min split loss |
 | `--xgb_reg_alpha` | `0.0` | XGBoost L1 regularization |
+| `--model_arg` | `{}` | Override model configuration (repeatable). Example: `--model_arg depth=6 num_heads=8` |
+| `--proc_arg` | `{}` | Override processor configuration (repeatable). Example: `--proc_arg image_size=384` |
+| `--optimizer` | `adamw` | Optimizer: `adamw`, `adam`, or `sgd` |
+| `--opt_arg` | `{}` | Extra optimizer kwargs (repeatable). Example: `--opt_arg betas=0.9,0.999 momentum=0.9` |
+| `--scheduler` | `cosine` | Scheduler: `cosine`, `cosine_warmup`, `step`, `constant` |
+| `--sched_arg` | `{}` | Extra scheduler kwargs (repeatable). Example: `--sched_arg T_max=50 eta_min=1e-6` |
 
 Training automatically resumes from an existing `_latest.pt` or `_best.pt`
 checkpoint if one exists at the `--checkpoint` path.
@@ -206,6 +212,12 @@ scdiag-train --model convvit \
 | `--checkpoint` | (required) | Checkpoint path prefix (saves `_latest.pt` and `_best.pt`). |
 | `--log_level` | `INFO` | Minimum logging level. |
 | `--vis_every` | `10` | Log reconstruction visualisation to TensorBoard every N epochs. |
+| `--model_arg` | `{}` | Override model configuration (repeatable). Example: `--model_arg depth=6 num_heads=8` |
+| `--proc_arg` | `{}` | Override processor configuration (repeatable). |
+| `--optimizer` | `adamw` | Optimizer: `adamw`, `adam`, or `sgd` |
+| `--opt_arg` | `{}` | Extra optimizer kwargs (repeatable). Example: `--opt_arg betas=0.9,0.999` |
+| `--scheduler` | `cosine` | Scheduler: `cosine`, `cosine_warmup`, `step`, `constant` |
+| `--sched_arg` | `{}` | Extra scheduler kwargs (repeatable). Example: `--sched_arg T_max=50` |
 
 ### Dataset Ensemble
 
@@ -255,6 +267,8 @@ scdiag-infer --model facebook/convnextv2-base-22k-224 \
 | `--device` | `None` | Force device (`cuda`, `cpu`, `mps`). Auto-detected if omitted. |
 | `--cache_dir` | `None` | HuggingFace cache directory |
 | `--xgboost_model` | `None` | XGBoost model path. If provided, run XGBoost alongside PyTorch. |
+| `--model_arg` | `{}` | Override model configuration (repeatable). Example: `--model_arg depth=6` |
+| `--proc_arg` | `{}` | Override processor configuration (repeatable). |
 
 ### XGBoost Inference
 
@@ -284,6 +298,9 @@ scdiag-train --model facebook/convnextv2-base-22-22k-384 ...
 
 # Use the built-in ConvViT (ConvNeXtV2 stem + ViT encoder)
 scdiag-train --model convvit --image_size 224 ...
+
+# Override ConvViT architecture from the CLI
+scdiag-train --model convvit --model_arg depth=6 num_heads=8 dropout=0.2
 ```
 
 ### Adding a custom model
@@ -292,7 +309,7 @@ scdiag-train --model convvit --image_size 224 ...
    - `model.py` — the `nn.Module` architecture
    - `processor.py` — image processor (must have `__call__(images)` → tensor)
    - `loader.py` — `@register_model("{name}")` decorated loader function
-     returning `(model, processor)`
+     whose `**kwargs` accept arbitrary overrides (forwarded from `--model_arg`)
    - `__init__.py` — re-export public symbols
 2. Add the import to `scdiag/models/__init__.py`
 3. The model must satisfy the protocol:
@@ -300,6 +317,9 @@ scdiag-train --model convvit --image_size 224 ...
    - `config.id2label` / `config.label2id` accessible
    - `extract_backbone_features(pixel_values)` for XGBoost (optional —
      hook-based fallback works for HF models automatically)
+4. CLI overrides via `--model_arg KEY=VALUE` are forwarded as `**kwargs`
+   to the registered loader.  The loader is responsible for applying them
+   (e.g. by merging into a default config via `setattr`).
 
 ### Built-in custom models
 

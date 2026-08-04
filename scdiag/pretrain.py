@@ -35,11 +35,13 @@ from scdiag.checkpointing import (
     parse_state_flags,
     resume_checkpoint,
 )
+from scdiag.cli_utils import KVPairAction
 from scdiag.datasets.ensemble import DermoscopyEnsemble
 from scdiag.gcs_utils import save_checkpoint
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.logging_utils import setup_logging
 from scdiag.model_utils import DTYPE_MAP, get_backbone
+from scdiag.optim_factory import create_optimizer, create_scheduler
 from scdiag.models.convvit.simmim import (
     ConvViTSimMIM,
     patchify,
@@ -364,6 +366,44 @@ def parse_args(argv=None):
                       help="Log reconstruction visualisation to TensorBoard "
                       "every N epochs.")
 
+  # --- Configurable overrides ------------------------------------------------
+  parser.add_argument("--model_arg",
+                      nargs="+",
+                      action=KVPairAction,
+                      default={},
+                      metavar="KEY=VALUE",
+                      help="Override model configuration (repeatable). "
+                      "Example: --model_arg depth=6 num_heads=8")
+  parser.add_argument("--proc_arg",
+                      nargs="+",
+                      action=KVPairAction,
+                      default={},
+                      metavar="KEY=VALUE",
+                      help="Override processor configuration (repeatable).")
+  parser.add_argument("--optimizer",
+                      type=str,
+                      default="adamw",
+                      help="Optimizer name: adamw (default), adam, sgd.")
+  parser.add_argument("--opt_arg",
+                      nargs="+",
+                      action=KVPairAction,
+                      default={},
+                      metavar="KEY=VALUE",
+                      help="Extra optimizer kwargs (repeatable). "
+                      "Example: --opt_arg betas=0.9,0.999 momentum=0.9")
+  parser.add_argument("--scheduler",
+                      type=str,
+                      default="cosine",
+                      help="Scheduler name: cosine (default), "
+                      "cosine_warmup, step, constant.")
+  parser.add_argument("--sched_arg",
+                      nargs="+",
+                      action=KVPairAction,
+                      default={},
+                      metavar="KEY=VALUE",
+                      help="Extra scheduler kwargs (repeatable). "
+                      "Example: --sched_arg T_max=50 eta_min=1e-6")
+
   args = parser.parse_args(argv)
 
   if args.log_dir is None:
@@ -416,6 +456,7 @@ def main(argv=None):
       image_size=args.image_size,
       cache_dir=args.cache_dir,
       device=device,
+      **args.model_arg,
   )
   encoder = get_backbone(base_model)
 
@@ -433,35 +474,22 @@ def main(argv=None):
       f"Model params: {num_params:.1f}M "
       f"(encoder: {enc_params:.1f}M + decoder: {num_params - enc_params:.1f}M)")
 
-  optimizer = optim.AdamW(
+  optimizer = create_optimizer(
       model.parameters(),
+      name=args.optimizer,
       lr=args.lr,
       weight_decay=args.weight_decay,
-      betas=(0.9, 0.95),
+      **args.opt_arg,
   )
 
-  if args.warmup_epochs > 0:
-    scheduler_warmup = optim.lr_scheduler.LinearLR(
-        optimizer,
-        start_factor=0.01,
-        total_iters=args.warmup_epochs,
-    )
-    scheduler_cosine = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer,
-        T_max=args.epochs - args.warmup_epochs,
-        eta_min=args.lr * 0.01,
-    )
-    scheduler = optim.lr_scheduler.SequentialLR(
-        optimizer,
-        [scheduler_warmup, scheduler_cosine],
-        milestones=[args.warmup_epochs],
-    )
-  else:
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer,
-        T_max=args.epochs,
-        eta_min=args.lr * 0.01,
-    )
+  scheduler = create_scheduler(
+      optimizer,
+      name=args.scheduler,
+      epochs=args.epochs,
+      warmup_epochs=args.warmup_epochs,
+      base_lr=args.lr,
+      **args.sched_arg,
+  )
 
   states_to_save = parse_state_flags(args.state_save)
   states_to_load = parse_state_flags(args.state_load)

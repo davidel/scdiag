@@ -88,6 +88,8 @@ def load_model_for_inference(
     checkpoint_path,
     device="cuda",
     cache_dir=None,
+    model_kwargs=None,
+    proc_kwargs=None,
 ):
   """Load a fine-tuned model ready for inference.
 
@@ -97,6 +99,10 @@ def load_model_for_inference(
         checkpoint_path: Path to our .pt checkpoint containing model_state_dict.
         device: Target device.
         cache_dir: Optional HF cache directory.
+        model_kwargs: Optional dict of extra kwargs forwarded to
+            :func:`load_model` (e.g. ``{"depth": 6}``).
+        proc_kwargs: Optional dict of extra kwargs forwarded to
+            :func:`load_processor`.
 
     Returns:
         (model, processor) tuple.
@@ -133,6 +139,7 @@ def load_model_for_inference(
       device=torch.device(device),
       checkpoint_path=checkpoint_path,
       cache_dir=cache_dir,
+      **(model_kwargs or {}),
   )
 
   # Restore label mapping if not provided via checkpoint.
@@ -151,6 +158,7 @@ def load_model_for_inference(
       model_name,
       image_size=224,
       cache_dir=cache_dir,
+      **(proc_kwargs or {}),
   )
 
   model.to(device).eval()

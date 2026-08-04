@@ -9,6 +9,7 @@ import numpy as np
 import torch
 from PIL import Image
 
+from scdiag.cli_utils import KVPairAction
 from scdiag.logging_utils import setup_logging
 from scdiag.model_utils import build_val_transform, load_model_for_inference
 
@@ -70,6 +71,23 @@ def parse_args(argv=None):
       "the PyTorch classifier.",
   )
   parser.add_argument(
+      "--model_arg",
+      nargs="+",
+      action=KVPairAction,
+      default={},
+      metavar="KEY=VALUE",
+      help="Override model configuration (repeatable). "
+      "Example: --model_arg depth=6 num_heads=8",
+  )
+  parser.add_argument(
+      "--proc_arg",
+      nargs="+",
+      action=KVPairAction,
+      default={},
+      metavar="KEY=VALUE",
+      help="Override processor configuration (repeatable).",
+  )
+  parser.add_argument(
       "images",
       nargs="+",
       help="Image file paths and/or URLs.",
@@ -112,6 +130,8 @@ def main(argv=None):
       checkpoint_path=args.checkpoint,
       device=device,
       cache_dir=args.cache_dir,
+      model_kwargs=args.model_arg,
+      proc_kwargs=args.proc_arg,
   )
   transform = build_val_transform(processor, args.image_size)
 
