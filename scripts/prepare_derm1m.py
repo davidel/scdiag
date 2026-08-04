@@ -3,7 +3,7 @@
 
 The redlessone/Derm1M HuggingFace dataset contains CSV metadata with filenames
 that reference images inside zip archives (IIYI.zip, ISIC.zip, etc.). This
-script downloads and extracts those archives, then copies the images into a
+script downloads and extracts those archives, then moves the images into a
 flat ImageFolder directory compatible with scdiag-pretrain.
 
 Usage:
@@ -183,11 +183,11 @@ def main():
       image_count += 1
       ext = fpath.suffix.lower()
       dest = output_path / f"IMG_{image_count:08d}{ext}"
-      shutil.copy2(fpath, dest)
+      shutil.move(str(fpath), str(dest))
       if image_count % 10000 == 0:
-        print(f"  Copied {image_count:,} images ...")
+        print(f"  Moved {image_count:,} images ...")
 
-  print(f"\nTotal images copied: {image_count:,}")
+  print(f"\nTotal images moved: {image_count:,}")
 
   # Clean up temp dir if we downloaded
   if not (args.skip_download and args.zip_dir):
