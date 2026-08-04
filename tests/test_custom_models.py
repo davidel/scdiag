@@ -19,11 +19,6 @@ from scdiag.models.convvit.processor import ConvViTProcessor
 from scdiag.model_utils import extract_backbone_features
 
 
-# -----------------------------------------------------------------------
-# Local ConvViTConfig (no longer shipped in the library; test-only)
-# -----------------------------------------------------------------------
-
-
 class ConvViTConfig:
   """Minimal ConvViT configuration for testing purposes."""
 
@@ -62,11 +57,6 @@ class ConvViTConfig:
     self.label2id = label2id if label2id is not None else {}
 
 
-# -----------------------------------------------------------------------
-# Registry tests
-# -----------------------------------------------------------------------
-
-
 class TestRegistry:
   """Tests for the model registry dispatch."""
 
@@ -98,11 +88,6 @@ class TestRegistry:
     del REGISTRY["_test_model_xyz"]
 
 
-# -----------------------------------------------------------------------
-# ModelOutput tests
-# -----------------------------------------------------------------------
-
-
 class TestModelOutput:
   """Tests for the ModelOutput wrapper."""
 
@@ -118,11 +103,6 @@ class TestModelOutput:
     loss = out.logits.sum()
     loss.backward()
     assert t.grad is not None
-
-
-# -----------------------------------------------------------------------
-# ConvViTProcessor tests
-# -----------------------------------------------------------------------
 
 
 class TestConvViTProcessor:
@@ -163,11 +143,6 @@ class TestConvViTProcessor:
     assert out.shape == (1, 3, 448, 448)
 
 
-# -----------------------------------------------------------------------
-# ConvViTConfig tests
-# -----------------------------------------------------------------------
-
-
 class TestConvViTConfig:
   """Tests for the ConvViT configuration dataclass."""
 
@@ -194,11 +169,6 @@ class TestConvViTConfig:
     )
     assert cfg.num_labels == 3
     assert cfg.id2label[1] == "b"
-
-
-# -----------------------------------------------------------------------
-# ConvViT model forward tests
-# -----------------------------------------------------------------------
 
 
 class TestConvViTForward:
@@ -269,11 +239,6 @@ class TestConvViTForward:
       assert f.ndim == 4
 
 
-# -----------------------------------------------------------------------
-# ConvViTForClassification wrapper tests
-# -----------------------------------------------------------------------
-
-
 class TestConvViTForClassification:
   """Tests for the protocol wrapper."""
 
@@ -327,11 +292,6 @@ class TestConvViTForClassification:
     assert len(features) == 4
 
 
-# -----------------------------------------------------------------------
-# load_custom_model integration test
-# -----------------------------------------------------------------------
-
-
 class TestLoadCustomModel:
   """Test the full load path through the registry."""
 
@@ -367,11 +327,6 @@ class TestLoadCustomModel:
           image_size=224,
           device=torch.device("cpu"),
       )
-
-
-# -----------------------------------------------------------------------
-# Checkpoint round-trip test
-# -----------------------------------------------------------------------
 
 
 class TestCheckpointRoundtrip:
@@ -418,11 +373,6 @@ class TestCheckpointRoundtrip:
             f"Weight mismatch in {n1}"
     finally:
       os.unlink(ckpt_path)
-
-
-# -----------------------------------------------------------------------
-# extract_backbone_features tests
-# -----------------------------------------------------------------------
 
 
 class TestExtractBackboneFeatures:

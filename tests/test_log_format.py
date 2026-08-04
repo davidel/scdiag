@@ -11,10 +11,6 @@ from unittest.mock import patch, MagicMock
 import numpy as np
 import pytest
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 
 def _import_train():
   """Lazy-import scdiag.train so module-level fixtures resolve cleanly."""
@@ -28,11 +24,6 @@ def _import_train():
 def _make_fake_logger():
   """Create a simple logger that captures log messages."""
   return MagicMock()
-
-
-# ---------------------------------------------------------------------------
-# Log format tests
-# ---------------------------------------------------------------------------
 
 
 class TestTrainLogFormat:
@@ -107,11 +98,6 @@ class TestTrainLogFormat:
     assert "80.50%" in caplog.records[1].message
 
 
-# ---------------------------------------------------------------------------
-# GPU stats format tests
-# ---------------------------------------------------------------------------
-
-
 class TestGPUStatsFormat:
 
   def test_gpu_stats_str_empty_on_cpu(self):
@@ -141,11 +127,6 @@ class TestGPUStatsFormat:
     assert result.startswith("GPU: mem=")
     assert "res=" in result
     assert "util=" in result
-
-
-# ---------------------------------------------------------------------------
-# parse_args tests (new CLI flags)
-# ---------------------------------------------------------------------------
 
 
 class TestParseArgs:

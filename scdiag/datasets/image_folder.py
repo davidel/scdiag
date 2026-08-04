@@ -34,9 +34,7 @@ class ImageFolderDataset:
     self.min_resolution = min_resolution
     self._paths: list[Path] = []
 
-  # ------------------------------------------------------------------
   # Internal helpers
-  # ------------------------------------------------------------------
 
   def _ensure_loaded(self):
     if self._paths:
@@ -49,9 +47,7 @@ class ImageFolderDataset:
     logging.info(
         f"ImageFolderDataset: found {len(self._paths):,} images in '{self.root_dir}'")
 
-  # ------------------------------------------------------------------
   # Dataset protocol
-  # ------------------------------------------------------------------
 
   def __len__(self):
     self._ensure_loaded()

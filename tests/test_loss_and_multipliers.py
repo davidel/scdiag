@@ -8,11 +8,6 @@ import torch.nn as nn
 
 from scdiag.train import CombinedFocalLoss, parse_class_multipliers
 
-
-# ---------------------------------------------------------------------------
-# parse_class_multipliers tests
-# ---------------------------------------------------------------------------
-
 LABEL2ID = {
     "actinic_keratoses": 0,
     "basal_cell_carcinoma": 1,
@@ -55,7 +50,8 @@ class TestParseClassMultipliers:
   def test_multiple_entries(self):
     m = parse_class_multipliers(
         "melanoma=4.0,melanocytic_Nevi=0.5,basal_cell_carcinoma=2.0",
-        NUM_LABELS, LABEL2ID,
+        NUM_LABELS,
+        LABEL2ID,
     )
     assert m[5] == pytest.approx(4.0)
     assert m[4] == pytest.approx(0.5)
@@ -66,7 +62,9 @@ class TestParseClassMultipliers:
 
   def test_whitespace_handling(self):
     m = parse_class_multipliers(
-        "melanoma=4.0 , melanocytic_Nevi=0.5", NUM_LABELS, LABEL2ID,
+        "melanoma=4.0 , melanocytic_Nevi=0.5",
+        NUM_LABELS,
+        LABEL2ID,
     )
     assert m[5] == pytest.approx(4.0)
     assert m[4] == pytest.approx(0.5)
@@ -103,10 +101,6 @@ class TestParseClassMultipliers:
     assert m[5] == pytest.approx(100.0)
 
 
-# ---------------------------------------------------------------------------
-# CombinedFocalLoss tests
-# ---------------------------------------------------------------------------
-
 def _make_batch(num_classes=7, batch_size=16, seed=42):
   """Create a reproducible batch of logits and targets."""
   g = torch.Generator().manual_seed(seed)
@@ -125,14 +119,19 @@ class TestCombinedFocalLoss:
     logits, targets = _make_batch()
     weights = torch.tensor([1.0, 2.0, 0.5, 1.5, 0.8, 3.0, 1.2])
 
-    focal = CombinedFocalLoss(weights=weights, gamma=0.0,
-                              label_smoothing=0.0, reduction='mean')
+    focal = CombinedFocalLoss(weights=weights,
+                              gamma=0.0,
+                              label_smoothing=0.0,
+                              reduction='mean')
 
     # Our implementation uses F.cross_entropy(reduction='none') then .mean(),
     # which divides by batch size (not by sum of per-class weights as
     # nn.CrossEntropyLoss(reduction='mean') does).
-    ce_none = nn.functional.cross_entropy(
-        logits, targets, weight=weights, label_smoothing=0.0, reduction='none')
+    ce_none = nn.functional.cross_entropy(logits,
+                                          targets,
+                                          weight=weights,
+                                          label_smoothing=0.0,
+                                          reduction='none')
     expected = ce_none.mean()
 
     loss_focal = focal(logits, targets)
@@ -144,11 +143,16 @@ class TestCombinedFocalLoss:
     logits, targets = _make_batch()
     weights = torch.tensor([1.0, 2.0, 0.5, 1.5, 0.8, 3.0, 1.2])
 
-    focal = CombinedFocalLoss(weights=weights, gamma=0.0,
-                              label_smoothing=0.1, reduction='mean')
+    focal = CombinedFocalLoss(weights=weights,
+                              gamma=0.0,
+                              label_smoothing=0.1,
+                              reduction='mean')
 
-    ce_none = nn.functional.cross_entropy(
-        logits, targets, weight=weights, label_smoothing=0.1, reduction='none')
+    ce_none = nn.functional.cross_entropy(logits,
+                                          targets,
+                                          weight=weights,
+                                          label_smoothing=0.1,
+                                          reduction='none')
     expected = ce_none.mean()
 
     loss_focal = focal(logits, targets)
@@ -184,8 +188,10 @@ class TestCombinedFocalLoss:
     focal = CombinedFocalLoss(weights=weights, gamma=2.0, reduction='mean')
 
     # Compute the CE part manually (reduction='none')
-    ce_none = nn.functional.cross_entropy(
-        logits, targets, weight=weights, reduction='none')
+    ce_none = nn.functional.cross_entropy(logits,
+                                          targets,
+                                          weight=weights,
+                                          reduction='none')
     loss_ce = ce_none.mean().item()
     loss_focal = focal(logits, targets).item()
 
@@ -204,14 +210,14 @@ class TestCombinedFocalLoss:
     # Low melanoma multiplier
     w_low = base_weights.clone()
     w_low[5] = 1.0
-    loss_low = CombinedFocalLoss(
-        weights=w_low, gamma=2.0, reduction='mean')(logits, targets)
+    loss_low = CombinedFocalLoss(weights=w_low, gamma=2.0, reduction='mean')(logits,
+                                                                             targets)
 
     # High melanoma multiplier
     w_high = base_weights.clone()
     w_high[5] = 4.0
-    loss_high = CombinedFocalLoss(
-        weights=w_high, gamma=2.0, reduction='mean')(logits, targets)
+    loss_high = CombinedFocalLoss(weights=w_high, gamma=2.0, reduction='mean')(logits,
+                                                                               targets)
 
     assert loss_high.item() > loss_low.item(), (
         f"Higher melanoma weight ({loss_high:.4f}) should produce "
@@ -228,14 +234,14 @@ class TestCombinedFocalLoss:
     # Low melanoma multiplier
     w_low = base_weights.clone()
     w_low[5] = 1.0
-    loss_low = CombinedFocalLoss(
-        weights=w_low, gamma=2.0, reduction='mean')(logits, targets)
+    loss_low = CombinedFocalLoss(weights=w_low, gamma=2.0, reduction='mean')(logits,
+                                                                             targets)
 
     # High melanoma multiplier
     w_high = base_weights.clone()
     w_high[5] = 4.0
-    loss_high = CombinedFocalLoss(
-        weights=w_high, gamma=2.0, reduction='mean')(logits, targets)
+    loss_high = CombinedFocalLoss(weights=w_high, gamma=2.0, reduction='mean')(logits,
+                                                                               targets)
 
     # Loss should be identical since no sample is melanoma
     torch.testing.assert_close(loss_low, loss_high, rtol=1e-6, atol=1e-7)
@@ -287,8 +293,7 @@ class TestCombinedFocalLoss:
     loss_mean = focal_mean(logits, targets)
     loss_sum = focal_sum(logits, targets)
 
-    torch.testing.assert_close(
-        loss_sum, loss_mean * 8, rtol=1e-5, atol=1e-6)
+    torch.testing.assert_close(loss_sum, loss_mean * 8, rtol=1e-5, atol=1e-6)
 
   def test_gamma_zero_reduces_to_ce(self):
     """When gamma=0, the loss should match F.cross_entropy(reduction='none').mean()."""
@@ -297,20 +302,20 @@ class TestCombinedFocalLoss:
 
     focal = CombinedFocalLoss(weights=weights, gamma=0.0, reduction='mean')
 
-    ce_none = nn.functional.cross_entropy(
-        logits, targets, weight=weights, reduction='none')
+    ce_none = nn.functional.cross_entropy(logits,
+                                          targets,
+                                          weight=weights,
+                                          reduction='none')
     expected = ce_none.mean()
 
-    torch.testing.assert_close(
-        focal(logits, targets), expected, rtol=1e-5, atol=1e-6)
+    torch.testing.assert_close(focal(logits, targets), expected, rtol=1e-5, atol=1e-6)
 
   def test_label_smoothing_warning_emitted(self, caplog):
     """logging.warning should fire when gamma>0 and label_smoothing>0."""
     logits, targets = _make_batch()
     weights = torch.ones(7)
 
-    focal = CombinedFocalLoss(
-        weights=weights, gamma=2.0, label_smoothing=0.1)
+    focal = CombinedFocalLoss(weights=weights, gamma=2.0, label_smoothing=0.1)
 
     # The warning is emitted in train.py at construction time, not in the
     # loss class itself.  This test verifies the class still works correctly

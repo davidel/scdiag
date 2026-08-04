@@ -15,9 +15,7 @@ import datasets
 from PIL import Image
 from unittest.mock import patch, MagicMock
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _import_train():
@@ -50,9 +48,7 @@ def _make_synthetic_dataset(label_col="label", image_col="image", n=64, num_clas
   return datasets.Dataset.from_dict(data, features=features)
 
 
-# ---------------------------------------------------------------------------
 # Detect image column
-# ---------------------------------------------------------------------------
 
 
 class TestDetectImageColumn:
@@ -142,9 +138,7 @@ class TestDetectImageColumn:
       assert isinstance(img, Image.Image), (f"Expected PIL Image, got {type(img)}")
 
 
-# ---------------------------------------------------------------------------
 # Detect label column
-# ---------------------------------------------------------------------------
 
 
 class TestDetectLabelColumn:
@@ -239,9 +233,7 @@ class TestDetectLabelColumn:
     assert train_mod.HFDatasetProxy.detect_label_column(ds) is None
 
 
-# ---------------------------------------------------------------------------
 # Load and split dataset
-# ---------------------------------------------------------------------------
 
 
 class TestLoadAndSplit:
@@ -307,9 +299,7 @@ class TestLoadAndSplit:
     assert "label" in train_p.dataset.column_names
 
 
-# ---------------------------------------------------------------------------
 # Compute class weights
-# ---------------------------------------------------------------------------
 
 
 class TestComputeClassWeights:
@@ -380,9 +370,7 @@ class TestComputeClassWeights:
     assert weights[1] > weights[0]
 
 
-# ---------------------------------------------------------------------------
 # HFDatasetProxy
-# ---------------------------------------------------------------------------
 
 
 class TestHFDatasetProxy:
@@ -429,9 +417,7 @@ class TestHFDatasetProxy:
     assert proxy.num_labels == 5
 
 
-# ---------------------------------------------------------------------------
 # Build transforms
-# ---------------------------------------------------------------------------
 
 
 class TestBuildTransforms:
@@ -473,9 +459,7 @@ class TestBuildTransforms:
     assert result.dtype == torch.float32
 
 
-# ---------------------------------------------------------------------------
 # Parse args (updated CLI)
-# ---------------------------------------------------------------------------
 
 
 class TestLoadAugmentationScript:
@@ -484,14 +468,12 @@ class TestLoadAugmentationScript:
   def test_loads_local_script(self, tmp_path):
     train_mod = _import_train()
     script = tmp_path / "my_aug.py"
-    script.write_text(
-        "from torchvision.transforms import v2\n"
-        "\n"
-        "def create_train_transform(image_size, **kwargs):\n"
-        "    return [\n"
-        "        v2.RandomHorizontalFlip(p=0.5),\n"
-        "    ]\n"
-    )
+    script.write_text("from torchvision.transforms import v2\n"
+                      "\n"
+                      "def create_train_transform(image_size, **kwargs):\n"
+                      "    return [\n"
+                      "        v2.RandomHorizontalFlip(p=0.5),\n"
+                      "    ]\n")
     fn = train_mod.load_augmentation_script(str(script))
     assert callable(fn)
     result = fn(224)
@@ -514,12 +496,10 @@ class TestLoadAugmentationScript:
 
   def test_loads_url(self):
     train_mod = _import_train()
-    url_script = (
-        "from torchvision.transforms import v2\n"
-        "\n"
-        "def create_train_transform(image_size, **kwargs):\n"
-        "    return [v2.RandomVerticalFlip(p=1.0)]\n"
-    )
+    url_script = ("from torchvision.transforms import v2\n"
+                  "\n"
+                  "def create_train_transform(image_size, **kwargs):\n"
+                  "    return [v2.RandomVerticalFlip(p=1.0)]\n")
     with patch("urllib.request.urlopen") as mock_url:
       mock_resp = MagicMock()
       mock_resp.read.return_value = url_script.encode("utf-8")
@@ -550,16 +530,14 @@ class TestBuildTransformsWithCustomAug:
     def my_aug(image_size):
       return [v2.RandomHorizontalFlip(p=1.0)]
 
-    train_t, val_t = train_mod.build_transforms(
-        self._mock_processor(), image_size=64, train_aug_fn=my_aug
-    )
+    train_t, val_t = train_mod.build_transforms(self._mock_processor(),
+                                                image_size=64,
+                                                train_aug_fn=my_aug)
     assert callable(train_t)
     assert callable(val_t)
     # Train transform should produce output (custom aug + tail).
     # No resize/crop in custom augs, so output matches input size.
-    img = Image.fromarray(
-        np.random.randint(0, 256, (128, 128, 3), dtype=np.uint8)
-    )
+    img = Image.fromarray(np.random.randint(0, 256, (128, 128, 3), dtype=np.uint8))
     result = train_t(img)
     assert isinstance(result, torch.Tensor)
     assert result.shape == (3, 128, 128)
@@ -570,12 +548,10 @@ class TestBuildTransformsWithCustomAug:
     def empty_aug(image_size):
       return []
 
-    train_t, _ = train_mod.build_transforms(
-        self._mock_processor(), image_size=64, train_aug_fn=empty_aug
-    )
-    img = Image.fromarray(
-        np.random.randint(0, 256, (128, 128, 3), dtype=np.uint8)
-    )
+    train_t, _ = train_mod.build_transforms(self._mock_processor(),
+                                            image_size=64,
+                                            train_aug_fn=empty_aug)
+    img = Image.fromarray(np.random.randint(0, 256, (128, 128, 3), dtype=np.uint8))
     result = train_t(img)
     assert isinstance(result, torch.Tensor)
     # No resize/crop, so 128x128 input stays 128x128
@@ -588,19 +564,17 @@ class TestBuildTransformsWithCustomAug:
       return "not a list"
 
     with pytest.raises(TypeError, match="must return a list"):
-      train_mod.build_transforms(
-          self._mock_processor(), image_size=64, train_aug_fn=bad_aug
-      )
+      train_mod.build_transforms(self._mock_processor(),
+                                 image_size=64,
+                                 train_aug_fn=bad_aug)
 
   def test_none_fn_uses_default(self):
     train_mod = _import_train()
     # Passing train_aug_fn=None should behave like the original default
-    train_t, val_t = train_mod.build_transforms(
-        self._mock_processor(), image_size=64, train_aug_fn=None
-    )
-    img = Image.fromarray(
-        np.random.randint(0, 256, (128, 128, 3), dtype=np.uint8)
-    )
+    train_t, val_t = train_mod.build_transforms(self._mock_processor(),
+                                                image_size=64,
+                                                train_aug_fn=None)
+    img = Image.fromarray(np.random.randint(0, 256, (128, 128, 3), dtype=np.uint8))
     result = train_t(img)
     assert isinstance(result, torch.Tensor)
     assert result.shape == (3, 64, 64)

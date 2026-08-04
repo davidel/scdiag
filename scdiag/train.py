@@ -37,9 +37,7 @@ from scdiag.optim_factory import create_optimizer, create_scheduler
 
 from scdiag.datasets.hf_proxy import HFDatasetProxy
 
-# ---------------------------------------------------------------------------
 # Loss function and CLI helpers for Phase 1 of the loss revision plan.
-# ---------------------------------------------------------------------------
 
 
 def parse_class_multipliers(s, num_labels, label2id):
@@ -556,7 +554,6 @@ def parse_args(argv=None):
       help="XGBoost L1 regularization.",
   )
 
-  # --- Configurable overrides ------------------------------------------------
   parser.add_argument(
       "--model_arg",
       nargs="+",

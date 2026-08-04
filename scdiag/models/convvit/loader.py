@@ -15,9 +15,7 @@ from scdiag.models.registry import ModelOutput, register_model, register_process
 from scdiag.models.convvit.model import CustomPatchTransformer
 from scdiag.models.convvit.processor import ConvViTProcessor
 
-# ------------------------------------------------------------------
 # Wrapped model — protocol adapter
-# ------------------------------------------------------------------
 
 
 class ConvViTForClassification(nn.Module):
@@ -70,9 +68,7 @@ class ConvViTForClassification(nn.Module):
     return features
 
 
-# ------------------------------------------------------------------
 # Registry entry point
-# ------------------------------------------------------------------
 
 
 @register_model("convvit")
@@ -143,9 +139,7 @@ def load_convvit(
       num_conv_layers=config.num_conv_layers,
   )
 
-  # ------------------------------------------------------------------
   # Load checkpoint (if provided)
-  # ------------------------------------------------------------------
   if checkpoint_path and os.path.isfile(checkpoint_path):
     ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     state = ckpt.get("model_state_dict", ckpt)

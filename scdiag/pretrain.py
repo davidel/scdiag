@@ -371,7 +371,6 @@ def parse_args(argv=None):
                       help="Log reconstruction visualisation to TensorBoard "
                       "every N epochs.")
 
-  # --- Configurable overrides ------------------------------------------------
   parser.add_argument("--model_arg",
                       nargs="+",
                       action=KVPairAction,

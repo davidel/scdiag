@@ -5,18 +5,21 @@ import re
 
 from scdiag.logging_utils import GlogFormatter, setup_logging
 
-
-# ---------------------------------------------------------------------------
 # GlogFormatter
-# ---------------------------------------------------------------------------
+
 
 class TestGlogFormatter:
 
   def test_basic_format_contains_level_char(self):
     fmt = GlogFormatter()
     record = logging.LogRecord(
-        name="test", level=logging.INFO, pathname="train.py",
-        lineno=42, msg="hello %s", args=("world",), exc_info=None,
+        name="test",
+        level=logging.INFO,
+        pathname="train.py",
+        lineno=42,
+        msg="hello %s",
+        args=("world",),
+        exc_info=None,
     )
     out = fmt.format(record)
     # Should start with the level char 'I' followed by month/day digits.
@@ -27,8 +30,13 @@ class TestGlogFormatter:
   def test_multiline_message(self):
     fmt = GlogFormatter()
     record = logging.LogRecord(
-        name="test", level=logging.WARNING, pathname="foo.py",
-        lineno=1, msg="line1\nline2\nline3", args=(), exc_info=None,
+        name="test",
+        level=logging.WARNING,
+        pathname="foo.py",
+        lineno=1,
+        msg="line1\nline2\nline3",
+        args=(),
+        exc_info=None,
     )
     out = fmt.format(record)
     lines = out.split("\n")
@@ -48,24 +56,33 @@ class TestGlogFormatter:
     }
     for lvl, char in expected.items():
       record = logging.LogRecord(
-          name="t", level=lvl, pathname="x.py",
-          lineno=1, msg="m", args=(), exc_info=None,
+          name="t",
+          level=lvl,
+          pathname="x.py",
+          lineno=1,
+          msg="m",
+          args=(),
+          exc_info=None,
       )
       assert fmt.format(record).startswith(char)
 
   def test_no_args_message(self):
     fmt = GlogFormatter()
     record = logging.LogRecord(
-        name="t", level=logging.INFO, pathname="a.py",
-        lineno=10, msg="plain", args=(), exc_info=None,
+        name="t",
+        level=logging.INFO,
+        pathname="a.py",
+        lineno=10,
+        msg="plain",
+        args=(),
+        exc_info=None,
     )
     out = fmt.format(record)
     assert "plain" in out
 
 
-# ---------------------------------------------------------------------------
 # setup_logging
-# ---------------------------------------------------------------------------
+
 
 class TestSetupLogging:
 

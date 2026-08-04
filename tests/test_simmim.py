@@ -13,11 +13,6 @@ from scdiag.models.convvit.simmim import (
 from scdiag.models.convvit.loader import load_convvit
 
 
-# -----------------------------------------------------------------------
-# Local ConvViTConfig (no longer shipped in the library; test-only)
-# -----------------------------------------------------------------------
-
-
 class ConvViTConfig:
   """Minimal ConvViT configuration for testing purposes."""
 
@@ -56,10 +51,6 @@ class ConvViTConfig:
     self.label2id = label2id if label2id is not None else {}
 
 
-# ---------------------------------------------------------------------------
-# patchify / unpatchify
-# ---------------------------------------------------------------------------
-
 class TestPatchify:
 
   def test_roundtrip_224(self):
@@ -83,10 +74,6 @@ class TestPatchify:
     assert patches.shape == (4, 784, 768)
 
 
-# ---------------------------------------------------------------------------
-# random_mask
-# ---------------------------------------------------------------------------
-
 class TestRandomMask:
 
   def test_shape(self):
@@ -106,10 +93,6 @@ class TestRandomMask:
       expected = int(100 * ratio)
       assert (mask.sum(dim=1) == expected).all()
 
-
-# ---------------------------------------------------------------------------
-# simmim_loss
-# ---------------------------------------------------------------------------
 
 class TestSimMIMLoss:
 
@@ -139,17 +122,12 @@ class TestSimMIMLoss:
     assert loss.item() == 0.0
 
 
-# ---------------------------------------------------------------------------
-# ConvViTSimMIM end-to-end
-# ---------------------------------------------------------------------------
-
 class TestConvViTSimMIM:
 
   @pytest.fixture
   def simmim_model(self):
     """Build a small ConvViT encoder and wrap in SimMIM."""
-    id2label = {0: "akiec", 1: "bcc", 2: "bkl", 3: "df",
-                4: "mel", 5: "nv", 6: "vasc"}
+    id2label = {0: "akiec", 1: "bcc", 2: "bkl", 3: "df", 4: "mel", 5: "nv", 6: "vasc"}
     label2id = {v: k for k, v in id2label.items()}
     encoder = load_convvit(
         image_size=224,
@@ -187,8 +165,6 @@ class TestConvViTSimMIM:
     loss = simmim_loss(pred, target, mask)
     loss.backward()
     # Check that gradients exist for encoder parameters
-    has_grad = any(
-        p.grad is not None and p.grad.abs().sum() > 0
-        for p in simmim_model.encoder.parameters()
-    )
+    has_grad = any(p.grad is not None and p.grad.abs().sum() > 0
+                   for p in simmim_model.encoder.parameters())
     assert has_grad

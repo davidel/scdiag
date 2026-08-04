@@ -6,14 +6,13 @@ Both scripts import these functions rather than maintaining separate copies.
 
 import logging
 import os
-from typing import Set
 
 import torch
 
 _VALID_STATE_FLAGS = {"opt", "sched", "amp", "none"}
 
 
-def parse_state_flags(flag_value: str) -> Set[str]:
+def parse_state_flags(flag_value):
   """Parse a comma-separated state flag string into a set of tokens.
 
   Returns a set like ``{"opt", "sched", "amp"}``.

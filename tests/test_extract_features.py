@@ -10,9 +10,6 @@ import torch
 from scdiag.model_utils import collect_features, extract_features
 
 
-# --- extract_features ---
-
-
 class TestExtractFeatures:
   """Tests for extract_features()."""
 
@@ -48,9 +45,6 @@ class TestExtractFeatures:
     assert result.shape[0] == 5
 
 
-# --- collect_features ---
-
-
 class _TinyBackbone(torch.nn.Module):
   """Mock backbone that returns a dict-like with pooler_output."""
 
@@ -63,7 +57,7 @@ class _TinyBackbone(torch.nn.Module):
   def forward(self, pixel_values):
     # pixel_values: [B, 3, H, W]
     pooled = self.pool(pixel_values).flatten(1)  # [B, 3]
-    projected = self.proj(pooled)                 # [B, hidden_size]
+    projected = self.proj(pooled)  # [B, hidden_size]
     Output = namedtuple("Output", ["pooler_output", "last_hidden_state"])
     return Output(pooler_output=projected, last_hidden_state=pixel_values)
 

@@ -14,9 +14,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# ---------------------------------------------------------------------------
 # Patchify / unpatchify
-# ---------------------------------------------------------------------------
 
 
 def patchify(images, patch_size=16):
@@ -54,9 +52,7 @@ def unpatchify(patches, patch_size=16, img_size=448, channels=3):
   return x
 
 
-# ---------------------------------------------------------------------------
 # Masking
-# ---------------------------------------------------------------------------
 
 
 def random_mask(batch_size, num_patches, mask_ratio=0.60, device=None):
@@ -74,9 +70,7 @@ def random_mask(batch_size, num_patches, mask_ratio=0.60, device=None):
   return mask
 
 
-# ---------------------------------------------------------------------------
 # Loss
-# ---------------------------------------------------------------------------
 
 
 def simmim_loss(pred, target, mask):
@@ -97,9 +91,7 @@ def simmim_loss(pred, target, mask):
   return loss
 
 
-# ---------------------------------------------------------------------------
 # SimMIM wrapper
-# ---------------------------------------------------------------------------
 
 
 class ConvViTSimMIM(nn.Module):
@@ -135,11 +127,11 @@ class ConvViTSimMIM(nn.Module):
     self.encoder = get_backbone(encoder)
     embed_dim = self.encoder.pos_embedding.shape[-1]
 
-    # --- mask token (one learned vector shared across all positions) ---
+    # Mask token (one learned vector shared across all positions).
     self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
     nn.init.trunc_normal_(self.mask_token, std=0.02)
 
-    # --- decoder MLP ---
+    # Decoder MLP.
     # Output dimension = patch_size² × 3 (raw pixel values per patch).
     # For patch_size=16, this is 768 — same as embed_dim for our ConvViT,
     # but we compute it explicitly for clarity.
@@ -153,7 +145,6 @@ class ConvViTSimMIM(nn.Module):
     layers.append(nn.Linear(decoder_dim, self._patch_pixel_dim))
     self.decoder = nn.Sequential(*layers)
 
-  # ------------------------------------------------------------------
   def forward(self, images, mask):
     """SimMIM forward pass.
 

@@ -13,13 +13,11 @@ Example::
 
 import argparse
 
-
-# ---------------------------------------------------------------------------
 # Value parsing
-# ---------------------------------------------------------------------------
+
 
 def parse_value(s):
-    """Auto-convert a CLI string to a Python value.
+  """Auto-convert a CLI string to a Python value.
 
     Conversion rules (applied in order):
 
@@ -30,64 +28,63 @@ def parse_value(s):
        element recursively converted via ``parse_value``
     5. Everything else is returned as a ``str``.
     """
-    # Bool check
-    if s.lower() in ("true", "false"):
-        return s.lower() == "true"
+  # Bool check
+  if s.lower() in ("true", "false"):
+    return s.lower() == "true"
 
-    # Int check
-    try:
-        return int(s)
-    except ValueError:
-        pass
+  # Int check
+  try:
+    return int(s)
+  except ValueError:
+    pass
 
-    # Float check
-    try:
-        return float(s)
-    except ValueError:
-        pass
+  # Float check
+  try:
+    return float(s)
+  except ValueError:
+    pass
 
-    # List check — explicit brackets or parens
-    stripped = s.strip()
-    if (stripped.startswith("[") and stripped.endswith("]")) or \
-       (stripped.startswith("(") and stripped.endswith(")")):
-        inner = stripped[1:-1].strip()
-        if not inner:
-            return []
-        items = [parse_value(item.strip()) for item in _split_list_items(inner)]
-        return items
+  # List check — explicit brackets or parens
+  stripped = s.strip()
+  if (stripped.startswith("[") and stripped.endswith("]")) or \
+     (stripped.startswith("(") and stripped.endswith(")")):
+    inner = stripped[1:-1].strip()
+    if not inner:
+      return []
+    items = [parse_value(item.strip()) for item in _split_list_items(inner)]
+    return items
 
-    # Fallback: raw string
-    return s
+  # Fallback: raw string
+  return s
 
 
 def _split_list_items(s):
-    """Split a list-body string by commas, respecting nested brackets."""
-    items = []
-    depth = 0
-    current = []
-    for ch in s:
-        if ch in ("[", "("):
-            depth += 1
-            current.append(ch)
-        elif ch in ("]", ")"):
-            depth -= 1
-            current.append(ch)
-        elif ch == "," and depth == 0:
-            items.append("".join(current).strip())
-            current = []
-        else:
-            current.append(ch)
-    if current:
-        items.append("".join(current).strip())
-    return items
+  """Split a list-body string by commas, respecting nested brackets."""
+  items = []
+  depth = 0
+  current = []
+  for ch in s:
+    if ch in ("[", "("):
+      depth += 1
+      current.append(ch)
+    elif ch in ("]", ")"):
+      depth -= 1
+      current.append(ch)
+    elif ch == "," and depth == 0:
+      items.append("".join(current).strip())
+      current = []
+    else:
+      current.append(ch)
+  if current:
+    items.append("".join(current).strip())
+  return items
 
 
-# ---------------------------------------------------------------------------
 # Argparse action
-# ---------------------------------------------------------------------------
+
 
 class KVPairAction(argparse.Action):
-    """Argparse action that collects ``--KEY=VALUE`` pairs into a dict.
+  """Argparse action that collects ``--KEY=VALUE`` pairs into a dict.
 
     Multiple occurrences are accumulated into a single dict::
 
@@ -98,16 +95,14 @@ class KVPairAction(argparse.Action):
     more than once, the last value wins.
     """
 
-    def __call__(self, parser, namespace, values, option_string=None):
-        d = getattr(namespace, self.dest) or {}
-        if not isinstance(d, dict):
-            d = {}
-        for token in values:
-            if "=" not in token:
-                parser.error(
-                    f"Expected KEY=VALUE pair, got: {token!r} "
-                    f"(for {option_string})"
-                )
-            key, val = token.split("=", 1)
-            d[key] = parse_value(val)
-        setattr(namespace, self.dest, d)
+  def __call__(self, parser, namespace, values, option_string=None):
+    d = getattr(namespace, self.dest) or {}
+    if not isinstance(d, dict):
+      d = {}
+    for token in values:
+      if "=" not in token:
+        parser.error(f"Expected KEY=VALUE pair, got: {token!r} "
+                     f"(for {option_string})")
+      key, val = token.split("=", 1)
+      d[key] = parse_value(val)
+    setattr(namespace, self.dest, d)

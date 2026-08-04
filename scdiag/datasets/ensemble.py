@@ -15,9 +15,7 @@ from PIL import Image
 from scdiag.datasets.hf_proxy import HFDatasetProxy
 from scdiag.datasets.image_folder import ImageFolderDataset
 
-# ---------------------------------------------------------------------------
 # Individual dataset back-ends
-# ---------------------------------------------------------------------------
 
 
 class _HFDataset:
@@ -89,9 +87,7 @@ class _HFDataset:
     return image
 
 
-# ---------------------------------------------------------------------------
 # Ensemble
-# ---------------------------------------------------------------------------
 
 
 class DermoscopyEnsemble:
@@ -123,8 +119,6 @@ class DermoscopyEnsemble:
     self._hf_token = hf_token
     self._datasets = []  # lazily populated
     self._offsets = None  # prefix-sum of lengths
-
-  # -- lazy loading -------------------------------------------------------
 
   def _ensure_loaded(self):
     if self._datasets:
@@ -166,8 +160,6 @@ class DermoscopyEnsemble:
     for ds in self._datasets:
       offsets.append(offsets[-1] + len(ds))
     self._offsets = offsets
-
-  # -- public API ---------------------------------------------------------
 
   def __len__(self):
     self._ensure_loaded()

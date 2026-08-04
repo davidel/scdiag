@@ -41,9 +41,7 @@ class ConvViTProcessor:
         v2.Normalize(mean=mean, std=std),
     ])
 
-  # ------------------------------------------------------------------
   # Public API
-  # ------------------------------------------------------------------
 
   def __call__(self, images):
     """Process one or more PIL images into a ``pixel_values`` tensor.

@@ -14,9 +14,7 @@ import logging
 
 import torch
 
-# ---------------------------------------------------------------------------
 # Public registry
-# ---------------------------------------------------------------------------
 
 REGISTRY = {}
 
@@ -25,9 +23,7 @@ _MODEL_REGISTRY = {}
 # Maps processor name → loader fn
 _PROCESSOR_REGISTRY = {}
 
-# ---------------------------------------------------------------------------
 # Protocol helpers
-# ---------------------------------------------------------------------------
 
 
 class ModelOutput:
@@ -95,9 +91,7 @@ def is_custom_model(model_name):
   return model_name in _MODEL_REGISTRY
 
 
-# ---------------------------------------------------------------------------
 # Unified loading API
-# ---------------------------------------------------------------------------
 
 
 def load_model(
@@ -183,9 +177,7 @@ def load_processor(
   return AutoImageProcessor.from_pretrained(model_name, cache_dir=cache_dir)
 
 
-# ---------------------------------------------------------------------------
 # Legacy helpers (kept for backwards compatibility)
-# ---------------------------------------------------------------------------
 
 
 def load_custom_model(
