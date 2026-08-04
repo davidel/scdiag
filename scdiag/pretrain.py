@@ -153,8 +153,12 @@ def train_one_epoch(model,
                     global_step,
                     writer,
                     log_every=50,
-                    monitor=None):
+                    monitor=None,
+                    grad_accum_steps=1):
   """Run one epoch of SimMIM pre-training.
+
+    If *grad_accum_steps* > 1, gradients are accumulated over that many
+    micro-batches before the optimizer steps and gradients are zeroed.
 
     Returns ``(avg_loss, global_step)``.
   """
@@ -186,22 +190,27 @@ def train_one_epoch(model,
       pred, target = model(images, mask)
       loss = simmim_loss(pred, target, mask)
 
+    loss = loss / grad_accum_steps
     loss.backward()
-    if monitor is not None:
-      monitor.step(global_step)
-    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-    optimizer.step()
-    optimizer.zero_grad(set_to_none=True)
+
+    # Step optimizer only every grad_accum_steps batches (or at end of epoch).
+    if (step + 1) % grad_accum_steps == 0 or (step + 1) == total_batches:
+      if monitor is not None:
+        monitor.step(global_step)
+      torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+      optimizer.step()
+      optimizer.zero_grad(set_to_none=True)
+
+      global_step += 1
 
     bs = images.shape[0]
-    total_loss += loss.item() * bs
+    total_loss += loss.item() * bs * grad_accum_steps
     total_samples += bs
     window_samples += bs
-    window_loss += loss.item() * bs
-    global_step += 1
+    window_loss += loss.item() * bs * grad_accum_steps
 
     elapsed = time.time() - last_log_time
-    if global_step % log_every == 0 and global_step > 0:
+    if global_step > 0 and global_step % log_every == 0:
       throughput = window_samples / elapsed if elapsed > 0 else 0
       lr_now = optimizer.param_groups[0]["lr"]
       w_loss = window_loss / window_samples if window_samples > 0 else 0.0
@@ -210,7 +219,8 @@ def train_one_epoch(model,
       msg = (f"  [Step {step + 1}/{total_batches}]"
              f" loss={w_loss:.4f} ({avg_loss_so_far:.4f})"
              f" lr={lr_now:.2e} img/s={throughput:.0f}"
-             f" mask_ratio={mask_ratio:.2f}")
+             f" mask_ratio={mask_ratio:.2f}"
+             f" accum={grad_accum_steps}")
       logging.info(msg)
       if gpu:
         logging.info(f"  [Step {step + 1}/{total_batches}] {gpu}")
@@ -291,6 +301,11 @@ def parse_args(argv=None):
                       default=32,
                       help="Per-GPU batch size. Reduce if OOM on "
                       "consumer GPUs at 448px.")
+  parser.add_argument("--grad_accum_steps",
+                      type=int,
+                      default=1,
+                      help="Gradient accumulation steps. Effective batch "
+                      "size = batch_size * grad_accum_steps.")
   parser.add_argument("--epochs",
                       type=int,
                       default=200,
@@ -473,9 +488,12 @@ def main(argv=None):
 
   num_params = sum(p.numel() for p in model.parameters()) / 1e6
   enc_params = sum(p.numel() for p in encoder.parameters()) / 1e6
+  effective_batch = args.batch_size * args.grad_accum_steps
   logging.info(
       f"Model params: {num_params:.1f}M "
       f"(encoder: {enc_params:.1f}M + decoder: {num_params - enc_params:.1f}M)")
+  logging.info(f"Effective batch size: {args.batch_size} x {args.grad_accum_steps}"
+               f" = {effective_batch}")
 
   optimizer = create_optimizer(
       model.parameters(),
@@ -516,7 +534,7 @@ def main(argv=None):
   writer = SummaryWriter(log_dir=args.log_dir)
 
   completed_epoch = start_epoch - 1  # last fully completed (-1 = none yet)
-  global_step = start_epoch * len(loader)
+  global_step = start_epoch * (len(loader) // args.grad_accum_steps)
   grad_monitor = None
   if args.grad_monitor >= 0:
     grad_monitor = GradMonitor(model, log_every=args.grad_monitor)
@@ -534,6 +552,7 @@ def main(argv=None):
           writer,
           log_every=args.log_every,
           monitor=grad_monitor,
+          grad_accum_steps=args.grad_accum_steps,
       )
       writer.add_scalar("Train/loss_epoch", avg_loss, epoch)
       scheduler.step()
