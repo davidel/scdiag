@@ -79,6 +79,15 @@ class ConvPatchEmbedding(nn.Module):
     self.num_patches_w = img_size // (2**num_blocks)
 
   @property
+  def patch_size(self):
+    """Effective spatial downsampling factor of the conv stem.
+
+    Each block halves the spatial resolution, so
+    ``patch_size = 2 ** num_blocks``.
+    """
+    return 2**len(self.blocks)
+
+  @property
   def num_patches(self):
     return self.num_patches_h * self.num_patches_w
 

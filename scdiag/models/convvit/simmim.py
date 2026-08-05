@@ -127,16 +127,17 @@ class ConvViTSimMIM(nn.Module):
     self.encoder = get_backbone(encoder)
     embed_dim = self.encoder.pos_embedding.shape[-1]
 
+    # Patch size derived from the conv stem (2 ** num_conv_layers).
+    # The decoder output dim must equal patch_size² × 3 (raw pixel values
+    # per patch) — NOT embed_dim — to match the reconstruction target.
+    ps = self.encoder.patch_embed.patch_size
+    self._patch_pixel_dim = ps * ps * 3  # e.g. 16*16*3 = 768
+
     # Mask token (one learned vector shared across all positions).
     self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
     nn.init.trunc_normal_(self.mask_token, std=0.02)
 
     # Decoder MLP.
-    # Output dimension = patch_size² × 3 (raw pixel values per patch).
-    # For patch_size=16, this is 768 — same as embed_dim for our ConvViT,
-    # but we compute it explicitly for clarity.
-    self._patch_pixel_dim = embed_dim  # = 16*16*3 = 768 for our config
-
     layers = []
     in_dim = embed_dim
     for _ in range(decoder_depth):
@@ -159,7 +160,8 @@ class ConvViTSimMIM(nn.Module):
     B = images.shape[0]
 
     # 1. Reconstruction target (raw pixels, patchified)
-    target = patchify(images, patch_size=16)  # (B, N, D)
+    patch_size = self.encoder.patch_embed.patch_size
+    target = patchify(images, patch_size=patch_size)  # (B, N, D)
 
     # 2. Conv stem — runs on ALL patches (conv needs spatial context)
     x = self.encoder.patch_embed(images)  # (B, N, D)
