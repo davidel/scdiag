@@ -58,7 +58,8 @@ def load_model_for_inference(
     Args:
         model_name: HuggingFace model name or local path defining architecture,
                     or a registered custom model name (e.g. "convvit").
-        checkpoint_path: Path to our .pt checkpoint containing model_state_dict.
+        checkpoint_path: Path to a raw state dictionary or a wrapped checkpoint
+            containing ``model_state_dict``. Only model weights are loaded here.
         device: Target device.
         cache_dir: Optional HF cache directory.
         model_kwargs: Optional dict of extra kwargs forwarded to
@@ -71,8 +72,14 @@ def load_model_for_inference(
     """
   import os
 
-  ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-  state_dict = ckpt.get("model_state_dict", ckpt)
+  ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+  if "model_state_dict" in ckpt:
+    state_dict = ckpt["model_state_dict"]
+  else:
+    logging.warning(
+        "Loading raw state dictionary from '%s'; checkpoint metadata is "
+        "unavailable.", checkpoint_path)
+    state_dict = ckpt
 
   # Infer num_labels from the checkpoint's classifier head.
   num_labels = None

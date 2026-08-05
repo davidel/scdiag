@@ -242,6 +242,8 @@ def load_and_split_dataset(
     seed=42,
     train_transform=None,
     val_transform=None,
+    image_column=None,
+    label_column=None,
 ):
   """Load a HuggingFace dataset, return ``(train_proxy, val_proxy)``."""
   if dataset_name.startswith("imagefolder/"):
@@ -252,18 +254,27 @@ def load_and_split_dataset(
 
   # Single split: validate, split and wrap.
   if isinstance(raw, datasets.Dataset):
-    if HFDatasetProxy.detect_image_column(raw) is None:
+    detected_image_column = (image_column or HFDatasetProxy.detect_image_column(raw))
+    if detected_image_column is None:
       raise ValueError(f"No image column detected in {dataset_name}. "
                        f"Columns: {list(raw.features.keys())}")
     split = raw.train_test_split(test_size=test_size, seed=seed)
     return (
-        HFDatasetProxy(split["train"], transform=train_transform),
-        HFDatasetProxy(split["test"], transform=val_transform),
+        HFDatasetProxy(split["train"],
+                       transform=train_transform,
+                       image_column=image_column,
+                       label_column=label_column),
+        HFDatasetProxy(split["test"],
+                       transform=val_transform,
+                       image_column=image_column,
+                       label_column=label_column),
     )
 
   # DatasetDict: validate and ensure train/test splits exist.
   for split_name in raw:
-    if HFDatasetProxy.detect_image_column(raw[split_name]) is None:
+    detected_image_column = (image_column or
+                             HFDatasetProxy.detect_image_column(raw[split_name]))
+    if detected_image_column is None:
       raise ValueError(f"No image column in split '{split_name}' of {dataset_name}. "
                        f"Columns: {list(raw[split_name].features.keys())}")
 
@@ -280,9 +291,19 @@ def load_and_split_dataset(
       names = list(raw.keys())
       raw = datasets.DatasetDict({"train": raw[names[0]], "test": raw[names[1]]})
 
+  logging.info("Using image column: %s%s", image_column or "auto-detected",
+               " (explicit)" if image_column else "")
+  logging.info("Using label column: %s%s", label_column or "auto-detected",
+               " (explicit)" if label_column else "")
   return (
-      HFDatasetProxy(raw["train"], transform=train_transform),
-      HFDatasetProxy(raw["test"], transform=val_transform),
+      HFDatasetProxy(raw["train"],
+                     transform=train_transform,
+                     image_column=image_column,
+                     label_column=label_column),
+      HFDatasetProxy(raw["test"],
+                     transform=val_transform,
+                     image_column=image_column,
+                     label_column=label_column),
   )
 
 
@@ -332,6 +353,16 @@ def parse_args(argv=None):
       default="marmal88/skin_cancer",
       help=
       "HuggingFace dataset name, or 'imagefolder/PATH' for local ImageFolder datasets.",
+  )
+  parser.add_argument(
+      "--image_column",
+      type=str,
+      help="Image column name; auto-detected when omitted.",
+  )
+  parser.add_argument(
+      "--label_column",
+      type=str,
+      help="Label column name; auto-detected when omitted.",
   )
   parser.add_argument(
       "--image_size",
@@ -954,6 +985,8 @@ def main():
       cache_dir=args.cache_dir,
       train_transform=train_transforms,
       val_transform=val_transforms,
+      image_column=args.image_column,
+      label_column=args.label_column,
   )
 
   num_labels = train_proxy.num_labels

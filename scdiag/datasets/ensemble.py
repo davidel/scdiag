@@ -8,6 +8,7 @@ SimMIM / MAE pre-training.
 
 import logging
 import os
+import random
 from pathlib import Path
 
 from PIL import Image
@@ -39,16 +40,11 @@ class _HFDataset:
   def _load(self):
     from datasets import load_dataset
     logging.info(f"Loading HF dataset '{self.name}' (split={self.split}) …")
-    try:
-      ds = load_dataset(self.name,
-                        split=self.split,
-                        cache_dir=self.cache_dir,
-                        token=self.hf_token)
-    except Exception as exc:
-      logging.warning(f"  Failed to load '{self.name}': {exc}")
-      return None
-    self._detect_and_normalize_image_column(ds)
-    return ds
+    ds = load_dataset(self.name,
+                      split=self.split,
+                      cache_dir=self.cache_dir,
+                      token=self.hf_token)
+    return self._detect_and_normalize_image_column(ds)
 
   def _detect_and_normalize_image_column(self, ds):
     """Detect the image column and ensure it returns decoded PIL images."""
@@ -59,8 +55,9 @@ class _HFDataset:
     if col is None:
       raise ValueError(f"Cannot auto-detect image column in '{self.name}'. "
                        f"Columns: {ds.column_names}. Set 'image_column' explicitly.")
-    HFDatasetProxy.normalize_image_column(ds, col)
+    ds = HFDatasetProxy.normalize_image_column(ds, col)
     self.image_column = col
+    return ds
 
   def _ensure_loaded(self):
     if self._ds is None:
@@ -113,16 +110,21 @@ class DermoscopyEnsemble:
         hf_token: HuggingFace token for gated datasets (e.g. Derm1M).
     """
 
-  def __init__(self, dataset_configs, cache_dir=None, hf_token=None):
+  _MAX_REPLACEMENT_ATTEMPTS = 32
+
+  def __init__(self, dataset_configs, cache_dir=None, hf_token=None, strict=False):
     self._configs = dataset_configs
     self._cache_dir = cache_dir
     self._hf_token = hf_token
+    self._strict = strict
     self._datasets = []  # lazily populated
     self._offsets = None  # prefix-sum of lengths
+    self._loaded = False
 
   def _ensure_loaded(self):
-    if self._datasets:
-      return  # already loaded
+    if self._loaded:
+      return  # already loaded, including the empty-result case
+    self._loaded = True
     for cfg in self._configs:
       name = cfg["name"]
       source = cfg.get("source", "hf")
@@ -150,10 +152,16 @@ class DermoscopyEnsemble:
         logging.info(f"  + {name}: {n:,} images")
         self._datasets.append(ds)
       except Exception as exc:
-        logging.warning(f"  Failed to initialize dataset '{name}': {exc}")
+        if self._strict:
+          raise RuntimeError(
+              f"Failed to initialize dataset '{name}' ({source})") from exc
+        logging.exception("  Failed to initialize dataset '%s' (%s); skipping.", name,
+                          source)
 
     # Build prefix-sum offsets for flat indexing
     self._rebuild_offsets()
+    if not self._datasets:
+      raise RuntimeError("No datasets loaded successfully")
 
   def _rebuild_offsets(self):
     offsets = [0]
@@ -165,21 +173,34 @@ class DermoscopyEnsemble:
     self._ensure_loaded()
     return self._offsets[-1] if self._offsets else 0
 
+  def _get_item(self, idx):
+    """Resolve a valid global index and load its image."""
+    import bisect
+    ds_idx = bisect.bisect_right(self._offsets, idx) - 1
+    local_idx = idx - self._offsets[ds_idx]
+    return self._datasets[ds_idx][local_idx]
+
   def __getitem__(self, idx):
     self._ensure_loaded()
     if not self._datasets:
       raise RuntimeError("No datasets loaded")
-    # Binary search for the right dataset
-    import bisect
-    ds_idx = bisect.bisect_right(self._offsets, idx) - 1
-    ds_idx = max(0, min(ds_idx, len(self._datasets) - 1))
-    local_idx = idx - self._offsets[ds_idx]
+    if idx < 0 or idx >= len(self):
+      raise IndexError(f"Index {idx} out of range for ensemble of length {len(self)}")
+
     try:
-      return self._datasets[ds_idx][local_idx]
-    except IndexError:
-      # Fallback: return first image from first dataset
-      logging.warning(f"Index {idx} out of range, falling back to index 0")
-      return self._datasets[0][0]
+      return self._get_item(idx)
+    except (IndexError, OSError, ValueError) as original_exc:
+      # Intentional training safeguard: avoid pre-scanning very large image
+      # collections. Replace an unusable sample with a random valid candidate.
+      for _ in range(self._MAX_REPLACEMENT_ATTEMPTS):
+        replacement_idx = random.randrange(len(self))
+        try:
+          return self._get_item(replacement_idx)
+        except (IndexError, OSError, ValueError):
+          continue
+      raise RuntimeError("Unable to find a usable image after "
+                         f"{self._MAX_REPLACEMENT_ATTEMPTS} attempts; original error: "
+                         f"{original_exc}") from original_exc
 
   @property
   def num_datasets(self):

@@ -91,6 +91,7 @@ def build_pretrain_dataset(args):
           "name": name,
           "source": "hf",
           "split": "train",
+          "image_column": args.image_column,
           "min_resolution": 224,
       })
 
@@ -101,6 +102,7 @@ def build_pretrain_dataset(args):
       configs,
       cache_dir=args.cache_dir,
       hf_token=args.hf_token,
+      strict=args.strict_datasets,
   )
   transform = build_pretrain_transform(args.image_size)
   dataset = _TransformWrapper(ensemble, transform)
@@ -300,6 +302,16 @@ def parse_args(argv=None):
       required=True,
       help="Dataset names or local paths to include in ensemble. "
       "Use HuggingFace IDs (e.g. 'HAM10000') or directories.",
+  )
+  parser.add_argument(
+      "--image_column",
+      type=str,
+      help="Image column name for HF datasets; auto-detected when omitted.",
+  )
+  parser.add_argument(
+      "--strict_datasets",
+      action="store_true",
+      help="Abort instead of skipping a dataset that fails to load.",
   )
   parser.add_argument(
       "--cache_dir",

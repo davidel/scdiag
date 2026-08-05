@@ -246,12 +246,16 @@ def load_checkpoint_weights(path,
         f"Checkpoint file not found: {path}. "
         "Ensure the checkpoint exists before calling load_checkpoint_weights().")
 
-  ckpt = torch.load(path, map_location=device, weights_only=False)
+  ckpt = torch.load(path, map_location=device, weights_only=True)
 
-  # Accept either raw state_dict or wrapped checkpoint
+  # Accept either raw state_dict or wrapped checkpoint. This helper loads
+  # model weights only, so use the safe tensor-only deserializer.
   if "model_state_dict" in ckpt:
     state = ckpt["model_state_dict"]
   else:
+    logging.warning(
+        "Loading raw state dictionary from '%s'; checkpoint metadata is "
+        "unavailable.", path)
     state = ckpt
 
   if exclude_prefixes:

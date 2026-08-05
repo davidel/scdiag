@@ -10,6 +10,7 @@ import torch
 from PIL import Image
 
 from scdiag.cli_utils import KVPairAction
+from scdiag.label_utils import get_label
 from scdiag.logging_utils import setup_logging
 from scdiag.model_utils import build_val_transform, load_model_for_inference
 
@@ -25,7 +26,7 @@ def parse_args(argv=None):
   parser.add_argument(
       "--checkpoint",
       required=True,
-      help="Path to .pt checkpoint (must contain 'model_state_dict').",
+      help="Path to .pt checkpoint (raw or wrapped state dictionary).",
   )
   parser.add_argument(
       "--image_size",
@@ -148,7 +149,7 @@ def main(argv=None):
     predictions = []
     for idx in probs.argsort(descending=True).tolist():
       predictions.append({
-          "label": model.config.id2label[str(idx)],
+          "label": get_label(model.config.id2label, idx),
           "probability": round(probs[idx].item(), 4),
       })
     if args.top_k:
@@ -173,7 +174,7 @@ def main(argv=None):
       xgb_predictions = []
       for idx in np.argsort(xgb_probs)[::-1].tolist():
         xgb_predictions.append({
-            "label": model.config.id2label[str(idx)],
+            "label": get_label(model.config.id2label, idx),
             "probability": round(float(xgb_probs[idx]), 4),
         })
       if args.top_k:

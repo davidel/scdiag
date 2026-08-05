@@ -10,7 +10,8 @@ self-supervised pre-training (SimMIM) on multi-source dermoscopy datasets.
 
 - **Any HuggingFace image classification dataset** — auto-detects image and
   label columns, handles filepath-based images, ClassLabel casting, and
-  pre-split datasets.
+  pre-split datasets. Use `--image_column` and `--label_column` when a dataset
+  uses non-standard or ambiguous column names.
 - **Mixed precision** — optional AMP with `float16` (with GradScaler) or
   `bfloat16`.
 - **Gradient accumulation** — effective batch size = `batch_size * grad_accum_steps`.
@@ -92,6 +93,8 @@ scdiag-train --model google/vit-base-patch16-224 \
 |---|---|---|
 | `--model` | `google/vit-base-patch16-224` | HuggingFace model name, local path, or custom model name (e.g. `convvit`) |
 | `--dataset` | `marmal88/skin_cancer` | HuggingFace dataset name |
+| `--image_column` | auto-detected | Explicit HuggingFace image column name |
+| `--label_column` | auto-detected | Explicit HuggingFace label column name |
 | `--image_size` | `448` | Augmentation crop size (processor handles final resize) |
 | `--train_augmentation_script` | `None` | Path or URL to a Python script defining `create_train_transform(image_size, **kwargs)` returning a list of v2 transforms. The fixed tail (ToImage, ToDtype, Normalize) is appended automatically. |
 | `--epochs` | `5` | Number of training epochs |
@@ -196,6 +199,8 @@ scdiag-train --model convvit \
 | `--datasets` | (required) | Space-separated dataset names or local paths. HuggingFace IDs or directories. |
 | `--cache_dir` | `None` | HuggingFace cache directory for dataset and model downloads. |
 | `--hf_token` | `None` | HuggingFace token for gated datasets (or set `HF_TOKEN` env var). |
+| `--image_column` | auto-detected | Explicit HF image column for pretraining datasets |
+| `--strict_datasets` | `False` | Abort instead of skipping a dataset that fails to load |
 | `--image_size` | `448` | Input image size (square). |
 | `--mask_ratio` | `0.60` | Fraction of patches to mask (SimMIM default: 0.60). |
 | `--decoder_dim` | `768` | Decoder hidden dimension. |
@@ -229,7 +234,15 @@ scdiag-train --model convvit \
 - **Local image directories** — pass a path to a folder of images
   (ImageFolder format).
 
-Datasets are loaded lazily and gracefully skipped if they fail to load.
+Datasets are loaded lazily; source initialization can occur when `len()` is
+first requested. By default, datasets that fail to load are logged and skipped
+(best-effort mode), and the run fails if no dataset loads successfully. Use
+`--strict_datasets` to abort on the first dataset-loading failure.
+
+Images smaller than the configured minimum resolution are not pre-scanned out
+of the corpus. During iteration, an unusable image is replaced by a randomly
+selected candidate, with a bounded number of attempts. This avoids scanning
+very large collections before pretraining while preventing infinite retries.
 
 ### Preparing Datasets
 
@@ -261,7 +274,7 @@ scdiag-infer --model facebook/convnextv2-base-22k-224 \
 | Flag | Default | Description |
 |---|---|---|
 | `--model` | (required) | HuggingFace model name |
-| `--checkpoint` | (required) | Path to `_best.pt` checkpoint |
+| `--checkpoint` | (required) | Path to a raw state dictionary or wrapped checkpoint |
 | `--top_k` | `5` | Show top-K predictions |
 | `--output` | `None` | Write JSON results to file |
 | `--device` | `None` | Force device (`cuda`, `cpu`, `mps`). Auto-detected if omitted. |
@@ -269,6 +282,13 @@ scdiag-infer --model facebook/convnextv2-base-22k-224 \
 | `--xgboost_model` | `None` | XGBoost model path. If provided, run XGBoost alongside PyTorch. |
 | `--model_arg` | `{}` | Override model configuration (repeatable). Example: `--model_arg depth=6` |
 | `--proc_arg` | `{}` | Override processor configuration (repeatable). |
+
+Inference accepts either a raw model state dictionary or a wrapped checkpoint
+containing `model_state_dict`; wrapped checkpoints are preferred because they
+can include model metadata. Raw state dictionaries produce a warning because
+metadata is unavailable. Inference uses safe weights-only checkpoint loading.
+Resume-training checkpoints contain additional state and must come from a
+trusted source because full PyTorch deserialization is required.
 
 ### XGBoost Inference
 

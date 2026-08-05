@@ -5,10 +5,18 @@ import logging
 import numpy as np
 from xgboost import XGBClassifier
 
+from scdiag.label_utils import get_label
 
-def train_xgboost(train_features, train_labels, max_depth=6,
-                  n_estimators=200, learning_rate=0.1, subsample=0.8,
-                  colsample_bytree=0.8, min_child_weight=1, gamma=0.0,
+
+def train_xgboost(train_features,
+                  train_labels,
+                  max_depth=6,
+                  n_estimators=200,
+                  learning_rate=0.1,
+                  subsample=0.8,
+                  colsample_bytree=0.8,
+                  min_child_weight=1,
+                  gamma=0.0,
                   reg_alpha=0.0):
   """Train an XGBoost classifier on backbone features.
 
@@ -76,17 +84,21 @@ def eval_xgboost(xgb_model, features, labels, id2label=None):
   for cls in sorted(set(labels)):
     mask = labels == cls
     cls_acc = np.mean(predictions[mask] == labels[mask])
-    name = id2label[str(cls)] if id2label and str(cls) in id2label else f"CLASS_{cls}"
+    try:
+      name = get_label(id2label, cls) if id2label else f"CLASS_{cls}"
+    except KeyError:
+      name = f"CLASS_{cls}"
     per_class[name] = float(cls_acc)
 
   # Build target names for classification report
   target_names = None
   if id2label:
-    target_names = [id2label[str(i)] for i in sorted(set(labels))]
+    target_names = [get_label(id2label, i) for i in sorted(set(labels))]
 
-  report = classification_report(labels, predictions,
-                                  target_names=target_names,
-                                  zero_division=0)
+  report = classification_report(labels,
+                                 predictions,
+                                 target_names=target_names,
+                                 zero_division=0)
   cm = confusion_matrix(labels, predictions)
 
   return {

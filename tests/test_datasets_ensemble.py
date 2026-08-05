@@ -1,5 +1,6 @@
 """Tests for the DermoscopyEnsemble dataset."""
 
+import pytest
 from PIL import Image
 
 from scdiag.datasets.ensemble import DermoscopyEnsemble
@@ -68,25 +69,36 @@ class TestDermoscopyEnsemble:
     assert "1 dataset" in s
 
   def test_graceful_failure(self, tmp_path):
-    """Ensemble should skip datasets that fail to load."""
-    configs = [
-        {
-            "name": "/nonexistent/path",
-            "source": "imagefolder"
-        },
-    ]
+    """Best-effort loading reports an error when every source fails."""
+    configs = [{"name": "/nonexistent/path", "source": "imagefolder"}]
     ensemble = DermoscopyEnsemble(configs)
-    assert len(ensemble) == 0
+    with pytest.raises(RuntimeError, match="No datasets loaded"):
+      len(ensemble)
 
   def test_empty_config(self):
     ensemble = DermoscopyEnsemble([])
-    assert len(ensemble) == 0
+    with pytest.raises(RuntimeError, match="No datasets loaded"):
+      len(ensemble)
+
+  def test_small_image_uses_random_replacement(self, tmp_path):
+    """A small image should be replaced without scanning the directory."""
+    d = tmp_path / "data"
+    d.mkdir()
+    Image.new("RGB", (8, 8)).save(d / "small.png")
+    Image.new("RGB", (64, 64)).save(d / "large.png")
+    ensemble = DermoscopyEnsemble([{
+        "name": str(d),
+        "source": "imagefolder",
+        "min_resolution": 32,
+    }])
+    image = ensemble[0]
+    assert image.size == (64, 64)
 
   def test_getitem_out_of_range(self, tmp_path):
-    """Out-of-range index should fallback to index 0."""
+    """Out-of-range indices should raise instead of duplicating data."""
     d = tmp_path / "data"
     d.mkdir()
     Image.new("RGB", (64, 64)).save(d / "img.png")
     ensemble = DermoscopyEnsemble([{"name": str(d), "source": "imagefolder"}])
-    img = ensemble[9999]  # out of range
-    assert isinstance(img, Image.Image)
+    with pytest.raises(IndexError, match="out of range"):
+      ensemble[9999]

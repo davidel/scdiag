@@ -54,9 +54,10 @@ class HFDatasetProxy:
       "channel",
   })
 
-  def __init__(self, hf_dataset, transform=None):
-    self.dataset = self.normalize_labels(self.normalize_image_column(hf_dataset))
-    self.image_col = self.detect_image_column(self.dataset)
+  def __init__(self, hf_dataset, transform=None, image_column=None, label_column=None):
+    self.dataset = self.normalize_image_column(hf_dataset, image_column)
+    self.dataset = self.normalize_labels(self.dataset, label_column)
+    self.image_col = image_column or self.detect_image_column(self.dataset)
     self.transform = transform
 
   def __len__(self):
@@ -123,20 +124,32 @@ class HFDatasetProxy:
     return None
 
   @staticmethod
-  def normalize_image_column(dataset):
-    """Cast the image column to ``datasets.Image`` if it's stored as strings."""
-    image_col = HFDatasetProxy.detect_image_column(dataset)
+  def normalize_image_column(dataset, image_column=None):
+    """Cast the selected image column to ``datasets.Image`` when needed.
+
+    Args:
+      dataset: Hugging Face dataset to normalize.
+      image_column: Optional explicit image column. When omitted, the image
+        column is detected automatically.
+    """
+    image_col = image_column or HFDatasetProxy.detect_image_column(dataset)
     if image_col is None:
       return dataset
+    if image_col not in dataset.features:
+      raise ValueError(f"Image column '{image_col}' is not present. "
+                       f"Available columns: {dataset.column_names}")
     feat = dataset.features[image_col]
     if isinstance(feat, datasets.Value) and feat.dtype == "string":
       dataset = dataset.cast_column(image_col, datasets.Image())
     return dataset
 
   @staticmethod
-  def normalize_labels(dataset):
-    """Cast the detected label column to ClassLabel and rename to ``label``."""
-    label_col = HFDatasetProxy.detect_label_column(dataset)
+  def normalize_labels(dataset, label_column=None):
+    """Cast the selected label column to ClassLabel and rename to ``label``."""
+    label_col = label_column or HFDatasetProxy.detect_label_column(dataset)
+    if label_col is not None and label_col not in dataset.features:
+      raise ValueError(f"Label column '{label_col}' is not present. "
+                       f"Available columns: {dataset.column_names}")
     if label_col is None:
       return dataset
     if not isinstance(dataset.features[label_col], datasets.ClassLabel):
