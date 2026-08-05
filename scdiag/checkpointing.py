@@ -241,6 +241,11 @@ def load_checkpoint_weights(path,
     Returns:
         A ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys``.
     """
+  if not os.path.isfile(path):
+    raise FileNotFoundError(
+        f"Checkpoint file not found: {path}. "
+        "Ensure the checkpoint exists before calling load_checkpoint_weights().")
+
   ckpt = torch.load(path, map_location=device, weights_only=False)
 
   # Accept either raw state_dict or wrapped checkpoint

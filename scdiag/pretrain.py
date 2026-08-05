@@ -117,17 +117,25 @@ def log_reconstruction(model, loader, writer, epoch, device, num_samples=8):
   model.eval()
   images = next(iter(loader))[:num_samples].to(device)
   _, _, H, W = images.shape
-  patch_size = 16
-  num_patches = (H // patch_size) * (W // patch_size)
-  mask = random_mask(images.shape[0],
-                     num_patches,
-                     mask_ratio=getattr(model, "_last_mask_ratio", 0.60),
-                     device=device)
+
+  # Derive patch_size from the model rather than hard-coding it.
+  # ConvPatchEmbedding computes it as 2 ** num_conv_layers.
+  num_blocks = len(model.encoder.patch_embed.blocks)
+  patch_size = 2**num_blocks
+  num_patches = model.encoder.patch_embed.num_patches
+
+  mask = random_mask(
+      images.shape[0],
+      num_patches,
+      mask_ratio=getattr(model, "_last_mask_ratio", 0.60),
+      device=device,
+  )
 
   with torch.no_grad():
     pred, target = model(images, mask)
 
   from scdiag.models.convvit.simmim import unpatchify
+
   target_imgs = unpatchify(target, patch_size=patch_size, img_size=H)
   pred_imgs = unpatchify(pred, patch_size=patch_size, img_size=H)
 
@@ -144,24 +152,26 @@ def log_reconstruction(model, loader, writer, epoch, device, num_samples=8):
   model.train()
 
 
-def train_one_epoch(model,
-                    loader,
-                    optimizer,
-                    device,
-                    amp_dtype,
-                    epoch,
-                    global_step,
-                    writer,
-                    log_every=50,
-                    monitor=None,
-                    grad_accum_steps=1):
+def train_one_epoch(
+    model,
+    loader,
+    optimizer,
+    device,
+    amp_dtype,
+    epoch,
+    global_step,
+    writer,
+    log_every=50,
+    monitor=None,
+    grad_accum_steps=1,
+):
   """Run one epoch of SimMIM pre-training.
 
     If *grad_accum_steps* > 1, gradients are accumulated over that many
     micro-batches before the optimizer steps and gradients are zeroed.
 
     Returns ``(avg_loss, global_step)``.
-  """
+    """
   model.train()
   total_loss = 0.0
   total_samples = 0
@@ -258,170 +268,224 @@ def parse_args(argv=None):
       formatter_class=argparse.ArgumentDefaultsHelpFormatter,
   )
 
-  parser.add_argument("--model",
-                      type=str,
-                      default="convvit",
-                      help="Model name registered in the scdiag registry "
-                      "(e.g. 'convvit' or an HuggingFace model ID).")
-  parser.add_argument("--datasets",
-                      nargs="+",
-                      required=True,
-                      help="Dataset names or local paths to include in ensemble. "
-                      "Use HuggingFace IDs (e.g. 'HAM10000') or directories.")
-  parser.add_argument("--cache_dir",
-                      type=str,
-                      default=None,
-                      help="HuggingFace datasets cache directory")
-  parser.add_argument("--hf_token",
-                      type=str,
-                      default=None,
-                      help="HuggingFace token for gated datasets (or set HF_TOKEN "
-                      "env var)")
+  parser.add_argument(
+      "--model",
+      type=str,
+      default="convvit",
+      help="Model name registered in the scdiag registry "
+      "(e.g. 'convvit' or an HuggingFace model ID).",
+  )
+  parser.add_argument(
+      "--datasets",
+      nargs="+",
+      required=True,
+      help="Dataset names or local paths to include in ensemble. "
+      "Use HuggingFace IDs (e.g. 'HAM10000') or directories.",
+  )
+  parser.add_argument(
+      "--cache_dir",
+      type=str,
+      default=None,
+      help="HuggingFace datasets cache directory",
+  )
+  parser.add_argument(
+      "--hf_token",
+      type=str,
+      default=None,
+      help="HuggingFace token for gated datasets (or set HF_TOKEN "
+      "env var)",
+  )
   parser.add_argument("--image_size",
                       type=int,
                       default=448,
                       help="Input image size (square)")
   parser.add_argument("--num_workers", type=int, default=4, help="DataLoader workers")
 
-  parser.add_argument("--mask_ratio",
-                      type=float,
-                      default=0.60,
-                      help="Fraction of patches to mask (SimMIM default: 0.60)")
+  parser.add_argument(
+      "--mask_ratio",
+      type=float,
+      default=0.60,
+      help="Fraction of patches to mask (SimMIM default: 0.60)",
+  )
   parser.add_argument("--decoder_dim",
                       type=int,
                       default=768,
                       help="Decoder hidden dimension")
-  parser.add_argument("--decoder_depth",
-                      type=int,
-                      default=2,
-                      help="Number of Linear->GELU layers in decoder")
+  parser.add_argument(
+      "--decoder_depth",
+      type=int,
+      default=2,
+      help="Number of Linear->GELU layers in decoder",
+  )
 
-  parser.add_argument("--batch_size",
-                      type=int,
-                      default=32,
-                      help="Per-GPU batch size. Reduce if OOM on "
-                      "consumer GPUs at 448px.")
-  parser.add_argument("--grad_accum_steps",
-                      type=int,
-                      default=1,
-                      help="Gradient accumulation steps. Effective batch "
-                      "size = batch_size * grad_accum_steps.")
+  parser.add_argument(
+      "--batch_size",
+      type=int,
+      default=32,
+      help="Per-GPU batch size. Reduce if OOM on "
+      "consumer GPUs at 448px.",
+  )
+  parser.add_argument(
+      "--grad_accum_steps",
+      type=int,
+      default=1,
+      help="Gradient accumulation steps. Effective batch "
+      "size = batch_size * grad_accum_steps.",
+  )
   parser.add_argument("--epochs",
                       type=int,
                       default=200,
                       help="Total pre-training epochs.")
-  parser.add_argument("--lr",
-                      type=float,
-                      default=1e-4,
-                      help="Peak learning rate for AdamW. Linear warmup "
-                      "from 1%% of this value.")
+  parser.add_argument(
+      "--lr",
+      type=float,
+      default=1e-4,
+      help="Peak learning rate for AdamW. Linear warmup "
+      "from 1%% of this value.",
+  )
   parser.add_argument("--weight_decay",
                       type=float,
                       default=0.05,
                       help="AdamW weight decay.")
-  parser.add_argument("--warmup_epochs",
-                      type=int,
-                      default=10,
-                      help="Linear warmup epochs before cosine schedule.")
+  parser.add_argument(
+      "--warmup_epochs",
+      type=int,
+      default=10,
+      help="Linear warmup epochs before cosine schedule.",
+  )
   parser.add_argument("--grad_clip",
                       type=float,
                       default=1.0,
                       help="Max gradient norm for clipping.")
-  parser.add_argument("--amp_dtype",
-                      type=str,
-                      default="float16",
-                      choices=["float16", "bfloat16", "none"],
-                      help="Mixed precision dtype. Use 'none' to disable AMP.")
+  parser.add_argument(
+      "--amp_dtype",
+      type=str,
+      default="float16",
+      choices=["float16", "bfloat16", "none"],
+      help="Mixed precision dtype. Use 'none' to disable AMP.",
+  )
 
-  parser.add_argument("--checkpoint",
-                      type=str,
-                      default="./checkpoints/convvit_simmim",
-                      help="Checkpoint path prefix (without extension). "
-                      "_latest.pt and _best.pt suffixes are appended "
-                      "automatically.")
-  parser.add_argument("--gcs_checkpoint",
-                      type=str,
-                      default=None,
-                      help="GCS URI to sync checkpoints to "
-                      "(format: gs://BUCKET/PREFIX). Requires "
-                      "google-cloud-storage package.")
-  parser.add_argument("--resume",
-                      action=argparse.BooleanOptionalAction,
-                      default=True,
-                      help="Resume training from latest checkpoint if one "
-                      "exists.")
-  parser.add_argument("--state_save",
-                      type=str,
-                      default="opt,sched",
-                      help="Comma-separated states to save in checkpoints. "
-                      "Allowed: opt, sched, amp, none.")
-  parser.add_argument("--state_load",
-                      type=str,
-                      default="opt,sched",
-                      help="Comma-separated states to restore from checkpoints. "
-                      "Allowed: opt, sched, amp, none.")
+  parser.add_argument(
+      "--checkpoint",
+      type=str,
+      default="./checkpoints/convvit_simmim",
+      help="Checkpoint path prefix (without extension). "
+      "_latest.pt and _best.pt suffixes are appended "
+      "automatically.",
+  )
+  parser.add_argument(
+      "--gcs_checkpoint",
+      type=str,
+      default=None,
+      help="GCS URI to sync checkpoints to "
+      "(format: gs://BUCKET/PREFIX). Requires "
+      "google-cloud-storage package.",
+  )
+  parser.add_argument(
+      "--resume",
+      action=argparse.BooleanOptionalAction,
+      default=True,
+      help="Resume training from latest checkpoint if one "
+      "exists.",
+  )
+  parser.add_argument(
+      "--state_save",
+      type=str,
+      default="opt,sched",
+      help="Comma-separated states to save in checkpoints. "
+      "Allowed: opt, sched, amp, none.",
+  )
+  parser.add_argument(
+      "--state_load",
+      type=str,
+      default="opt,sched",
+      help="Comma-separated states to restore from checkpoints. "
+      "Allowed: opt, sched, amp, none.",
+  )
 
-  parser.add_argument("--log_level",
-                      type=str,
-                      default="INFO",
-                      choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-                      help="Minimum logging level.")
-  parser.add_argument("--log_dir",
-                      type=str,
-                      default=None,
-                      help="TensorBoard log directory. Defaults to "
-                      "<checkpoint_dir>/logs if not specified.")
-  parser.add_argument("--log_every",
-                      type=int,
-                      default=50,
-                      help="Log training metrics every N optimization steps.")
-  parser.add_argument("--grad_monitor",
-                      type=int,
-                      default=-1,
-                      help="Log gradient stats every N steps. "
-                      "-1 (default) = disabled.")
-  parser.add_argument("--vis_every",
-                      type=int,
-                      default=10,
-                      help="Log reconstruction visualisation to TensorBoard "
-                      "every N epochs.")
+  parser.add_argument(
+      "--log_level",
+      type=str,
+      default="INFO",
+      choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+      help="Minimum logging level.",
+  )
+  parser.add_argument(
+      "--log_dir",
+      type=str,
+      default=None,
+      help="TensorBoard log directory. Defaults to "
+      "<checkpoint_dir>/logs if not specified.",
+  )
+  parser.add_argument(
+      "--log_every",
+      type=int,
+      default=50,
+      help="Log training metrics every N optimization steps.",
+  )
+  parser.add_argument(
+      "--grad_monitor",
+      type=int,
+      default=-1,
+      help="Log gradient stats every N steps. "
+      "-1 (default) = disabled.",
+  )
+  parser.add_argument(
+      "--vis_every",
+      type=int,
+      default=10,
+      help="Log reconstruction visualisation to TensorBoard "
+      "every N epochs.",
+  )
 
-  parser.add_argument("--model_arg",
-                      nargs="+",
-                      action=KVPairAction,
-                      default={},
-                      metavar="KEY=VALUE",
-                      help="Override model configuration (repeatable). "
-                      "Example: --model_arg depth=6 num_heads=8")
-  parser.add_argument("--proc_arg",
-                      nargs="+",
-                      action=KVPairAction,
-                      default={},
-                      metavar="KEY=VALUE",
-                      help="Override processor configuration (repeatable).")
-  parser.add_argument("--optimizer",
-                      type=str,
-                      default="adamw",
-                      help="Optimizer name: adamw (default), adam, sgd.")
-  parser.add_argument("--opt_arg",
-                      nargs="+",
-                      action=KVPairAction,
-                      default={},
-                      metavar="KEY=VALUE",
-                      help="Extra optimizer kwargs (repeatable). "
-                      "Example: --opt_arg betas=0.9,0.999 momentum=0.9")
-  parser.add_argument("--scheduler",
-                      type=str,
-                      default="cosine",
-                      help="Scheduler name: cosine (default), "
-                      "cosine_warmup, step, constant.")
-  parser.add_argument("--sched_arg",
-                      nargs="+",
-                      action=KVPairAction,
-                      default={},
-                      metavar="KEY=VALUE",
-                      help="Extra scheduler kwargs (repeatable). "
-                      "Example: --sched_arg T_max=50 eta_min=1e-6")
+  parser.add_argument(
+      "--model_arg",
+      nargs="+",
+      action=KVPairAction,
+      default={},
+      metavar="KEY=VALUE",
+      help="Override model configuration (repeatable). "
+      "Example: --model_arg depth=6 num_heads=8",
+  )
+  parser.add_argument(
+      "--proc_arg",
+      nargs="+",
+      action=KVPairAction,
+      default={},
+      metavar="KEY=VALUE",
+      help="Override processor configuration (repeatable).",
+  )
+  parser.add_argument(
+      "--optimizer",
+      type=str,
+      default="adamw",
+      help="Optimizer name: adamw (default), adam, sgd.",
+  )
+  parser.add_argument(
+      "--opt_arg",
+      nargs="+",
+      action=KVPairAction,
+      default={},
+      metavar="KEY=VALUE",
+      help="Extra optimizer kwargs (repeatable). "
+      "Example: --opt_arg betas=0.9,0.999 momentum=0.9",
+  )
+  parser.add_argument(
+      "--scheduler",
+      type=str,
+      default="cosine",
+      help="Scheduler name: cosine (default), "
+      "cosine_warmup, step, constant.",
+  )
+  parser.add_argument(
+      "--sched_arg",
+      nargs="+",
+      action=KVPairAction,
+      default={},
+      metavar="KEY=VALUE",
+      help="Extra scheduler kwargs (repeatable). "
+      "Example: --sched_arg T_max=50 eta_min=1e-6",
+  )
 
   args = parser.parse_args(argv)
 

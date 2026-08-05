@@ -46,7 +46,7 @@ class _HFDataset:
                         token=self.hf_token)
     except Exception as exc:
       logging.warning(f"  Failed to load '{self.name}': {exc}")
-    return None
+      return None
     self._detect_and_normalize_image_column(ds)
     return ds
 

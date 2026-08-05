@@ -31,24 +31,24 @@ def group_split_by_lesion_id(
 ):
   """Split dataset by lesion_id groups to prevent data leakage.
 
-  Args:
-      dataset: HuggingFace dataset with 'image', 'lesion_id', and label columns
-      test_size: Fraction of lesion_ids for test set
-      val_size: Fraction of lesion_ids for validation set
-      seed: Random seed for reproducibility
-      label_col: Name of the label column (default: 'dx')
+    Args:
+        dataset: HuggingFace dataset with 'image', 'lesion_id', and label columns
+        test_size: Fraction of lesion_ids for test set
+        val_size: Fraction of lesion_ids for validation set
+        seed: Random seed for reproducibility
+        label_col: Name of the label column (default: 'dx')
 
-  Returns:
-      Dict with 'train', 'val', 'test' keys containing lists of (image, label) tuples
-  """
+    Returns:
+        Dict with 'train', 'val', 'test' keys containing lists of (image, label) tuples
+    """
   random.seed(seed)
 
-  # Group dataset indices by lesion_id
+  # Group dataset indices by lesion_id.
+  # Use the column-level access to avoid loading full images into memory.
+  lesion_ids = dataset["lesion_id"]
   lesion_to_indices = defaultdict(list)
 
-  for idx in range(len(dataset)):
-    example = dataset[idx]
-    lesion_id = example["lesion_id"]
+  for idx, lesion_id in enumerate(lesion_ids):
     lesion_to_indices[lesion_id].append(idx)
 
   # Split lesion_ids into train/val/test
@@ -59,7 +59,7 @@ def group_split_by_lesion_id(
   n_val = int(len(all_lesion_ids) * val_size)
 
   test_lesion_ids = set(all_lesion_ids[:n_test])
-  val_lesion_ids = set(all_lesion_ids[n_test:n_test + n_val]) if n_val > 0 else set()
+  val_lesion_ids = (set(all_lesion_ids[n_test:n_test + n_val]) if n_val > 0 else set())
   train_lesion_ids = set(all_lesion_ids[n_test + n_val:])
 
   # Collect indices for each split
@@ -99,9 +99,7 @@ def group_split_by_lesion_id(
     print(
         f"  Lesion IDs: {len(train_lesion_ids)} train, {len(test_lesion_ids)} test (no val)"
     )
-    print(
-        f"  Images: {len(train_examples)} train, {len(test_examples)} test (no val)"
-    )
+    print(f"  Images: {len(train_examples)} train, {len(test_examples)} test (no val)")
 
   return {
       "train": train_examples,
@@ -117,11 +115,11 @@ def save_as_imagefolder(
 ):
   """Save splits as ImageFolder structure.
 
-  Args:
-      splits: Dict with 'train', 'val', 'test' keys containing lists of (image, label) tuples
-      output_dir: Output directory path
-      label_names: Optional dict mapping label_id -> class_name. If None, uses numeric names.
-  """
+    Args:
+        splits: Dict with 'train', 'val', 'test' keys containing lists of (image, label) tuples
+        output_dir: Output directory path
+        label_names: Optional dict mapping label_id -> class_name. If None, uses numeric names.
+    """
   output_path = Path(output_dir)
 
   for split_name, examples in splits.items():
@@ -197,7 +195,8 @@ def main():
       "--cache_dir",
       type=str,
       default=None,
-      help="HuggingFace datasets cache directory (default: ~/.cache/huggingface/datasets)",
+      help=
+      "HuggingFace datasets cache directory (default: ~/.cache/huggingface/datasets)",
   )
 
   args = parser.parse_args()
@@ -214,6 +213,7 @@ def main():
   if isinstance(raw, dict):
     # DatasetDict: concatenate all splits
     from datasets import concatenate_datasets
+
     splits = list(raw.keys())
     print(f"Dataset has {len(splits)} splits: {splits}")
     dataset = concatenate_datasets([raw[split] for split in splits])

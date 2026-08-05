@@ -32,9 +32,9 @@ BASE_URL = "https://huggingface.co/datasets/redlessone/Derm1M/resolve/main"
 def fetch_zip_names(repo_id=_DEFAULT_REPO_ID, token=None):
   """Fetch the list of zip archive names from a HuggingFace dataset repo.
 
-  Uses the HuggingFace API to dynamically discover zip files instead
-  of maintaining a hardcoded list.
-  """
+    Uses the HuggingFace API to dynamically discover zip files instead
+    of maintaining a hardcoded list.
+    """
   from huggingface_hub import HfApi  # noqa: lazy import
 
   api = HfApi()
@@ -68,6 +68,7 @@ def download_file(url, dest_path, token=None):
   # Move to expected location if different
   if Path(downloaded_path) != dest_path:
     import shutil
+
     shutil.move(downloaded_path, dest_path)
 
   print(f"    Done  ({dest_path.stat().st_size / 1024**3:.2f} GB)")
@@ -131,7 +132,7 @@ def main():
 
   output_path.mkdir(parents=True, exist_ok=True)
 
-  # Determine zip directory
+  # Determine zip directory.
   if args.zip_dir:
     zip_dir = Path(args.zip_dir)
     zip_dir.mkdir(parents=True, exist_ok=True)
@@ -177,7 +178,14 @@ def main():
     for fname in sorted(files):
       fpath = root_path / fname
       if fpath.suffix.lower() not in {
-          ".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp", ".gif"
+          ".jpg",
+          ".jpeg",
+          ".png",
+          ".bmp",
+          ".tiff",
+          ".tif",
+          ".webp",
+          ".gif",
       }:
         continue
       image_count += 1
@@ -189,8 +197,8 @@ def main():
 
   print(f"\nTotal images moved: {image_count:,}")
 
-  # Clean up temp dir if we downloaded
-  if not (args.skip_download and args.zip_dir):
+  # Clean up temp dir only if we created it (not user-specified).
+  if not args.zip_dir:
     shutil.rmtree(zip_dir, ignore_errors=True)
 
   print("\n" + "=" * 60)

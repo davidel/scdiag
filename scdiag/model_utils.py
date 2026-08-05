@@ -194,9 +194,32 @@ def extract_backbone_features(model, pixel_values):
 
     The hook is removed after extraction to avoid side-effects.
 
+    The model is temporarily placed in eval mode during feature extraction
+    so that BatchNorm/Dropout behave deterministically, and restored to
+    its original mode afterwards.
+
     Raises:
         ValueError: if no ``classifier`` attribute is found and the model
                     does not implement the protocol method.
+    """
+  # Temporarily switch to eval mode for deterministic features.
+  was_training = model.training
+  model.eval()
+  try:
+    return _extract_backbone_features_impl(model, pixel_values)
+  finally:
+    if was_training:
+      model.train()
+
+
+def _extract_backbone_features_impl(model, pixel_values):
+  """Internal implementation of backbone feature extraction.
+
+    .. note::
+
+       The caller (``extract_backbone_features``) is responsible for
+       setting the model to eval mode.  This function assumes the
+       model is already in eval mode.
     """
   # 1. Scdiag protocol
   if hasattr(model, "extract_backbone_features") and callable(

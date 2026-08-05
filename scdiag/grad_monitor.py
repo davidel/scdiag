@@ -50,16 +50,22 @@ class GradMonitor:
     top_k : int
         Number of healthy (non-anomalous) params to show in the report,
         sorted by gradient norm descending.
+    imbalance_factor : float
+        A parameter whose gradient norm exceeds this factor times the
+        median gradient norm is flagged as IMBALANCED.  Defaults to 100.
     """
 
-  def __init__(self,
-               model,
-               log_every=50,
-               detect_nan=False,
-               stall_window=50,
-               norm_floor=1e-8,
-               norm_ceiling=100.0,
-               top_k=5):
+  def __init__(
+      self,
+      model,
+      log_every=50,
+      detect_nan=False,
+      stall_window=50,
+      norm_floor=1e-8,
+      norm_ceiling=100.0,
+      top_k=5,
+      imbalance_factor=100.0,
+  ):
     self._model = model
     self._log_every = log_every
     self._detect_nan = detect_nan
@@ -67,6 +73,7 @@ class GradMonitor:
     self._norm_floor = norm_floor
     self._norm_ceiling = norm_ceiling
     self._top_k = top_k
+    self._imbalance_factor = imbalance_factor
 
     self._consecutive_low = {}
 
@@ -87,8 +94,7 @@ class GradMonitor:
       if p.grad is None:
         continue
       if p.grad.isnan().any() or p.grad.isinf().any():
-        logging.critical("GradMonitor: NaN/Inf detected in gradient of '%s'",
-                         name)
+        logging.critical("GradMonitor: NaN/Inf detected in gradient of '%s'", name)
 
   def _snapshot(self, global_step):
     stats = {}
@@ -117,8 +123,7 @@ class GradMonitor:
       prev = self._consecutive_low.get(name, 0)
       self._consecutive_low[name] = prev + 1 if is_low else 0
       if self._consecutive_low[name] >= self._stall_window:
-        anomalies.append(
-            f"STALLED({name}, {self._consecutive_low[name]} steps)")
+        anomalies.append(f"STALLED({name}, {self._consecutive_low[name]} steps)")
 
       if entry["grad_norm"] > self._norm_ceiling:
         anomalies.append(f"EXPLODING({name}, norm={entry['grad_norm']:.2e})")
@@ -130,7 +135,7 @@ class GradMonitor:
       norms_sorted = sorted(norms)
       median = norms_sorted[len(norms_sorted) // 2]
       for name, v in stats.items():
-        if v["grad_norm"] > 0 and v["grad_norm"] > median * 100:
+        if (v["grad_norm"] > 0 and v["grad_norm"] > median * self._imbalance_factor):
           anomalies.append(f"IMBALANCED({name})")
 
     self._log(global_step, stats, anomalies)
@@ -152,8 +157,11 @@ class GradMonitor:
 
     name_status = {}
     for a in anomalies:
-      for tag, short in [("STALLED(", "STL"), ("EXPLODING(", "OVF"),
-                          ("IMBALANCED(", "IMB")]:
+      for tag, short in [
+          ("STALLED(", "STL"),
+          ("EXPLODING(", "OVF"),
+          ("IMBALANCED(", "IMB"),
+      ]:
         if tag in a:
           start = a.index(tag) + len(tag)
           end = a.index(")", start)
@@ -174,14 +182,11 @@ class GradMonitor:
       if len(rows) >= self._top_k + len(name_status):
         break
       if s["grad_norm"] > 0 or name in name_status:
-        rows.append(
-            self._format_row(name, s, name_status.get(name, "OK")))
+        rows.append(self._format_row(name, s, name_status.get(name, "OK")))
 
     if rows:
-      lines.append(
-          f"  {'Name':<45} {'g_norm':>10} {'p_norm':>10}"
-          f" {'g/p':>10} {'g_max':>10} {'sparse':>7} {'status':<12}"
-      )
+      lines.append(f"  {'Name':<45} {'g_norm':>10} {'p_norm':>10}"
+                   f" {'g/p':>10} {'g_max':>10} {'sparse':>7} {'status':<12}")
       lines.append("  " + "-" * 115)
       for r in rows:
         lines.append("  " + r)

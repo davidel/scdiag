@@ -131,10 +131,14 @@ class CombinedFocalLoss(nn.Module):
 
     # Focal modulation: down-weight easy examples.
     # p_t is the model's predicted probability for the true class.
-    with torch.no_grad():
-      prob = torch.nn.functional.softmax(inputs, dim=-1)
-      p_t = prob.gather(1, targets.unsqueeze(1)).squeeze(1)
-      focal_weight = (1 - p_t)**self.gamma
+    # NOTE: The focal weight is computed with gradients enabled so that
+    # the full focal loss contributes correct gradient signals during
+    # learning-rate warmup and fine-tuning.  Earlier, this was wrapped
+    # in torch.no_grad() which silently disconnected the focal
+    # probability from the gradient graph.
+    prob = torch.nn.functional.softmax(inputs, dim=-1)
+    p_t = prob.gather(1, targets.unsqueeze(1)).squeeze(1)
+    focal_weight = (1 - p_t)**self.gamma
 
     loss = focal_weight * ce_loss
 
@@ -313,7 +317,8 @@ def compute_class_weights(train_dataset, num_labels):
 def parse_args(argv=None):
   parser = argparse.ArgumentParser(
       description="Fine-tune a HuggingFace image-classification model.",
-      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+      formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+  )
 
   parser.add_argument(
       "--model",
@@ -1008,6 +1013,7 @@ def main():
   # Optionally load SimMIM pre-trained encoder weights
   if args.pretrained_encoder:
     from scdiag.checkpointing import load_checkpoint_weights
+
     logging.info(f"Loading pre-trained encoder from: {args.pretrained_encoder}")
     load_checkpoint_weights(
         args.pretrained_encoder,
