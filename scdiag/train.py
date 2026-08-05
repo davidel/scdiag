@@ -342,7 +342,6 @@ def parse_args(argv=None):
   parser.add_argument(
       "--train_augmentation_script",
       type=str,
-      default=None,
       help="Path or URL to a Python script defining "
       "create_train_transform(image_size, **kwargs) -> list of v2 "
       "transforms. The fixed tail (ToImage, ToDtype, Normalize) is "
@@ -405,10 +404,10 @@ def parse_args(argv=None):
   parser.add_argument(
       "--amp_dtype",
       type=str,
-      default=None,
       choices=["float16", "bfloat16"],
-      help="AMP dtype for mixed precision. float16 requires "
-      "GradScaler; bfloat16 is recommended for Ampere+ GPUs.",
+      help="AMP dtype for mixed precision. Omit to disable AMP. "
+      "float16 requires GradScaler; bfloat16 is recommended for "
+      "Ampere+ GPUs.",
   )
 
   parser.add_argument(
@@ -422,7 +421,6 @@ def parse_args(argv=None):
   parser.add_argument(
       "--log_dir",
       type=str,
-      default=None,
       help="TensorBoard log directory. Defaults to "
       "<dir_of_latest_ckpt>/logs.",
   )
@@ -483,13 +481,11 @@ def parse_args(argv=None):
   parser.add_argument(
       "--cache_dir",
       type=str,
-      default=None,
       help="Cache directory for downloaded datasets.",
   )
   parser.add_argument(
       "--pretrained_encoder",
       type=str,
-      default=None,
       help="Path to a SimMIM pre-training checkpoint. Encoder weights are "
       "loaded (with shape-mismatched keys skipped) before training starts. "
       "Typically produced by scdiag-pretrain.",
@@ -498,7 +494,6 @@ def parse_args(argv=None):
   parser.add_argument(
       "--gcs_checkpoint",
       type=str,
-      default=None,
       help="GCS URI to sync checkpoints to "
       "(format: gs://BUCKET/PREFIX).",
   )
@@ -506,7 +501,6 @@ def parse_args(argv=None):
   xgb_group = parser.add_argument_group("xgboost")
   xgb_group.add_argument(
       "--xgboost_model",
-      default=None,
       help="Output path for XGBoost model. If set, train XGBoost on "
       "backbone features after training completes.",
   )

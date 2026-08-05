@@ -194,7 +194,6 @@ def main():
   parser.add_argument(
       "--cache_dir",
       type=str,
-      default=None,
       help=
       "HuggingFace datasets cache directory (default: ~/.cache/huggingface/datasets)",
   )

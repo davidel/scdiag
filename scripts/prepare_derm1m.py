@@ -99,13 +99,11 @@ def main():
   parser.add_argument(
       "--token",
       type=str,
-      default=None,
       help="HuggingFace API token (or set HF_TOKEN env var)",
   )
   parser.add_argument(
       "--zip_dir",
       type=str,
-      default=None,
       help="Directory to store zip archives. Existing zips are reused, "
       "missing ones are downloaded. If omitted, a temp directory is used.",
   )

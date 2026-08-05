@@ -36,25 +36,21 @@ def parse_args(argv=None):
   parser.add_argument(
       "--output",
       type=str,
-      default=None,
       help="Path to write JSON results.",
   )
   parser.add_argument(
       "--top_k",
       type=int,
-      default=None,
       help="Only show top-K predictions (default: all).",
   )
   parser.add_argument(
       "--device",
       type=str,
-      default=None,
       help="Device: cuda or cpu (default: auto-detect).",
   )
   parser.add_argument(
       "--cache_dir",
       type=str,
-      default=None,
       help="HuggingFace cache directory.",
   )
   parser.add_argument(
@@ -66,7 +62,6 @@ def parse_args(argv=None):
   parser.add_argument(
       "--xgboost_model",
       type=str,
-      default=None,
       help="Optional XGBoost model path. If provided, run XGBoost alongside "
       "the PyTorch classifier.",
   )

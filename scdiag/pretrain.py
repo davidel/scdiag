@@ -298,13 +298,11 @@ def parse_args(argv=None):
   parser.add_argument(
       "--cache_dir",
       type=str,
-      default=None,
       help="HuggingFace datasets cache directory",
   )
   parser.add_argument(
       "--hf_token",
       type=str,
-      default=None,
       help="HuggingFace token for gated datasets (or set HF_TOKEN "
       "env var)",
   )
@@ -373,9 +371,10 @@ def parse_args(argv=None):
   parser.add_argument(
       "--amp_dtype",
       type=str,
-      default="float16",
-      choices=["float16", "bfloat16", "none"],
-      help="Mixed precision dtype. Use 'none' to disable AMP.",
+      choices=["float16", "bfloat16"],
+      help="AMP dtype for mixed precision. Omit or use --amp_dtype "
+      "without a value to disable AMP. float16 requires GradScaler; "
+      "bfloat16 is recommended for Ampere+ GPUs.",
   )
 
   parser.add_argument(
@@ -389,7 +388,6 @@ def parse_args(argv=None):
   parser.add_argument(
       "--gcs_checkpoint",
       type=str,
-      default=None,
       help="GCS URI to sync checkpoints to "
       "(format: gs://BUCKET/PREFIX). Requires "
       "google-cloud-storage package.",
@@ -426,7 +424,6 @@ def parse_args(argv=None):
   parser.add_argument(
       "--log_dir",
       type=str,
-      default=None,
       help="TensorBoard log directory. Defaults to "
       "<checkpoint_dir>/logs if not specified.",
   )
