@@ -563,7 +563,7 @@ def main(argv=None):
   model._last_mask_ratio = args.mask_ratio
 
   num_params = sum(p.numel() for p in model.parameters()) / 1e6
-  enc_params = sum(p.numel() for p in encoder.parameters()) / 1e6
+  enc_params = sum(p.numel() for p in model.encoder.parameters()) / 1e6
   effective_batch = args.batch_size * args.grad_accum_steps
   logging.info(
       f"Model params: {num_params:.1f}M "
