@@ -7,7 +7,6 @@ from PIL import Image
 
 from scdiag.logging_utils import fatal
 
-# Recognised image file extensions.
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
 
 
@@ -36,8 +35,6 @@ class ImageFolderDataset:
     self.min_resolution = min_resolution
     self._paths: list[Path] = []
 
-  # Internal helpers
-
   def _ensure_loaded(self):
     if self._paths:
       return
@@ -48,8 +45,6 @@ class ImageFolderDataset:
         p for p in self.root_dir.rglob("*") if p.suffix.lower() in _IMAGE_EXTS)
     logging.info(
         f"ImageFolderDataset: found {len(self._paths):,} images in '{self.root_dir}'")
-
-  # Dataset protocol
 
   def __len__(self):
     self._ensure_loaded()
