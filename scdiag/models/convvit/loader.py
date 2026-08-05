@@ -15,8 +15,6 @@ from scdiag.models.registry import ModelOutput, register_model, register_process
 from scdiag.models.convvit.model import CustomPatchTransformer
 from scdiag.models.convvit.processor import ConvViTProcessor
 
-# Wrapped model — protocol adapter
-
 
 class ConvViTForClassification(nn.Module):
   """Thin wrapper that makes ConvViT match the scdiag / HF interface.
@@ -55,9 +53,6 @@ class ConvViTForClassification(nn.Module):
       x = block(x)
       features.append(x)
     return features
-
-
-# Registry entry point
 
 
 @register_model("convvit")

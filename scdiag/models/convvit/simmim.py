@@ -14,9 +14,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# Patchify / unpatchify
-
-
 def patchify(images, patch_size):
   """Convert images to per-patch pixel vectors.
 
@@ -52,9 +49,6 @@ def unpatchify(patches, patch_size, img_size=448, channels=3):
   return x
 
 
-# Masking
-
-
 def random_mask(batch_size, num_patches, mask_ratio=0.60, device=None):
   """Generate independent random per-patch masks.
 
@@ -68,9 +62,6 @@ def random_mask(batch_size, num_patches, mask_ratio=0.60, device=None):
     idx = torch.randperm(num_patches, device=device)[:num_masked]
     mask[i, idx] = True
   return mask
-
-
-# Loss
 
 
 def simmim_loss(pred, target, mask):
@@ -89,9 +80,6 @@ def simmim_loss(pred, target, mask):
   loss = loss.mean(dim=-1)  # (B, N) — average over D
   loss = (loss * mask.float()).sum() / mask.float().sum().clamp(min=1)
   return loss
-
-
-# SimMIM wrapper
 
 
 class ConvViTSimMIM(nn.Module):
