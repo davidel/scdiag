@@ -765,17 +765,20 @@ def train_one_epoch(
     else:
       loss.backward()
 
-    if monitor is not None:
-      monitor.step(epoch * total_batches + batch_idx)
-
     # Step optimizer only every grad_accum_steps batches (or at end of epoch).
     if (batch_idx + 1) % args.grad_accum_steps == 0 or (batch_idx + 1) == total_batches:
       if amp_dtype == torch.float16 and scaler is not None:
         scaler.unscale_(optimizer)
+        # Gradient monitor must read AFTER unscale_() so it sees the true
+        # gradient magnitudes, not the scaled values.
+        if monitor is not None:
+          monitor.step(epoch * total_batches + batch_idx)
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         scaler.step(optimizer)
         scaler.update()
       else:
+        if monitor is not None:
+          monitor.step(epoch * total_batches + batch_idx)
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
       optimizer.zero_grad(set_to_none=True)
