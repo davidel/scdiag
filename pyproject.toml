@@ -32,4 +32,4 @@ scdiag-infer = "scdiag.infer:main"
 include = ["scdiag*"]
 
 [tool.ruff.lint]
-ignore = ["LOG015"]
+ignore = ["LOG015", "PLC0415", "RUF012", "PLR0402"]

@@ -12,7 +12,7 @@ Both functions transparently dispatch to the appropriate backend
 
 import logging
 
-import torch
+from scdiag.logging_utils import fatal
 
 # Public registry
 
@@ -54,7 +54,7 @@ def register_model(name):
 
   def wrapper(fn):
     if name in _MODEL_REGISTRY:
-      raise ValueError(f"Model '{name}' is already registered.")
+      fatal(f"Model '{name}' is already registered.", ValueError)
     _MODEL_REGISTRY[name] = fn
     # Also keep the legacy REGISTRY in sync for backwards compatibility.
     REGISTRY[name] = fn
@@ -79,7 +79,7 @@ def register_processor(name):
 
   def wrapper(fn):
     if name in _PROCESSOR_REGISTRY:
-      raise ValueError(f"Processor '{name}' is already registered.")
+      fatal(f"Processor '{name}' is already registered.", ValueError)
     _PROCESSOR_REGISTRY[name] = fn
     return fn
 
@@ -115,8 +115,9 @@ def load_model(
     Returns:
         ``torch.nn.Module``
     """
-  from transformers import (
-      AutoModelForImageClassification,)  # local to avoid top-level import
+  # Keep this import local so importing the registry does not eagerly load
+  # the Transformers dependency.
+  from transformers import AutoModelForImageClassification
 
   if model_name in _MODEL_REGISTRY:
     logging.info("Loading custom model '%s' from registry.", model_name)

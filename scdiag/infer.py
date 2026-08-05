@@ -3,7 +3,6 @@
 import argparse
 import json
 import logging
-import os
 
 import numpy as np
 import torch

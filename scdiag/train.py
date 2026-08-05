@@ -8,34 +8,30 @@ import tempfile
 import time
 import urllib.request
 
+import datasets
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.optim as optim
-import datasets
 from datasets import load_dataset
 from sklearn.metrics import f1_score, precision_recall_fscore_support
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import v2
 
-from scdiag.models import load_model, load_processor
-
 from scdiag.checkpointing import (
     checkpoint_dict,
-    filter_state_dict,
     parse_state_flags,
     resume_checkpoint,
 )
 from scdiag.cli_utils import KVPairAction
-from scdiag.gpu_utils import gpu_stats_str
-from scdiag.logging_utils import setup_logging
-from scdiag.gcs_utils import save_checkpoint
-from scdiag.model_utils import DTYPE_MAP
-from scdiag.grad_monitor import GradMonitor
-from scdiag.optim_factory import create_optimizer, create_scheduler
-
 from scdiag.datasets.hf_proxy import HFDatasetProxy
+from scdiag.gcs_utils import save_checkpoint
+from scdiag.gpu_utils import gpu_stats_str
+from scdiag.grad_monitor import GradMonitor
+from scdiag.logging_utils import fatal, setup_logging
+from scdiag.model_utils import DTYPE_MAP
+from scdiag.models import load_model, load_processor
+from scdiag.optim_factory import create_optimizer, create_scheduler
 
 # Loss function and CLI helpers for Phase 1 of the loss revision plan.
 
@@ -59,19 +55,21 @@ def parse_class_multipliers(s, num_labels, label2id):
     if not pair:
       continue
     if "=" not in pair:
-      raise ValueError(f"Invalid --class_multipliers entry: '{pair}'. "
-                       "Expected NAME=VALUE (e.g. melanoma=4.0).")
+      fatal(
+          f"Invalid --class_multipliers entry: '{pair}'. "
+          "Expected NAME=VALUE (e.g. melanoma=4.0).", ValueError)
     name, val = pair.split("=", 1)
     name, val = name.strip(), val.strip()
     if name.isdigit():
       idx = int(name)
     else:
       if name not in label2id:
-        raise ValueError(f"Unknown class name '{name}' in --class_multipliers. "
-                         f"Available: {list(label2id.keys())}")
+        fatal(
+            f"Unknown class name '{name}' in --class_multipliers. "
+            f"Available: {list(label2id.keys())}", ValueError)
       idx = label2id[name]
     if not (0 <= idx < num_labels):
-      raise ValueError(f"Label index {idx} out of range [0, {num_labels})")
+      fatal(f"Label index {idx} out of range [0, {num_labels})", ValueError)
     m[idx] = float(val)
   return m
 
@@ -179,18 +177,19 @@ def load_augmentation_script(path_or_url):
       tmp.write(code)
       tmp_path = tmp.name
     try:
-      exec(compile(code, path_or_url, "exec"), namespace)
+      exec(compile(code, path_or_url, "exec"), namespace)  # noqa: S102
     finally:
       os.unlink(tmp_path)
   else:
     with open(path_or_url) as f:
       code = f.read()
-    exec(compile(code, path_or_url, "exec"), namespace)
+    exec(compile(code, path_or_url, "exec"), namespace)  # noqa: S102
 
   fn = namespace.get("create_train_transform")
   if fn is None or not callable(fn):
-    raise ValueError(f"Script {path_or_url!r} does not define a callable "
-                     "'create_train_transform(image_size, **kwargs)'.")
+    fatal(
+        f"Script {path_or_url!r} does not define a callable "
+        "'create_train_transform(image_size, **kwargs)'.", ValueError)
   return fn
 
 
@@ -214,8 +213,9 @@ def build_transforms(processor, image_size, train_aug_fn=None):
   if train_aug_fn is not None:
     user_transforms = train_aug_fn(image_size)
     if not isinstance(user_transforms, list):
-      raise TypeError("create_train_transform() must return a list of transforms, "
-                      f"got {type(user_transforms).__name__}")
+      fatal(
+          "create_train_transform() must return a list of transforms, "
+          f"got {type(user_transforms).__name__}", TypeError)
     train_augmentations = v2.Compose(user_transforms + tail)
   else:
     train_augmentations = v2.Compose([
@@ -256,8 +256,9 @@ def load_and_split_dataset(
   if isinstance(raw, datasets.Dataset):
     detected_image_column = (image_column or HFDatasetProxy.detect_image_column(raw))
     if detected_image_column is None:
-      raise ValueError(f"No image column detected in {dataset_name}. "
-                       f"Columns: {list(raw.features.keys())}")
+      fatal(
+          f"No image column detected in {dataset_name}. "
+          f"Columns: {list(raw.features.keys())}", ValueError)
     split = raw.train_test_split(test_size=test_size, seed=seed)
     return (
         HFDatasetProxy(split["train"],
@@ -275,8 +276,9 @@ def load_and_split_dataset(
     detected_image_column = (image_column or
                              HFDatasetProxy.detect_image_column(raw[split_name]))
     if detected_image_column is None:
-      raise ValueError(f"No image column in split '{split_name}' of {dataset_name}. "
-                       f"Columns: {list(raw[split_name].features.keys())}")
+      fatal(
+          f"No image column in split '{split_name}' of {dataset_name}. "
+          f"Columns: {list(raw[split_name].features.keys())}", ValueError)
 
   splits = set(raw.keys())
   if "train" not in splits or "test" not in splits:
@@ -284,7 +286,7 @@ def load_and_split_dataset(
       split = raw["train"].train_test_split(test_size=test_size, seed=seed)
       raw = datasets.DatasetDict(split)
     elif len(splits) == 1:
-      only = list(splits)[0]
+      only = next(iter(splits))
       split = raw[only].train_test_split(test_size=test_size, seed=seed)
       raw = datasets.DatasetDict(split)
     else:
@@ -326,8 +328,9 @@ def compute_class_weights(train_dataset, num_labels):
 
   actual_labels = np.unique(labels)
   if len(actual_labels) > num_labels:
-    raise ValueError(
-        f"Dataset has {len(actual_labels)} unique labels but num_labels={num_labels}")
+    fatal(
+        f"Dataset has {len(actual_labels)} unique labels but "
+        f"num_labels={num_labels}", ValueError)
   counts = np.bincount(labels, minlength=num_labels).astype(np.float64)
   counts = np.maximum(counts, 1.0)
   weights = 1.0 / counts
@@ -644,13 +647,13 @@ def train_xgboost_on_backbone(args, train_ds, val_ds, device):
         val_ds: Validation HF Dataset (raw, before proxy wrapping).
         device: torch device.
     """
+  from scdiag.datasets.hf_proxy import HFDatasetProxy
   from scdiag.model_utils import (
       build_val_transform,
       collect_features,
       load_model_for_inference,
   )
-  from scdiag.datasets.hf_proxy import HFDatasetProxy
-  from scdiag.xgb_utils import train_xgboost, eval_xgboost
+  from scdiag.xgb_utils import eval_xgboost, train_xgboost
 
   logging.info("=" * 60)
   logging.info("XGBoost training on backbone features")
@@ -1010,8 +1013,9 @@ def main():
   logging.info(f"Final class weights (W_freq x M_c): {class_weights.tolist()}")
 
   if len(train_proxy) < args.batch_size:
-    raise ValueError(f"Training set ({len(train_proxy)} samples) is smaller than "
-                     f"batch_size ({args.batch_size}). Reduce --batch_size.")
+    fatal(
+        f"Training set ({len(train_proxy)} samples) is smaller than "
+        f"batch_size ({args.batch_size}). Reduce --batch_size.", ValueError)
   train_loader = DataLoader(
       train_proxy,
       batch_size=args.batch_size,

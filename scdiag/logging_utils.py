@@ -17,7 +17,7 @@ class GlogFormatter(logging.Formatter):
   }
 
   def format(self, record):
-    now = datetime.datetime.now()
+    now = datetime.datetime.now().astimezone()
     level_char = self.LEVEL_MAP.get(record.levelno, "I")
     month_day = now.strftime("%m%d")
     time_str = now.strftime("%H:%M:%S.%f")

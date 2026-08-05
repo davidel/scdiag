@@ -1,5 +1,7 @@
 """Helpers for resolving model class labels consistently."""
 
+from scdiag.logging_utils import fatal
+
 
 def get_label(id2label, class_id):
   """Return a label for an integer class ID.
@@ -22,4 +24,4 @@ def get_label(id2label, class_id):
   string_id = str(class_id)
   if string_id in id2label:
     return id2label[string_id]
-  raise KeyError(f"No label configured for class ID {class_id!r}")
+  fatal(f"No label configured for class ID {class_id!r}", KeyError)

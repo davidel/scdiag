@@ -7,14 +7,13 @@ SimMIM / MAE pre-training.
 """
 
 import logging
-import os
 import random
-from pathlib import Path
 
 from PIL import Image
 
 from scdiag.datasets.hf_proxy import HFDatasetProxy
 from scdiag.datasets.image_folder import ImageFolderDataset
+from scdiag.logging_utils import fatal
 
 # Individual dataset back-ends
 
@@ -53,8 +52,9 @@ class _HFDataset:
     else:
       col = HFDatasetProxy.detect_image_column(ds)
     if col is None:
-      raise ValueError(f"Cannot auto-detect image column in '{self.name}'. "
-                       f"Columns: {ds.column_names}. Set 'image_column' explicitly.")
+      fatal(
+          f"Cannot auto-detect image column in '{self.name}'. "
+          f"Columns: {ds.column_names}. Set 'image_column' explicitly.", ValueError)
     ds = HFDatasetProxy.normalize_image_column(ds, col)
     self.image_column = col
     return ds
@@ -72,15 +72,16 @@ class _HFDataset:
   def __getitem__(self, idx):
     self._ensure_loaded()
     if self._ds is None:
-      raise IndexError(f"Dataset '{self.name}' failed to load")
+      fatal(f"Dataset '{self.name}' failed to load", IndexError)
     row = self._ds[idx]
     image = row[self.image_column]
     if not isinstance(image, Image.Image):
       image = Image.open(image)
     image = image.convert("RGB")
-    if self.min_resolution is not None:
-      if image.width < self.min_resolution or image.height < self.min_resolution:
-        raise IndexError(f"Image too small: {image.size}, min={self.min_resolution}")
+    if (self.min_resolution is not None and
+        (image.width < self.min_resolution or
+         image.height < self.min_resolution)):
+      fatal(f"Image too small: {image.size}, min={self.min_resolution}", IndexError)
     return image
 
 
@@ -151,17 +152,16 @@ class DermoscopyEnsemble:
           continue
         logging.info(f"  + {name}: {n:,} images")
         self._datasets.append(ds)
-      except Exception as exc:
+      except Exception:
         if self._strict:
-          raise RuntimeError(
-              f"Failed to initialize dataset '{name}' ({source})") from exc
+          fatal(f"Failed to initialize dataset '{name}' ({source})", RuntimeError)
         logging.exception("  Failed to initialize dataset '%s' (%s); skipping.", name,
                           source)
 
     # Build prefix-sum offsets for flat indexing
     self._rebuild_offsets()
     if not self._datasets:
-      raise RuntimeError("No datasets loaded successfully")
+      fatal("No datasets loaded successfully", RuntimeError)
 
   def _rebuild_offsets(self):
     offsets = [0]
@@ -183,9 +183,9 @@ class DermoscopyEnsemble:
   def __getitem__(self, idx):
     self._ensure_loaded()
     if not self._datasets:
-      raise RuntimeError("No datasets loaded")
+      fatal("No datasets loaded", RuntimeError)
     if idx < 0 or idx >= len(self):
-      raise IndexError(f"Index {idx} out of range for ensemble of length {len(self)}")
+      fatal(f"Index {idx} out of range for ensemble of length {len(self)}", IndexError)
 
     try:
       return self._get_item(idx)
@@ -198,9 +198,10 @@ class DermoscopyEnsemble:
           return self._get_item(replacement_idx)
         except (IndexError, OSError, ValueError):
           continue
-      raise RuntimeError("Unable to find a usable image after "
-                         f"{self._MAX_REPLACEMENT_ATTEMPTS} attempts; original error: "
-                         f"{original_exc}") from original_exc
+      fatal(
+          "Unable to find a usable image after "
+          f"{self._MAX_REPLACEMENT_ATTEMPTS} attempts; original error: "
+          f"{original_exc}", RuntimeError)
 
   @property
   def num_datasets(self):
@@ -211,8 +212,8 @@ class DermoscopyEnsemble:
     """Return a human-readable summary of the ensemble."""
     self._ensure_loaded()
     lines = [
-        f"DermoscopyEnsemble: {len(self):,} images from "
-        f"{len(self._datasets)} dataset(s)"
+        (f"DermoscopyEnsemble: {len(self):,} images from "
+         f"{len(self._datasets)} dataset(s)")
     ]
     for i, ds in enumerate(self._datasets):
       lines.append(f"  [{i}] {ds.name}: {len(ds):,} images")

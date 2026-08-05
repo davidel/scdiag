@@ -3,22 +3,23 @@
 import torch
 import torch.nn as nn
 
+from scdiag.logging_utils import fatal
 from scdiag.models.masked_encoder import MaskedImageEncoder
 
 
 def patchify(images, patch_size, channels=None):
   """Convert ``(B, C, H, W)`` images to flattened patch pixels."""
   if images.ndim != 4:
-    raise ValueError(f"Expected images with shape (B, C, H, W), got {images.shape}")
+    fatal(f"Expected images with shape (B, C, H, W), got {images.shape}", ValueError)
   if isinstance(patch_size, tuple):
     if patch_size[0] != patch_size[1]:
-      raise ValueError("SimMIM currently requires square patches")
+      fatal("SimMIM currently requires square patches", ValueError)
     patch_size = patch_size[0]
   B, C, H, W = images.shape
   if channels is not None and C != channels:
-    raise ValueError(f"Expected {channels} channels, got {C}")
+    fatal(f"Expected {channels} channels, got {C}", ValueError)
   if H % patch_size or W % patch_size:
-    raise ValueError("Image dimensions must be divisible by patch_size")
+    fatal("Image dimensions must be divisible by patch_size", ValueError)
   h, w = H // patch_size, W // patch_size
   x = images.reshape(B, C, h, patch_size, w, patch_size)
   x = x.permute(0, 2, 4, 3, 5, 1)
@@ -29,19 +30,19 @@ def unpatchify(patches, patch_size, img_size, channels=3):
   """Convert flattened patch pixels back to ``(B, C, H, W)`` images."""
   if isinstance(patch_size, tuple):
     if patch_size[0] != patch_size[1]:
-      raise ValueError("SimMIM currently requires square patches")
+      fatal("SimMIM currently requires square patches", ValueError)
     patch_size = patch_size[0]
   if isinstance(img_size, tuple):
     if img_size[0] != img_size[1]:
-      raise ValueError("SimMIM currently requires square images")
+      fatal("SimMIM currently requires square images", ValueError)
     img_size = img_size[0]
   B, N, D = patches.shape
   expected = patch_size * patch_size * channels
   if D != expected:
-    raise ValueError(f"Expected patch dimension {expected}, got {D}")
+    fatal(f"Expected patch dimension {expected}, got {D}", ValueError)
   grid = img_size // patch_size
   if grid * patch_size != img_size or N != grid * grid:
-    raise ValueError("Patch count and image size do not match")
+    fatal("Patch count and image size do not match", ValueError)
   x = patches.reshape(B, grid, grid, patch_size, patch_size, channels)
   x = x.permute(0, 5, 1, 3, 2, 4)
   return x.reshape(B, channels, img_size, img_size)
@@ -61,7 +62,7 @@ def random_mask(batch_size, num_patches, mask_ratio=0.60, device=None):
 def simmim_loss(pred, target, mask):
   """Compute mean squared reconstruction error over masked patches."""
   if pred.shape != target.shape or mask.shape != pred.shape[:2]:
-    raise ValueError("Prediction, target, and mask shapes are incompatible")
+    fatal("Prediction, target, and mask shapes are incompatible", ValueError)
   loss = (pred - target)**2
   loss = loss.mean(dim=-1)
   mask_float = mask.float()
@@ -79,7 +80,7 @@ class SimMIM(nn.Module):
     patch_size = encoder.patch_size
     if isinstance(patch_size, tuple):
       if patch_size[0] != patch_size[1]:
-        raise ValueError("SimMIM currently requires square patches")
+        fatal("SimMIM currently requires square patches", ValueError)
       patch_size = patch_size[0]
     self._patch_pixel_dim = patch_size * patch_size * encoder.in_channels
 
@@ -114,7 +115,7 @@ class SimMIM(nn.Module):
     )
     embeddings = self._encoder_api.patch_embed(images)
     if embeddings.shape[:2] != mask.shape:
-      raise ValueError(f"Expected mask shape {embeddings.shape[:2]}, got {mask.shape}")
+      fatal(f"Expected mask shape {embeddings.shape[:2]}, got {mask.shape}", ValueError)
     mask_tokens = self.mask_token.expand(embeddings.shape[0], embeddings.shape[1], -1)
     embeddings = torch.where(mask.unsqueeze(-1), mask_tokens, embeddings)
     features = self._encoder_api.encode_embeddings(embeddings)

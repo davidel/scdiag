@@ -35,7 +35,7 @@ def fetch_zip_names(repo_id=_DEFAULT_REPO_ID, token=None):
     Uses the HuggingFace API to dynamically discover zip files instead
     of maintaining a hardcoded list.
     """
-  from huggingface_hub import HfApi  # noqa: lazy import
+  from huggingface_hub import HfApi
 
   api = HfApi()
   all_files = api.list_repo_files(repo_id=repo_id, repo_type="dataset", token=token)

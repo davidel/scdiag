@@ -5,11 +5,13 @@ import os
 
 import torch
 
+from scdiag.logging_utils import fatal
+
 
 def parse_gcs_uri(gcs_uri):
   """Parse a ``gs://BUCKET/PREFIX`` URI into ``(bucket, prefix)``."""
   if not gcs_uri.startswith("gs://"):
-    raise ValueError(f"GCS URI must start with gs://, got: {gcs_uri}")
+    fatal(f"GCS URI must start with gs://, got: {gcs_uri}", ValueError)
   without_scheme = gcs_uri[len("gs://"):]
   parts = without_scheme.split("/", 1)
   bucket = parts[0]
@@ -22,8 +24,9 @@ def gcs_upload(bucket_name, local_path, gcs_prefix):
   try:
     from google.cloud import storage
   except ImportError:
-    raise ImportError("google-cloud-storage is required for GCS sync. "
-                      "Install with: pip install skin-classifier[gcs]")
+    fatal(
+        "google-cloud-storage is required for GCS sync. "
+        "Install with: pip install skin-classifier[gcs]", ImportError)
   client = storage.Client()
   bucket = client.bucket(bucket_name)
   filename = os.path.basename(local_path)

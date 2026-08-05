@@ -11,9 +11,9 @@ from types import SimpleNamespace
 import torch
 import torch.nn as nn
 
-from scdiag.models.registry import ModelOutput, register_model, register_processor
 from scdiag.models.convvit.model import CustomPatchTransformer
 from scdiag.models.convvit.processor import ConvViTProcessor
+from scdiag.models.registry import ModelOutput, register_model, register_processor
 
 
 class ConvViTForClassification(nn.Module):

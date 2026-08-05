@@ -8,6 +8,7 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 from torchvision.transforms.functional import InterpolationMode
 
+from scdiag.logging_utils import fatal
 from scdiag.models import load_model, load_processor
 
 DTYPE_MAP = {
@@ -70,8 +71,6 @@ def load_model_for_inference(
     Returns:
         (model, processor) tuple.
     """
-  import os
-
   ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
   if "model_state_dict" in ckpt:
     state_dict = ckpt["model_state_dict"]
@@ -88,8 +87,9 @@ def load_model_for_inference(
       num_labels = state_dict[key].shape[0]
       break
   if num_labels is None:
-    raise ValueError("Cannot infer num_labels from checkpoint. "
-                     f"Keys present: {list(state_dict.keys())[:10]}")
+    fatal(
+        "Cannot infer num_labels from checkpoint. "
+        f"Keys present: {list(state_dict.keys())[:10]}", ValueError)
 
   # Load id2label mapping from checkpoint if available.
   id2label = None
@@ -219,23 +219,25 @@ def _extract_backbone_features_impl(model, pixel_values):
   # 3. Hook-based fallback via the classification head
   head = _find_head_module(model)
   if head is None:
-    raise ValueError("Cannot extract backbone features — no classification head found "
-                     "and the model does not implement extract_backbone_features().")
+    fatal(
+        "Cannot extract backbone features — no classification head found "
+        "and the model does not implement extract_backbone_features().", ValueError)
   _, head_module = head
   captured = []
 
-  def _hook(module, inp, out):
+  def hook(module, inp, out):
     captured.append(inp[0])
 
-  handle = head_module.register_forward_hook(_hook)
+  handle = head_module.register_forward_hook(hook)
   try:
     model(pixel_values=pixel_values)
   finally:
     handle.remove()
 
   if not captured:
-    raise ValueError("Hook did not capture any features. "
-                     "Ensure the model's head module is called during forward().")
+    fatal(
+        "Hook did not capture any features. "
+        "Ensure the model's head module is called during forward().", ValueError)
 
   return captured[0]
 

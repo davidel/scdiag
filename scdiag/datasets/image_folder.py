@@ -5,6 +5,8 @@ from pathlib import Path
 
 from PIL import Image
 
+from scdiag.logging_utils import fatal
+
 # Recognised image file extensions.
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
 
@@ -56,10 +58,11 @@ class ImageFolderDataset:
   def __getitem__(self, idx):
     self._ensure_loaded()
     if idx >= len(self._paths):
-      raise IndexError(f"Index {idx} out of range for '{self.name}'")
+      fatal(f"Index {idx} out of range for '{self.name}'", IndexError)
     path = self._paths[idx]
     image = Image.open(path).convert("RGB")
-    if self.min_resolution is not None:
-      if image.width < self.min_resolution or image.height < self.min_resolution:
-        raise IndexError(f"Image too small: {image.size}, min={self.min_resolution}")
+    if (self.min_resolution is not None and
+        (image.width < self.min_resolution or
+         image.height < self.min_resolution)):
+      fatal(f"Image too small: {image.size}, min={self.min_resolution}", IndexError)
     return image

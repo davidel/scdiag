@@ -9,6 +9,8 @@ import os
 
 import torch
 
+from scdiag.logging_utils import fatal
+
 _VALID_STATE_FLAGS = {"opt", "sched", "amp", "none"}
 
 
@@ -81,10 +83,11 @@ def parse_state_flags(flag_value):
     """
   tokens = {t.strip().lower() for t in flag_value.split(",")}
   if not tokens:
-    raise ValueError("state flag string must not be empty")
+    fatal("state flag string must not be empty", ValueError)
   invalid = tokens - _VALID_STATE_FLAGS
   if invalid:
-    raise ValueError(f"Invalid state flag(s): {invalid}. Allowed: {_VALID_STATE_FLAGS}")
+    fatal(f"Invalid state flag(s): {invalid}. Allowed: {_VALID_STATE_FLAGS}",
+          ValueError)
   if "none" in tokens:
     return set()
   return tokens
@@ -134,8 +137,8 @@ def filter_state_dict(ckpt_state, model_state):
     elif v.shape != model_state[k].shape:
       skipped.append((
           k,
-          f"shape mismatch: checkpoint {list(v.shape)} "
-          f"vs model {list(model_state[k].shape)}",
+          (f"shape mismatch: checkpoint {list(v.shape)} " \
+           f"vs model {list(model_state[k].shape)}"),
       ))
     else:
       filtered[k] = v
@@ -242,9 +245,10 @@ def load_checkpoint_weights(path,
         A ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys``.
     """
   if not os.path.isfile(path):
-    raise FileNotFoundError(
+    fatal(
         f"Checkpoint file not found: {path}. "
-        "Ensure the checkpoint exists before calling load_checkpoint_weights().")
+        "Ensure the checkpoint exists before calling load_checkpoint_weights().",
+        FileNotFoundError)
 
   ckpt = torch.load(path, map_location=device, weights_only=True)
 

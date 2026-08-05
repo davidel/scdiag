@@ -16,15 +16,11 @@ be loaded into a classification model via ``--pretrained_encoder`` in
 """
 
 import argparse
-import gc
 import logging
 import os
 import time
 
-import numpy as np
 import torch
-import torch.nn.functional as F
-import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import v2
@@ -39,13 +35,13 @@ from scdiag.cli_utils import KVPairAction
 from scdiag.datasets.ensemble import DermoscopyEnsemble
 from scdiag.gcs_utils import save_checkpoint
 from scdiag.gpu_utils import gpu_stats_str
+from scdiag.grad_monitor import GradMonitor
 from scdiag.logging_utils import fatal, setup_logging
 from scdiag.model_utils import DTYPE_MAP
-from scdiag.grad_monitor import GradMonitor
-from scdiag.optim_factory import create_optimizer, create_scheduler
 from scdiag.models.convvit.masked_encoder import ConvViTMaskedImageEncoder
 from scdiag.models.registry import load_model
 from scdiag.models.simmim import SimMIM, random_mask, simmim_loss, unpatchify
+from scdiag.optim_factory import create_optimizer, create_scheduler
 
 
 def build_pretrain_transform(image_size=448):
@@ -96,7 +92,7 @@ def build_pretrain_dataset(args):
       })
 
   if not configs:
-    raise ValueError("No datasets specified. Use --datasets <name1> <name2> ...")
+    fatal("No datasets specified. Use --datasets <name1> <name2> ...", ValueError)
 
   ensemble = DermoscopyEnsemble(
       configs,
@@ -151,6 +147,7 @@ def log_reconstruction(model, loader, writer, epoch, device, num_samples=8):
   masked[mask_expanded.bool()] = 0.0
 
   writer.add_image("recon/original", images[0], epoch)
+  writer.add_image("recon/target", target_imgs[0].clamp(0, 1), epoch)
   writer.add_image("recon/masked", masked[0], epoch)
   writer.add_image("recon/reconstructed", pred_imgs[0].clamp(0, 1), epoch)
   model.train()

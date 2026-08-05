@@ -23,8 +23,6 @@ immediately if any are found.
 
 import logging
 
-import torch
-
 
 class GradMonitor:
   """Architecture-agnostic gradient inspector.
@@ -147,12 +145,12 @@ class GradMonitor:
     ]
 
     lines = [
-        f"[Step {global_step}] Gradient Report:"
-        f" {len(stats)} params"
-        f" | grad_norm: mean={sum(norms)/len(norms) if norms else 0:.2e}"
-        f" max={max(norms) if norms else 0:.2e}"
-        f" min={min(norms) if norms else 0:.2e}"
-        f" | grad/param: mean={sum(ratios)/len(ratios) if ratios else 0:.2e}"
+        (f"[Step {global_step}] Gradient Report:"
+         f" {len(stats)} params"
+         f" | grad_norm: mean={sum(norms)/len(norms) if norms else 0:.2e}"
+         f" max={max(norms) if norms else 0:.2e}"
+         f" min={min(norms) if norms else 0:.2e}"
+         f" | grad/param: mean={sum(ratios)/len(ratios) if ratios else 0:.2e}")
     ]
 
     name_status = {}

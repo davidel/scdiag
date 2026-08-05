@@ -1,3 +1,5 @@
+# ruff: noqa
+
 """Custom model registry.
 
 Each custom model registers itself via a @register_model decorator or a
@@ -16,8 +18,11 @@ from scdiag.models.registry import (
     register_processor,
 )
 
-# Import built-in custom models so their @register_model decorators run.
-import scdiag.models.convvit  # noqa: F401
+# Import built-in models after the registry API is available so their
+# module-level decorators can register ConvViT in the central registries.
+# The import is intentionally unused as a name; importing the module performs
+# the registration side effect required by model loading.
+import scdiag.models.convvit
 
 __all__ = [
     "REGISTRY",

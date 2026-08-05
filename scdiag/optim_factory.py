@@ -8,6 +8,8 @@ import logging
 
 import torch.optim as optim
 
+from scdiag.logging_utils import fatal
+
 _OPTIMIZER_MAP = {
     "adam": optim.Adam,
     "adamw": optim.AdamW,
@@ -31,8 +33,9 @@ def create_optimizer(params, *, name="adamw", lr=1e-4, weight_decay=0.01, **kwar
     """
   cls = _OPTIMIZER_MAP.get(name.lower())
   if cls is None:
-    raise ValueError(f"Unknown optimizer {name!r}. "
-                     f"Available: {', '.join(sorted(_OPTIMIZER_MAP))}")
+    fatal(
+        f"Unknown optimizer {name!r}. "
+        f"Available: {', '.join(sorted(_OPTIMIZER_MAP))}", ValueError)
   logging.info("Creating %s optimizer (lr=%.2e, weight_decay=%.2e)", name, lr,
                weight_decay)
   if kwargs:
@@ -76,8 +79,9 @@ def create_scheduler(optimizer,
     """
   sched_type = _SCHEDULER_MAP.get(name.lower())
   if sched_type is None:
-    raise ValueError(f"Unknown scheduler {name!r}. "
-                     f"Available: {', '.join(sorted(_SCHEDULER_MAP))}")
+    fatal(
+        f"Unknown scheduler {name!r}. "
+        f"Available: {', '.join(sorted(_SCHEDULER_MAP))}", ValueError)
 
   sched = _build_main_scheduler(optimizer, sched_type, epochs, base_lr, kwargs)
 
@@ -116,4 +120,4 @@ def _build_main_scheduler(optimizer, sched_type, epochs, base_lr, extra):
     # Constant LR — return a dummy scheduler that never changes LR.
     return optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 1.0)
 
-  raise ValueError(f"Unhandled scheduler type: {sched_type!r}")
+  fatal(f"Unhandled scheduler type: {sched_type!r}", ValueError)

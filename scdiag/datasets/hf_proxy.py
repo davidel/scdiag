@@ -2,6 +2,8 @@
 
 import datasets
 
+from scdiag.logging_utils import fatal
+
 
 class HFDatasetProxy:
   """Wrap a HF ``Dataset`` for use with PyTorch ``DataLoader``.
@@ -136,8 +138,9 @@ class HFDatasetProxy:
     if image_col is None:
       return dataset
     if image_col not in dataset.features:
-      raise ValueError(f"Image column '{image_col}' is not present. "
-                       f"Available columns: {dataset.column_names}")
+      fatal(
+          f"Image column '{image_col}' is not present. "
+          f"Available columns: {dataset.column_names}", ValueError)
     feat = dataset.features[image_col]
     if isinstance(feat, datasets.Value) and feat.dtype == "string":
       dataset = dataset.cast_column(image_col, datasets.Image())
@@ -148,8 +151,9 @@ class HFDatasetProxy:
     """Cast the selected label column to ClassLabel and rename to ``label``."""
     label_col = label_column or HFDatasetProxy.detect_label_column(dataset)
     if label_col is not None and label_col not in dataset.features:
-      raise ValueError(f"Label column '{label_col}' is not present. "
-                       f"Available columns: {dataset.column_names}")
+      fatal(
+          f"Label column '{label_col}' is not present. "
+          f"Available columns: {dataset.column_names}", ValueError)
     if label_col is None:
       return dataset
     if not isinstance(dataset.features[label_col], datasets.ClassLabel):
