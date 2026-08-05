@@ -164,14 +164,18 @@ def train_one_epoch(
     log_every=50,
     monitor=None,
     grad_accum_steps=1,
+    scaler=None,
 ):
   """Run one epoch of SimMIM pre-training.
 
     If *grad_accum_steps* > 1, gradients are accumulated over that many
     micro-batches before the optimizer steps and gradients are zeroed.
 
+    When *scaler* is provided (float16 AMP), gradient scaling is applied
+    to avoid underflow of small gradients.
+
     Returns ``(avg_loss, global_step)``.
-    """
+  """
   model.train()
   total_loss = 0.0
   total_samples = 0
@@ -201,14 +205,23 @@ def train_one_epoch(
       loss = simmim_loss(pred, target, mask)
 
     loss = loss / grad_accum_steps
-    loss.backward()
+    if amp_dtype == torch.float16 and scaler is not None:
+      scaler.scale(loss).backward()
+    else:
+      loss.backward()
 
     # Step optimizer only every grad_accum_steps batches (or at end of epoch).
     if (step + 1) % grad_accum_steps == 0 or (step + 1) == total_batches:
       if monitor is not None:
         monitor.step(global_step)
-      torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-      optimizer.step()
+      if amp_dtype == torch.float16 and scaler is not None:
+        scaler.unscale_(optimizer)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        scaler.step(optimizer)
+        scaler.update()
+      else:
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        optimizer.step()
       optimizer.zero_grad(set_to_none=True)
 
       global_step += 1
@@ -567,6 +580,13 @@ def main(argv=None):
       **args.opt_arg,
   )
 
+  # Only use GradScaler with float16 AMP (not bfloat16 which has native
+  # wider dynamic range and doesn't need loss scaling).
+  scaler = (torch.amp.GradScaler("cuda")
+            if args.amp_dtype == torch.float16 and device.type == "cuda" else None)
+  if scaler is not None:
+    logging.info("GradScaler enabled for float16 AMP stability.")
+
   scheduler = create_scheduler(
       optimizer,
       name=args.scheduler,
@@ -589,7 +609,7 @@ def main(argv=None):
         model,
         optimizer,
         scheduler,
-        scaler=None,
+        scaler=scaler,
         device=device,
         states_to_load=states_to_load,
     )
@@ -617,6 +637,7 @@ def main(argv=None):
           log_every=args.log_every,
           monitor=grad_monitor,
           grad_accum_steps=args.grad_accum_steps,
+          scaler=scaler,
       )
       writer.add_scalar("Train/loss_epoch", avg_loss, epoch)
       scheduler.step()
