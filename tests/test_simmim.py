@@ -3,14 +3,15 @@
 import torch
 import pytest
 
-from scdiag.models.convvit.simmim import (
+from scdiag.models.convvit.loader import load_convvit
+from scdiag.models.convvit.masked_encoder import ConvViTMaskedImageEncoder
+from scdiag.models.simmim import (
+    SimMIM,
     patchify,
     unpatchify,
     random_mask,
     simmim_loss,
-    ConvViTSimMIM,
 )
-from scdiag.models.convvit.loader import load_convvit
 
 
 class ConvViTConfig:
@@ -122,7 +123,7 @@ class TestSimMIMLoss:
     assert loss.item() == 0.0
 
 
-class TestConvViTSimMIM:
+class TestSimMIM:
 
   @pytest.fixture
   def simmim_model(self):
@@ -138,12 +139,16 @@ class TestConvViTSimMIM:
     )
     encoder.head = torch.nn.Identity()
     encoder.cls_guided_pool = torch.nn.Identity()
-    model = ConvViTSimMIM(encoder, decoder_dim=768, decoder_depth=2)
+    model = SimMIM(
+        ConvViTMaskedImageEncoder(encoder),
+        decoder_dim=768,
+        decoder_depth=2,
+    )
     return model
 
   def test_forward_output_shapes(self, simmim_model):
     images = torch.randn(2, 3, 224, 224)
-    num_patches = simmim_model.encoder.patch_embed.num_patches
+    num_patches = simmim_model.num_patches
     mask = random_mask(2, num_patches, mask_ratio=0.60)
     pred, target = simmim_model(images, mask)
     assert pred.shape == target.shape
@@ -151,7 +156,7 @@ class TestConvViTSimMIM:
 
   def test_loss_finite(self, simmim_model):
     images = torch.randn(2, 3, 224, 224)
-    num_patches = simmim_model.encoder.patch_embed.num_patches
+    num_patches = simmim_model.num_patches
     mask = random_mask(2, num_patches, mask_ratio=0.60)
     pred, target = simmim_model(images, mask)
     loss = simmim_loss(pred, target, mask)
@@ -159,7 +164,7 @@ class TestConvViTSimMIM:
 
   def test_backward(self, simmim_model):
     images = torch.randn(2, 3, 224, 224)
-    num_patches = simmim_model.encoder.patch_embed.num_patches
+    num_patches = simmim_model.num_patches
     mask = random_mask(2, num_patches, mask_ratio=0.60)
     pred, target = simmim_model(images, mask)
     loss = simmim_loss(pred, target, mask)

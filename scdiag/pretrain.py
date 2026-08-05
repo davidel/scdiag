@@ -43,13 +43,9 @@ from scdiag.logging_utils import fatal, setup_logging
 from scdiag.model_utils import DTYPE_MAP
 from scdiag.grad_monitor import GradMonitor
 from scdiag.optim_factory import create_optimizer, create_scheduler
-from scdiag.models.convvit.simmim import (
-    ConvViTSimMIM,
-    patchify,
-    random_mask,
-    simmim_loss,
-)
+from scdiag.models.convvit.masked_encoder import ConvViTMaskedImageEncoder
 from scdiag.models.registry import load_model
+from scdiag.models.simmim import SimMIM, random_mask, simmim_loss, unpatchify
 
 
 def build_pretrain_transform(image_size=448):
@@ -118,11 +114,8 @@ def log_reconstruction(model, loader, writer, epoch, device, num_samples=8):
   images = next(iter(loader))[:num_samples].to(device)
   _, _, H, W = images.shape
 
-  # Derive patch_size from the model rather than hard-coding it.
-  # ConvPatchEmbedding computes it as 2 ** num_conv_layers.
-  num_blocks = len(model.encoder.patch_embed.blocks)
-  patch_size = 2**num_blocks
-  num_patches = model.encoder.patch_embed.num_patches
+  patch_size = model.patch_size
+  num_patches = model.num_patches
 
   mask = random_mask(
       images.shape[0],
@@ -134,15 +127,24 @@ def log_reconstruction(model, loader, writer, epoch, device, num_samples=8):
   with torch.no_grad():
     pred, target = model(images, mask)
 
-  from scdiag.models.convvit.simmim import unpatchify
-
-  target_imgs = unpatchify(target, patch_size=patch_size, img_size=H)
-  pred_imgs = unpatchify(pred, patch_size=patch_size, img_size=H)
+  target_imgs = unpatchify(
+      target,
+      patch_size=patch_size,
+      img_size=H,
+      channels=model.in_channels,
+  )
+  pred_imgs = unpatchify(
+      pred,
+      patch_size=patch_size,
+      img_size=H,
+      channels=model.in_channels,
+  )
 
   masked = images.clone()
   p = patch_size
-  mask_expanded = mask.unsqueeze(-1).expand(-1, -1, p * p * 3)
-  mask_expanded = mask_expanded.reshape(images.shape[0], H // p, W // p, p, p, 3)
+  mask_expanded = mask.unsqueeze(-1).expand(-1, -1, p * p * model.in_channels)
+  channels = model.in_channels
+  mask_expanded = mask_expanded.reshape(images.shape[0], H // p, W // p, p, p, channels)
   mask_expanded = mask_expanded.permute(0, 5, 1, 3, 2, 4).reshape_as(masked)
   masked[mask_expanded.bool()] = 0.0
 
@@ -184,7 +186,7 @@ def train_one_epoch(
   window_samples = 0
   window_loss = 0.0
 
-  num_patches = model.encoder.patch_embed.num_patches
+  num_patches = model.num_patches
   mask_ratio = getattr(model, "_mask_ratio", 0.60)
   total_batches = len(loader)
 
@@ -554,8 +556,9 @@ def main(argv=None):
       device=device,
       **args.model_arg,
   )
-  model = ConvViTSimMIM(
-      base_model,
+  encoder = ConvViTMaskedImageEncoder(base_model)
+  model = SimMIM(
+      encoder,
       decoder_dim=args.decoder_dim,
       decoder_depth=args.decoder_depth,
   ).to(device)
