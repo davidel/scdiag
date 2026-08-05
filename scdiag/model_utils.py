@@ -31,42 +31,6 @@ def _find_head_module(model):
   return None
 
 
-def get_backbone(model):
-  """Return the backbone encoder as a standalone ``nn.Module``.
-
-    The returned module should accept raw patch / feature inputs and
-    produce the penultimate representations (i.e. everything *before*
-    the classification head).
-
-    Resolution order
-    ----------------
-    1. If *model* exposes a ``get_backbone()`` method (scdiag protocol),
-       delegate to it.
-    2. If *model* has a ``.model`` attribute (e.g.
-       ``ConvViTForClassification``), return ``model.model``.
-    3. Otherwise (HF model), find the classification head via
-       ``_find_head_module``, replace it with ``Identity``, and return
-       the model itself as the backbone.
-    """
-  # 1. Explicit protocol
-  if hasattr(model, "get_backbone") and callable(model.get_backbone):
-    return model.get_backbone()
-
-  # 2. Wrapper with .model attribute
-  if hasattr(model, "model") and isinstance(model.model, torch.nn.Module):
-    return model.model
-
-  # 3. HF-style model — neutralise the head and return the model itself
-  head = _find_head_module(model)
-  if head is not None:
-    attr_name, _ = head
-    setattr(model, attr_name, torch.nn.Identity())
-    logging.info("Replaced model.%s with Identity for backbone extraction.", attr_name)
-  else:
-    logging.warning("No classification head found; returning model as-is.")
-  return model
-
-
 def build_val_transform(processor, image_size):
   """Build validation transform: Resize → CenterCrop → Processor."""
   return v2.Compose([

@@ -213,18 +213,62 @@ class CustomPatchTransformer(nn.Module):
       nn.init.constant_(m.bias, 0)
       nn.init.constant_(m.weight, 1.0)
 
-  def forward(self, x):
-    x = self.patch_embed(x)  # [B, N, D]
-    B = x.size(0)
+  def _run_transformer(self, patch_embeddings):
+    """Run the shared transformer core on patch embeddings.
+
+        Applies CLS token prepend, positional embeddings, all transformer
+        layers, and layer norm.  Returns both CLS and spatial outputs so
+        that callers can decide how to use them.
+
+        Args:
+            patch_embeddings: ``(B, N, D)`` output from the conv stem
+            (or modified version with mask tokens injected).
+
+        Returns:
+            ``(cls_out, spatial_out)`` where *cls_out* is ``(B, 1, D)``
+            and *spatial_out* is ``(B, N, D)``.
+        """
+    B = patch_embeddings.shape[0]
+    x = patch_embeddings
+
     # Prepend learnable CLS token with its own positional embedding
     cls = self.cls_token.expand(B, -1, -1) + self.cls_pos  # [B, 1, D]
     x = torch.cat([cls, x], dim=1)  # [B, 1+N, D]
-    x = x + self.pos_embedding
+    x = x + self.pos_embedding[:, :x.shape[1], :]
     x = self.pos_drop(x)
+
+    # Transformer encoder (all layers, all tokens)
     for layer in self.transformer_layers:
       x = layer(x)
     x = self.ln_norm(x)
-    cls_out = x[:, :1, :]  # [B, 1, D]
-    spatial_out = x[:, 1:, :]  # [B, N, D]
+
+    return x[:, :1, :], x[:, 1:, :]  # CLS, spatial
+
+  def forward(self, x):
+    embeddings = self.patch_embed(x)  # [B, N, D]
+    cls_out, spatial_out = self._run_transformer(embeddings)
     pooled = self.cls_guided_pool(cls_out, spatial_out)  # [B, D]
     return self.head(pooled)
+
+  def encoder_forward(self, patch_embeddings):
+    """Run the transformer encoder on pre-computed patch embeddings.
+
+        This method provides a non-mutating way to access the encoder's
+        internal representations (for SimMIM pre-training, feature
+        extraction, etc.) without removing classification heads.
+
+        The caller is responsible for:
+
+        1. Running the conv stem: ``embeddings = self.patch_embed(images)``
+        2. Optionally injecting mask tokens (e.g. for SimMIM) before
+           calling this method.
+
+        Args:
+            patch_embeddings: ``(B, N, D)`` output from the conv stem
+            (or modified version with mask tokens injected).
+
+        Returns:
+            ``(B, N, D)`` spatial transformer output (CLS token dropped).
+        """
+    _, spatial_out = self._run_transformer(patch_embeddings)
+    return spatial_out

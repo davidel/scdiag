@@ -17,7 +17,7 @@ import torch.nn.functional as F
 # Patchify / unpatchify
 
 
-def patchify(images, patch_size=16):
+def patchify(images, patch_size):
   """Convert images to per-patch pixel vectors.
 
     ``(B, C, H, W)`` → ``(B, N, patch_size² × C)`` where
@@ -35,7 +35,7 @@ def patchify(images, patch_size=16):
   return x
 
 
-def unpatchify(patches, patch_size=16, img_size=448, channels=3):
+def unpatchify(patches, patch_size, img_size=448, channels=3):
   """Convert per-patch pixel vectors back to an image.
 
     ``(B, N, p² × C)`` → ``(B, C, H, W)``.
@@ -120,11 +120,13 @@ class ConvViTSimMIM(nn.Module):
 
   def __init__(self, encoder, decoder_dim=768, decoder_depth=2):
     super().__init__()
-    # Unwrap any wrapper (ConvViTForClassification, HF model, etc.)
-    # via the scdiag get_backbone() protocol when available.
-    from scdiag.model_utils import get_backbone
-
-    self.encoder = get_backbone(encoder)
+    # Accept a wrapper (ConvViTForClassification) or raw model.
+    # If the wrapper exposes .model, use the raw encoder; otherwise
+    # use the object directly (it must have encoder_forward / patch_embed).
+    if hasattr(encoder, "model"):
+      self.encoder = encoder.model
+    else:
+      self.encoder = encoder
     embed_dim = self.encoder.pos_embedding.shape[-1]
 
     # Patch size derived from the conv stem (2 ** num_conv_layers).
@@ -170,21 +172,11 @@ class ConvViTSimMIM(nn.Module):
     mask_tokens = self.mask_token.expand(B, x.shape[1], -1)  # (B, N, D)
     x = torch.where(mask.unsqueeze(-1), mask_tokens, x)
 
-    # 4. Prepend CLS token + positional embeddings
-    cls = self.encoder.cls_token.expand(B, -1, -1) + self.encoder.cls_pos
-    x = torch.cat([cls, x], dim=1)  # (B, 1+N, D)
-    x = x + self.encoder.pos_embedding[:, :x.shape[1], :]
-    x = self.encoder.pos_drop(x)
+    # 4. Run transformer encoder via non-mutating method
+    #    (no need to remove classification heads)
+    spatial = self.encoder.encoder_forward(x)  # (B, N, D)
 
-    # 5. Transformer encoder (all layers, all tokens)
-    for layer in self.encoder.transformer_layers:
-      x = layer(x)
-    x = self.encoder.ln_norm(x)
-
-    # 6. Drop CLS → spatial tokens only
-    spatial = x[:, 1:, :]  # (B, N, D)
-
-    # 7. Decode
+    # 5. Decode
     pred = self.decoder(spatial)  # (B, N, D)
 
     return pred, target

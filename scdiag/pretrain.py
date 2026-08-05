@@ -40,7 +40,7 @@ from scdiag.datasets.ensemble import DermoscopyEnsemble
 from scdiag.gcs_utils import save_checkpoint
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.logging_utils import fatal, setup_logging
-from scdiag.model_utils import DTYPE_MAP, get_backbone
+from scdiag.model_utils import DTYPE_MAP
 from scdiag.grad_monitor import GradMonitor
 from scdiag.optim_factory import create_optimizer, create_scheduler
 from scdiag.models.convvit.simmim import (
@@ -554,10 +554,8 @@ def main(argv=None):
       device=device,
       **args.model_arg,
   )
-  encoder = get_backbone(base_model)
-
   model = ConvViTSimMIM(
-      encoder,
+      base_model,
       decoder_dim=args.decoder_dim,
       decoder_depth=args.decoder_depth,
   ).to(device)

@@ -35,17 +35,6 @@ class ConvViTForClassification(nn.Module):
     logits = self.model(pixel_values)  # [B, num_classes]
     return ModelOutput(logits)
 
-  def get_backbone(self):
-    """Return the raw encoder with classification heads removed.
-
-    Strips ``head`` and ``cls_guided_pool`` (replacing them with
-    ``Identity``) so the model can be used for masked-image-modelling
-    or other pre-training objectives.
-    """
-    self.model.head = nn.Identity()
-    self.model.cls_guided_pool = nn.Identity()
-    return self.model
-
   def extract_backbone_features(self, pixel_values):
     """Return intermediate feature maps from the conv patch embedding.
 

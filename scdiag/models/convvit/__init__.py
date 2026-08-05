@@ -1,4 +1,4 @@
-"""ConvViT: ConvNeXtV2 stem + ViT encoder for skin lesion classification."""
+"""ConvViT: Custom conv stem + ViT encoder for skin lesion classification."""
 
 from scdiag.models.convvit.loader import ConvViTForClassification
 from scdiag.models.convvit.model import CustomPatchTransformer

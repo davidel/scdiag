@@ -11,7 +11,7 @@ from scdiag.models import (
     REGISTRY,
     ModelOutput,
     is_custom_model,
-    load_custom_model,
+    load_model,
     register_model,
 )
 from scdiag.models.convvit.model import CustomPatchTransformer
@@ -298,7 +298,9 @@ class TestLoadCustomModel:
   def test_load_convvit(self):
     id2label = {0: "a", 1: "b", 2: "c"}
     label2id = {"a": 0, "b": 1, "c": 2}
-    model, processor = load_custom_model(
+    from scdiag.models import load_processor
+
+    model = load_model(
         "convvit",
         num_labels=3,
         id2label=id2label,
@@ -306,6 +308,7 @@ class TestLoadCustomModel:
         image_size=224,
         device=torch.device("cpu"),
     )
+    processor = load_processor("convvit", image_size=224)
     assert isinstance(model, torch.nn.Module)
     assert model.config.id2label == id2label
     assert hasattr(processor, "__call__")
@@ -318,8 +321,10 @@ class TestLoadCustomModel:
     assert out.logits.shape == (1, 3)
 
   def test_unknown_model_raises(self):
-    with pytest.raises(ValueError, match="Unknown custom model"):
-      load_custom_model(
+    # load_model falls through to HuggingFace for unknown names,
+    # which raises OSError for non-existent model ids.
+    with pytest.raises((ValueError, OSError)):
+      load_model(
           "nonexistent_model",
           num_labels=3,
           id2label={},
@@ -336,7 +341,7 @@ class TestCheckpointRoundtrip:
     id2label = {0: "melanoma", 1: "nevus"}
     label2id = {"melanoma": 0, "nevus": 1}
 
-    model, _ = load_custom_model(
+    model = load_model(
         "convvit",
         num_labels=2,
         id2label=id2label,
@@ -355,7 +360,7 @@ class TestCheckpointRoundtrip:
           }, ckpt_path)
 
     try:
-      model2, _ = load_custom_model(
+      model2 = load_model(
           "convvit",
           num_labels=2,
           id2label=id2label,
@@ -432,7 +437,7 @@ class TestExtractBackboneFeatures:
 
   def test_hook_with_custom_convvit(self):
     """extract_backbone_features uses the protocol method for custom models."""
-    model, processor = load_custom_model(
+    model = load_model(
         "convvit",
         num_labels=3,
         id2label={
