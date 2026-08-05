@@ -30,3 +30,6 @@ scdiag-infer = "scdiag.infer:main"
 
 [tool.setuptools.packages.find]
 include = ["scdiag*"]
+
+[tool.ruff.lint]
+ignore = ["LOG015"]
