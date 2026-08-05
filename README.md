@@ -25,11 +25,11 @@ self-supervised pre-training (SimMIM) on multi-source dermoscopy datasets.
   `--pretrained_encoder` to boost downstream performance on small datasets.
 - **Custom model registry** — use any HuggingFace `AutoModelForImageClassification`
   model, or register custom architectures via the `scdiag.models` registry.
-  First custom model: **ConvViT** (ConvNeXtV2 stem + ViT encoder with
+  First custom model: **ConvViT** (multi-block conv stem + ViT encoder with
   CLS-guided attention pooling). Use `--model convvit` to select it.
 - **Hook-based feature extraction** — XGBoost backbone features are extracted
   via a forward hook on the classifier head, making feature extraction
-  architecture-agnostic (works for ConvNeXtV2, ViT, ResNet, Swin, etc.).
+  architecture-agnostic (works for ViT, ResNet, Swin, etc.).
 - **Strong augmentations** — random rotation, elastic deformation, aggressive
   cropping, and color jitter tuned for dermoscopy images.
 - **Checkpointing** — saves `_latest.pt` and `_best.pt` (by validation accuracy).
@@ -52,7 +52,7 @@ self-supervised pre-training (SimMIM) on multi-source dermoscopy datasets.
 - **Multi-source dataset ensemble** — stitches together multiple HuggingFace
   datasets (e.g. HAM10000, ISIC challenges, Derm1M) into a single unified
   pre-training corpus with flat indexing and lazy loading.
-- **Mixed precision** — AMP support (`float16` or `bfloat16`).
+- **Mixed precision** — AMP support (`float16` with GradScaler, or `bfloat16`).
 - **Configurable architecture** — decoder depth, mask ratio, image size, and
   all training hyperparameters are exposed via CLI.
 - **Reconstruction visualisation** — periodic TensorBoard logging of original,
@@ -113,9 +113,8 @@ scdiag-train --model google/vit-base-patch16-224 \
 | `--cache_dir` | `None` | HuggingFace cache directory |
 | `--gcs_checkpoint` | `None` | GCS URI for checkpoint sync (`gs://BUCKET/PREFIX`) |
 | `--mixup_alpha` | `0.0` | Mixup alpha (0 = disabled, recommended: `0.2`) |
-| `--ignore_optimizer_ckpt` | `False` | Skip restoring optimizer state on resume |
-| `--ignore_scheduler_ckpt` | `False` | Skip restoring scheduler state on resume |
-| `--ignore_scaler_ckpt` | `False` | Skip restoring GradScaler state on resume |
+| `--state_save` | `opt,sched,amp` | Comma-separated states to save: `opt`, `sched`, `amp`, `none` |
+| `--state_load` | `opt,sched,amp` | Comma-separated states to restore on resume: `opt`, `sched`, `amp`, `none` |
 | `--xgboost_model` | `None` | Output path for XGBoost model. If set, train XGBoost on backbone features after training. |
 | `--xgb_max_depth` | `6` | XGBoost max tree depth |
 | `--xgb_n_estimators` | `200` | XGBoost number of trees |
@@ -144,9 +143,7 @@ To fine-tune backbone weights from a previous run on a different dataset
 scdiag-train --model facebook/convnextv2-base-22k-224 \
              --dataset ahmed-ai/skin-lesions-classification-dataset \
              --checkpoint scdiag \
-             --ignore_optimizer_ckpt \
-             --ignore_scheduler_ckpt \
-             --ignore_scaler_ckpt \
+             --state_load none \
              --epochs 10 \
              --batch_size 16 \
              --lr 3e-5 \
@@ -157,8 +154,8 @@ scdiag-train --model facebook/convnextv2-base-22k-224 \
 
 The checkpoint's backbone weights are loaded (`strict=False`), while the
 classifier head (different `num_classes`) is reinitialised and trained from
-scratch.  All three `--ignore_*` flags are recommended so the optimizer
-momentum, LR schedule, and scaler history from the old run don't interfere.
+scratch.  `--state_load none` ensures the old optimizer, scheduler, and
+scaler states are not carried over.
 
 ## Pre-Training (SimMIM)
 
@@ -207,8 +204,11 @@ scdiag-train --model convvit \
 | `--epochs` | `200` | Total pre-training epochs. |
 | `--lr` | `1e-4` | Peak learning rate for AdamW. |
 | `--warmup_epochs` | `10` | Number of linear warmup epochs. |
-| `--amp_dtype` | `float16` | Mixed precision dtype (`float16`, `bfloat16`, `none`). |
+| `--amp_dtype` | `None` | Mixed precision dtype. Omit to disable; use `float16` or `bfloat16` to enable. |
 | `--num_workers` | `4` | DataLoader worker processes. |
+| `--resume` | `True` | Auto-resume from latest checkpoint if one exists. Use `--no-resume` to disable. |
+| `--state_save` | `opt,sched` | Comma-separated states to save: `opt`, `sched`, `amp`, `none`. |
+| `--state_load` | `opt,sched` | Comma-separated states to restore on resume: `opt`, `sched`, `amp`, `none`. |
 | `--checkpoint` | (required) | Checkpoint path prefix (saves `_latest.pt` and `_best.pt`). |
 | `--log_level` | `INFO` | Minimum logging level. |
 | `--vis_every` | `10` | Log reconstruction visualisation to TensorBoard every N epochs. |
@@ -296,7 +296,7 @@ the box.  You can also register custom model architectures:
 # Use a HuggingFace model
 scdiag-train --model facebook/convnextv2-base-22-22k-384 ...
 
-# Use the built-in ConvViT (ConvNeXtV2 stem + ViT encoder)
+# Use the built-in ConvViT (conv stem + ViT encoder)
 scdiag-train --model convvit --image_size 224 ...
 
 # Override ConvViT architecture from the CLI
@@ -325,7 +325,7 @@ scdiag-train --model convvit --model_arg depth=6 num_heads=8 dropout=0.2
 
 | Name | Description | `--model` value |
 |---|---|---|
-| ConvViT | ConvNeXtV2 stem + 12-layer ViT encoder with CLS-guided attention pooling | `convvit` |
+| ConvViT | Multi-block conv stem (4 blocks → patch_size 16) + 12-layer ViT encoder with CLS-guided attention pooling | `convvit` |
 
 ConvViT supports SimMIM self-supervised pre-training via `scdiag-pretrain`.
 Pre-trained encoder weights can be loaded into the supervised training pipeline
