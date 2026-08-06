@@ -10,6 +10,10 @@ class MaskedImageEncoder(ABC):
   SimMIM wrapper. ``patch_embed`` must return one token per reconstruction
   patch, and ``encode_embeddings`` must return the corresponding spatial
   features after the encoder stack.
+
+  Implementations must expose the underlying model as ``model``, either as an
+  explicit field or as a property; the generic SimMIM wrapper accesses
+  ``encoder.model`` directly.
   """
 
   @property
