@@ -75,6 +75,9 @@ pip install -e ".[gcs]"
 - torchvision
 - transformers
 - datasets
+- NumPy
+- scikit-learn >= 1.3
+- XGBoost >= 2.0
 
 ## Quick Start
 
@@ -92,7 +95,7 @@ scdiag-train --model google/vit-base-patch16-224 \
 | Argument | Default | Description |
 |---|---|---|
 | `--model` | `google/vit-base-patch16-224` | HuggingFace model name, local path, or custom model name (e.g. `convvit`) |
-| `--dataset` | `marmal88/skin_cancer` | HuggingFace dataset name |
+| `--dataset` | `marmal88/skin_cancer` | HuggingFace dataset name or `imagefolder/PATH` for a local ImageFolder dataset |
 | `--image_column` | auto-detected | Explicit HuggingFace image column name |
 | `--label_column` | auto-detected | Explicit HuggingFace label column name |
 | `--image_size` | `448` | Augmentation crop size (processor handles final resize) |
@@ -109,6 +112,7 @@ scdiag-train --model google/vit-base-patch16-224 \
 | `--amp_dtype` | `None` | Mixed precision: `float16` or `bfloat16` |
 | `--checkpoint` | `scdiag` | Checkpoint base path (`_latest.pt` / `_best.pt` appended) |
 | `--log_every` | `20` | Log every N steps |
+| `--grad_monitor` | `-1` | Log gradient statistics every N steps; `-1` disables gradient monitoring |
 | `--save_every` | `500` | Save checkpoint every N steps |
 | `--num_workers` | `2` | DataLoader worker processes |
 | `--log_level` | `INFO` | Logging level |
@@ -216,6 +220,8 @@ scdiag-train --model convvit \
 | `--state_load` | `opt,sched` | Comma-separated states to restore on resume: `opt`, `sched`, `amp`, `none`. |
 | `--checkpoint` | (required) | Checkpoint path prefix (saves `_latest.pt` and `_best.pt`). |
 | `--log_level` | `INFO` | Minimum logging level. |
+| `--grad_monitor` | `-1` | Log gradient statistics every N steps; `-1` disables gradient monitoring. |
+| `--grad_clip` | `1.0` | Maximum gradient norm for clipping. |
 | `--vis_every` | `10` | Log reconstruction visualisation to TensorBoard every N epochs. |
 | `--model_arg` | `{}` | Override model configuration (repeatable). Example: `--model_arg depth=6 num_heads=8` |
 | `--proc_arg` | `{}` | Override processor configuration (repeatable). |
@@ -275,9 +281,9 @@ scdiag-infer --model facebook/convnextv2-base-22k-224 \
 |---|---|---|
 | `--model` | (required) | HuggingFace model name |
 | `--checkpoint` | (required) | Path to a raw state dictionary or wrapped checkpoint |
-| `--top_k` | `5` | Show top-K predictions |
+| `--top_k` | `None` | Show top-K predictions; omitted to return all class probabilities |
 | `--output` | `None` | Write JSON results to file |
-| `--device` | `None` | Force device (`cuda`, `cpu`, `mps`). Auto-detected if omitted. |
+| `--device` | `None` | Force the PyTorch device (for example, `cuda` or `cpu`). Auto-detected if omitted. |
 | `--cache_dir` | `None` | HuggingFace cache directory |
 | `--xgboost_model` | `None` | XGBoost model path. If provided, run XGBoost alongside PyTorch. |
 | `--model_arg` | `{}` | Override model configuration (repeatable). Example: `--model_arg depth=6` |
