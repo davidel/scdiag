@@ -398,12 +398,7 @@ def parse_args(argv=None):
       default=0.01,
       help="Weight decay.",
   )
-  parser.add_argument(
-      "--warmup_epochs",
-      type=int,
-      default=2,
-      help="Linear warmup epochs.",
-  )
+
   parser.add_argument(
       "--label_smoothing",
       type=float,

@@ -377,12 +377,6 @@ def parse_args(argv=None):
                       type=float,
                       default=0.05,
                       help="AdamW weight decay.")
-  parser.add_argument(
-      "--warmup_epochs",
-      type=int,
-      default=10,
-      help="Linear warmup epochs before cosine schedule.",
-  )
   parser.add_argument("--grad_clip",
                       type=float,
                       default=1.0,

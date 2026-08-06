@@ -15,7 +15,10 @@ self-supervised pre-training (SimMIM) on multi-source dermoscopy datasets.
 - **Mixed precision** — optional AMP with `float16` (with GradScaler) or
   `bfloat16`.
 - **Gradient accumulation** — effective batch size = `batch_size * grad_accum_steps`.
-- **Linear warmup + cosine annealing** learning rate schedule.
+- **Configurable optimizer and scheduler** — use any `torch.optim` optimizer
+  (e.g. `AdamW`, `SGD`) and any `torch.optim.lr_scheduler` scheduler
+  (e.g. `CosineAnnealingLR`, `StepLR`) via CLI arguments. Custom scheduler
+  scripts supported for complex schedules.
 - **Class-weighted loss** with inverse-frequency weighting and label smoothing.
 - **Cost-sensitive focal loss** — combined focal modulation and per-class
   clinical severity multipliers (`--focal_gamma`, `--class_multipliers`) for
@@ -104,7 +107,6 @@ scdiag-train --model google/vit-base-patch16-224 \
 | `--batch_size` | `32` | Batch size |
 | `--lr` | `3e-5` | Peak learning rate |
 | `--weight_decay` | `0.01` | Weight decay |
-| `--warmup_epochs` | `2` | Linear warmup epochs |
 | `--label_smoothing` | `0.0` | Label smoothing factor |
 | `--focal_gamma` | `0.0` | Focal loss gamma (`0` = disabled). Down-weights easy examples so the optimizer focuses on hard-to-classify samples. |
 | `--class_multipliers` | `""` | Comma-separated `NAME=VALUE` pairs overriding per-class clinical severity multipliers. `NAME` is a label string or integer index; `VALUE` is a float. Unspecified classes default to `1.0`. Example: `"melanoma=3.0,melanocytic_Nevi=1.0"` |
@@ -133,9 +135,9 @@ scdiag-train --model google/vit-base-patch16-224 \
 | `--xgb_reg_alpha` | `0.0` | XGBoost L1 regularization |
 | `--model_arg` | `{}` | Override model configuration (repeatable). Example: `--model_arg depth=6 num_heads=8` |
 | `--proc_arg` | `{}` | Override processor configuration (repeatable). Example: `--proc_arg image_size=384` |
-| `--optimizer` | `adamw` | Optimizer: `adamw`, `adam`, or `sgd` |
+| `--optimizer` | `AdamW` | `torch.optim` optimizer class name (case-sensitive). Examples: `AdamW`, `Adam`, `SGD` |
 | `--opt_arg` | `{}` | Extra optimizer kwargs (repeatable). Example: `--opt_arg betas=0.9,0.999 momentum=0.9` |
-| `--scheduler` | `cosine` | Scheduler: `cosine`, `cosine_warmup`, `step`, `constant` |
+| `--scheduler` | `None` | `torch.optim.lr_scheduler` class name (case-sensitive), or a `.py` script path. Examples: `CosineAnnealingLR`, `StepLR`. Default: no scheduler |
 | `--sched_arg` | `{}` | Extra scheduler kwargs (repeatable). Example: `--sched_arg T_max=50 eta_min=1e-6` |
 
 Training automatically resumes from an existing `_latest.pt` or `_best.pt`
@@ -180,7 +182,8 @@ scdiag-pretrain --model convvit \
                 --batch_size 32 \
                 --epochs 200 \
                 --lr 1e-4 \
-                --warmup_epochs 10 \
+                --scheduler CosineAnnealingLR \
+                --sched_arg T_max=200 --sched_arg eta_min=1e-6 \
                 --mask_ratio 0.60 \
                 --decoder_dim 768 \
                 --decoder_depth 2 \
@@ -212,7 +215,6 @@ scdiag-train --model convvit \
 | `--batch_size` | `32` | Per-GPU batch size. |
 | `--epochs` | `200` | Total pre-training epochs. |
 | `--lr` | `1e-4` | Peak learning rate for AdamW. |
-| `--warmup_epochs` | `10` | Number of linear warmup epochs. |
 | `--amp_dtype` | `None` | Mixed precision dtype. Omit to disable; use `float16` or `bfloat16` to enable. |
 | `--num_workers` | `4` | DataLoader worker processes. |
 | `--resume` | `True` | Auto-resume from latest checkpoint if one exists. Use `--no-resume` to disable. |
@@ -222,12 +224,12 @@ scdiag-train --model convvit \
 | `--log_level` | `INFO` | Minimum logging level. |
 | `--grad_monitor` | `-1` | Log gradient statistics every N steps; `-1` disables gradient monitoring. |
 | `--grad_clip` | `1.0` | Maximum gradient norm for clipping. |
-| `--vis_every` | `10` | Log reconstruction visualisation to TensorBoard every N epochs. |
+| `--vis_every` | `0` | Log reconstruction visualisation to TensorBoard every N steps. `0` disables visualisation logging. |
 | `--model_arg` | `{}` | Override model configuration (repeatable). Example: `--model_arg depth=6 num_heads=8` |
 | `--proc_arg` | `{}` | Override processor configuration (repeatable). |
-| `--optimizer` | `adamw` | Optimizer: `adamw`, `adam`, or `sgd` |
+| `--optimizer` | `AdamW` | `torch.optim` optimizer class name (case-sensitive). Examples: `AdamW`, `Adam`, `SGD` |
 | `--opt_arg` | `{}` | Extra optimizer kwargs (repeatable). Example: `--opt_arg betas=0.9,0.999` |
-| `--scheduler` | `cosine` | Scheduler: `cosine`, `cosine_warmup`, `step`, `constant` |
+| `--scheduler` | `None` | `torch.optim.lr_scheduler` class name (case-sensitive), or a `.py` script path. Examples: `CosineAnnealingLR`, `StepLR`. Default: no scheduler |
 | `--sched_arg` | `{}` | Extra scheduler kwargs (repeatable). Example: `--sched_arg T_max=50` |
 
 ### Dataset Ensemble
