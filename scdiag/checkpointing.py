@@ -115,7 +115,7 @@ def checkpoint_dict(model,
   if states_to_save is None or "opt" in states_to_save:
     d["optimizer_state_dict"] = optimizer.state_dict()
   if states_to_save is None or "sched" in states_to_save:
-    d["scheduler_state_dict"] = scheduler.state_dict()
+    d["scheduler_state_dict"] = scheduler.state_dict() if scheduler is not None else None
   if "amp" in states_to_save:
     d["scaler_state_dict"] = scaler.state_dict() if scaler is not None else None
   d.update(extra)
@@ -200,7 +200,9 @@ def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scale
     logging.info("  Skipped optimizer state")
 
   if "sched" in states_to_load and "scheduler_state_dict" in ckpt:
-    if skipped:
+    if scheduler is None:
+      logging.info("  Skipped scheduler restore (no scheduler in current run)")
+    elif skipped:
       logging.warning("  Skipped scheduler restore (model architecture changed)")
     else:
       scheduler.load_state_dict(ckpt["scheduler_state_dict"])

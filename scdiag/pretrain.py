@@ -487,8 +487,9 @@ def parse_args(argv=None):
   parser.add_argument(
       "--optimizer",
       type=str,
-      default="adamw",
-      help="Optimizer name: adamw (default), adam, sgd.",
+      default="AdamW",
+      help="torch.optim optimizer class name (case-sensitive). "
+      "Examples: AdamW (default), Adam, SGD.",
   )
   parser.add_argument(
       "--opt_arg",
@@ -502,9 +503,11 @@ def parse_args(argv=None):
   parser.add_argument(
       "--scheduler",
       type=str,
-      default="cosine",
-      help="Scheduler name: cosine (default), "
-      "cosine_warmup, step, constant.",
+      default=None,
+      help="torch.optim.lr_scheduler class name (case-sensitive), "
+      "or a path to a custom .py script. "
+      "Examples: CosineAnnealingLR, StepLR. "
+      "Default: None (no scheduler).",
   )
   parser.add_argument(
       "--sched_arg",
@@ -606,7 +609,6 @@ def main(argv=None):
       optimizer,
       name=args.scheduler,
       epochs=args.epochs,
-      warmup_epochs=args.warmup_epochs,
       base_lr=args.lr,
       **args.sched_arg,
   )
@@ -656,7 +658,8 @@ def main(argv=None):
           scaler=scaler,
       )
       writer.add_scalar("Train/loss_epoch", avg_loss, epoch)
-      scheduler.step()
+      if scheduler is not None:
+        scheduler.step()
       completed_epoch = epoch
 
       save_checkpoint(

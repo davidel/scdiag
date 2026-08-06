@@ -5,24 +5,23 @@ scheduler creation with configurable versions driven by CLI arguments.
 """
 
 import logging
+import os
+import tempfile
+import urllib.request
 
 import torch.optim as optim
 
 from scdiag.logging_utils import fatal
 
-_OPTIMIZER_MAP = {
-    "adam": optim.Adam,
-    "adamw": optim.AdamW,
-    "sgd": optim.SGD,
-}
 
-
-def create_optimizer(params, *, name="adamw", lr=1e-4, weight_decay=0.01, **kwargs):
+def create_optimizer(params, *, name="AdamW", lr=1e-4, weight_decay=0.01, **kwargs):
   """Create an optimizer by name, forwarding extra keyword arguments.
 
     Args:
         params: Iterable of parameters (typically ``model.parameters()``).
-        name: One of ``"adamw"`` (default), ``"adam"``, ``"sgd"``.
+        name: Name of a ``torch.optim`` optimizer class (e.g. ``"AdamW"``,
+            ``"Adam"``, ``"SGD"``).  Must match the class name exactly
+            (case-sensitive).
         lr: Learning rate.
         weight_decay: Weight decay (L2 penalty).
         **kwargs: Forwarded to the optimizer constructor (e.g. ``betas``,
@@ -31,11 +30,14 @@ def create_optimizer(params, *, name="adamw", lr=1e-4, weight_decay=0.01, **kwar
     Returns:
         A ``torch.optim.Optimizer`` instance.
     """
-  cls = _OPTIMIZER_MAP.get(name.lower())
-  if cls is None:
-    fatal(
-        f"Unknown optimizer {name!r}. "
-        f"Available: {', '.join(sorted(_OPTIMIZER_MAP))}", ValueError)
+  cls = getattr(optim, name, None)
+  if cls is None or not isinstance(cls, type):
+    available = [
+        x for x in dir(optim)
+        if not x.startswith("_") and isinstance(getattr(optim, x), type)
+    ]
+    fatal(f"Unknown optimizer {name!r}. "
+          f"Available: {', '.join(sorted(available))}", ValueError)
   logging.info("Creating %s optimizer (lr=%.2e, weight_decay=%.2e)", name, lr,
                weight_decay)
   if kwargs:
@@ -43,81 +45,88 @@ def create_optimizer(params, *, name="adamw", lr=1e-4, weight_decay=0.01, **kwar
   return cls(params, lr=lr, weight_decay=weight_decay, **kwargs)
 
 
-_SCHEDULER_MAP = {
-    "cosine": "cosine",
-    "cosine_warmup": "cosine_warmup",
-    "step": "step",
-    "constant": "constant",
-}
+def create_scheduler(optimizer, *, name=None, epochs=100, base_lr=1e-4, **kwargs):
+  """Create a LR scheduler by name, forwarding extra keyword arguments.
 
+    Three dispatch modes:
 
-def create_scheduler(optimizer,
-                     *,
-                     name="cosine",
-                     epochs=100,
-                     warmup_epochs=0,
-                     base_lr=1e-4,
-                     **kwargs):
-  """Create a LR scheduler by name, optionally with linear warmup.
+    1. **name is None / empty** — returns ``None`` (no scheduler).
+    2. **name ends with ``.py``** — loads the script and calls its
+       ``create_scheduler(optimizer, **kwargs)`` function (similar to
+       custom image processors).
+    3. **Otherwise** — resolves *name* via
+       ``getattr(torch.optim.lr_scheduler, name)`` (case-sensitive)
+       and instantiates it, forwarding ``kwargs``.
 
     Args:
         optimizer: The optimizer to schedule.
-        name: Scheduler type — ``"cosine"`` (default), ``"cosine_warmup"``,
-            ``"step"``, or ``"constant"``.
-        epochs: Total number of training epochs (used to set ``T_max`` for
-            cosine and the warmup schedule endpoint).
-        warmup_epochs: Number of warmup epochs at the start.  If > 0 a
-            ``LinearLR`` warmup is composed with the main scheduler via
-            ``SequentialLR``.
-        base_lr: The target / peak learning rate (used as the warmup end
-            point).
-        **kwargs: Forwarded to the underlying scheduler constructor (e.g.
+        name: A ``torch.optim.lr_scheduler`` class name (e.g.
+            ``"CosineAnnealingLR"``, ``"StepLR"``), a path / URL to a
+            Python script, or ``None`` for no scheduling.
+        epochs: Total number of training epochs.
+        base_lr: The target / peak learning rate.
+        **kwargs: Forwarded to the scheduler constructor (e.g.
             ``T_max``, ``eta_min``, ``step_size``, ``gamma``).
 
     Returns:
-        A ``torch.optim.lr_scheduler.LRScheduler`` instance.
+        A ``torch.optim.lr_scheduler.LRScheduler`` instance, or
+        ``None`` if *name* is ``None``.
     """
-  sched_type = _SCHEDULER_MAP.get(name.lower())
-  if sched_type is None:
-    fatal(
-        f"Unknown scheduler {name!r}. "
-        f"Available: {', '.join(sorted(_SCHEDULER_MAP))}", ValueError)
+  if not name:
+    logging.info("No scheduler requested.")
+    return None
 
-  sched = _build_main_scheduler(optimizer, sched_type, epochs, base_lr, kwargs)
+  if name.endswith(".py"):
+    return _load_scheduler_script(optimizer,
+                                  name,
+                                  epochs=epochs,
+                                  base_lr=base_lr,
+                                  **kwargs)
 
-  if warmup_epochs > 0 and sched_type in ("cosine", "cosine_warmup", "step"):
-    warmup = optim.lr_scheduler.LinearLR(optimizer,
-                                         start_factor=0.01,
-                                         total_iters=warmup_epochs)
-    sched = optim.lr_scheduler.SequentialLR(optimizer, [warmup, sched],
-                                            milestones=[warmup_epochs])
-    logging.info("Creating %s scheduler with %d-epoch linear warmup", name,
-                 warmup_epochs)
+  cls = getattr(optim.lr_scheduler, name, None)
+  if cls is None or not isinstance(cls, type):
+    available = [
+        x for x in dir(optim.lr_scheduler)
+        if not x.startswith("_") and isinstance(getattr(optim.lr_scheduler, x), type)
+    ]
+    fatal(f"Unknown scheduler {name!r}. "
+          f"Available: {', '.join(sorted(available))}", ValueError)
+
+  logging.info("Creating %s scheduler (kwargs=%s)", name, kwargs)
+  return cls(optimizer, **kwargs)
+
+
+def _load_scheduler_script(optimizer, path_or_url, **extra):
+  """Load a custom scheduler from a Python file or URL.
+
+    The script must define a callable
+    ``create_scheduler(optimizer, **kwargs)``.
+    """
+  namespace = {}
+
+  if path_or_url.startswith(("http://", "https://")):
+    with urllib.request.urlopen(path_or_url) as resp:
+      code = resp.read().decode("utf-8")
+    with tempfile.NamedTemporaryFile(mode="w",
+                                     suffix=".py",
+                                     delete=False,
+                                     prefix="sched_") as tmp:
+      tmp.write(code)
+      tmp_path = tmp.name
+    try:
+      exec(compile(code, path_or_url, "exec"), namespace)  # noqa: S102
+    finally:
+      os.unlink(tmp_path)
   else:
-    logging.info("Creating %s scheduler (no warmup)", name)
+    with open(path_or_url) as f:
+      code = f.read()
+    exec(compile(code, path_or_url, "exec"), namespace)  # noqa: S102
 
-  return sched
+  fn = namespace.get("create_scheduler")
+  if fn is None or not callable(fn):
+    fatal(
+        f"Script {path_or_url!r} does not define a callable "
+        "'create_scheduler(optimizer, **kwargs)'.", ValueError)
 
-
-def _build_main_scheduler(optimizer, sched_type, epochs, base_lr, extra):
-  """Build the core (non-warmup) scheduler."""
-  if sched_type == "cosine":
-    T_max = extra.pop("T_max", epochs)
-    eta_min = extra.pop("eta_min", base_lr * 0.01)
-    return optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=T_max, eta_min=eta_min)
-
-  if sched_type == "cosine_warmup":
-    T_max = extra.pop("T_max", epochs)
-    eta_min = extra.pop("eta_min", base_lr * 0.01)
-    return optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=T_max, eta_min=eta_min)
-
-  if sched_type == "step":
-    step_size = extra.pop("step_size", 30)
-    gamma = extra.pop("gamma", 0.1)
-    return optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
-
-  if sched_type == "constant":
-    # Constant LR — return a dummy scheduler that never changes LR.
-    return optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 1.0)
-
-  fatal(f"Unhandled scheduler type: {sched_type!r}", ValueError)
+  logging.info("Loading custom scheduler from %s", path_or_url)
+  return fn(optimizer, **extra)
