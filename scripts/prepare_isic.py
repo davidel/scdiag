@@ -10,11 +10,11 @@ Usage:
 
     # Download with a specific query (e.g., only melanoma cases)
     python scripts/prepare_isic.py --output_dir ./isic_melanoma \
-        --query 'diagnosis:"melanoma"'
+        --search 'diagnosis:"melanoma"'
 
     # Download the SIIM-ISIC 2020 Challenge subset
     python scripts/prepare_isic.py --output_dir ./isic_2020 \
-        --query "anonymous:true"
+        --search "anonymous:true"
 
     # Download the entire archive (may take several days)
     python scripts/prepare_isic.py --output_dir ./isic_full
@@ -61,10 +61,13 @@ def download_isic_archive(target_dir, search_query=None, verbose=False, max_retr
     raise RuntimeError("'isic' executable not found")
 
   # Build the isic command
-  cmd = [isic_executable, "archive", "download", "--output", str(target_path)]
+  # 'isic image download <folder>' automatically pulls images and metadata CSVs
+  cmd = [isic_executable, "image", "download"]
 
   if search_query:
-    cmd.extend(["--query", search_query])
+    cmd.extend(["--search", search_query])
+
+  cmd.append(str(target_path))
 
   if verbose:
     print(f"Running command: {' '.join(cmd)}")
@@ -111,7 +114,7 @@ def main():
       help="Output directory for downloaded images",
   )
   parser.add_argument(
-      "--query",
+      "--search",
       type=str,
       default=None,
       help="Lucene query string to filter downloads "
@@ -144,8 +147,8 @@ def main():
   print("ISIC Archive Downloader")
   print("=" * 60)
   print(f"Output directory: {output_path}")
-  if args.query:
-    print(f"Search query: {args.query}")
+  if args.search:
+    print(f"Search query: {args.search}")
   else:
     print("Search query: None (downloading entire archive)")
   print(f"Max retries: {args.max_retries}")
@@ -154,7 +157,7 @@ def main():
   try:
     download_isic_archive(
         target_dir=args.output_dir,
-        search_query=args.query,
+        search_query=args.search,
         verbose=args.verbose,
         max_retries=args.max_retries,
     )
