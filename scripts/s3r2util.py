@@ -7,17 +7,19 @@ import boto3
 from botocore.exceptions import ClientError
 
 
+def fatal(msg, code=1):
+  print(f"Error: {msg}", file=sys.stderr)
+  sys.exit(code)
+
+
 def create_s3_client():
   account_id = os.getenv("CLOUDFLARE_ACCOUNT_ID")
   access_key_id = os.getenv("R2_ACCESS_KEY_ID")
   secret_access_key = os.getenv("R2_SECRET_ACCESS_KEY")
 
   if not all([account_id, access_key_id, secret_access_key]):
-    print("Error: Missing credentials.", file=sys.stderr)
-    print(
-        "Please set CLOUDFLARE_ACCOUNT_ID, R2_ACCESS_KEY_ID, and R2_SECRET_ACCESS_KEY in your environment.",
-        file=sys.stderr)
-    sys.exit(1)
+    fatal("Missing credentials. Please set CLOUDFLARE_ACCOUNT_ID, "
+          "R2_ACCESS_KEY_ID, and R2_SECRET_ACCESS_KEY in your environment.")
 
   return boto3.client(
       service_name="s3",
@@ -54,8 +56,7 @@ def parse_r2_path(path):
 def handle_ls(args, s3_client):
   bucket, prefix = parse_r2_path(args.path)
   if not bucket:
-    print("Error: 'ls' target must start with r2://", file=sys.stderr)
-    sys.exit(1)
+    fatal("'ls' target must start with r2://")
 
   try:
     kwargs = {"Bucket": bucket}
@@ -75,7 +76,7 @@ def handle_ls(args, s3_client):
       print(f"No objects found in r2://{bucket}/{prefix}")
 
   except ClientError as e:
-    print(f"Error executing ls: {e}", file=sys.stderr)
+    fatal(f"ls failed: {e}")
 
 
 def handle_cp(args, s3_client):
@@ -104,58 +105,41 @@ def handle_cp(args, s3_client):
       print("Remote copy complete.")
 
     else:
-      print("Error: Both source and destination cannot be local files.",
-            file=sys.stderr)
-      sys.exit(1)
+      fatal("Both source and destination cannot be local files.")
 
   except ClientError as e:
-    print(f"Error executing cp: {e}", file=sys.stderr)
-    raise
+    fatal(f"cp failed: {e}")
 
 
 def handle_rm(args, s3_client):
   bucket, key = parse_r2_path(args.path)
   if not bucket or not key:
-    print("Error: Target must be a specific object starting with r2://bucket/key",
-          file=sys.stderr)
-    sys.exit(1)
+    fatal("Target must be a specific object starting with r2://bucket/key")
 
   try:
     print(f"Deleting r2://{bucket}/{key}")
     s3_client.delete_object(Bucket=bucket, Key=key)
     print("Delete complete.")
   except ClientError as e:
-    print(f"Error executing rm: {e}", file=sys.stderr)
+    fatal(f"rm failed: {e}")
 
 
 def handle_mv(args, s3_client):
-  """Copies the source to destination, then deletes the source.
-
-  Not atomic: if copy succeeds but deletion fails, a warning is printed.
-  """
+  """Renames an R2 object (copy + delete). Both source and dest must be r2://."""
   src_bucket, src_key = parse_r2_path(args.source)
+  dst_bucket, dst_key = parse_r2_path(args.destination)
+
+  if not src_bucket or not dst_bucket:
+    fatal("Both source and destination must be R2 paths (r2://bucket/key)")
 
   try:
-    handle_cp(args, s3_client)
-  except ClientError:
-    print("Error: Copy failed, aborting move.", file=sys.stderr)
-    sys.exit(1)
-
-  if src_bucket and src_key:
-    try:
-      print(f"Removing source file r2://{src_bucket}/{src_key}")
-      s3_client.delete_object(Bucket=src_bucket, Key=src_key)
-      print("Move process completed successfully.")
-    except ClientError as e:
-      print(f"Warning: File copied, but failed to delete original source: {e}",
-            file=sys.stderr)
-  elif not src_bucket:
-    try:
-      os.remove(args.source)
-      print("Removed local source file.")
-    except OSError as e:
-      print(f"Warning: File uploaded, but failed to delete local file: {e}",
-            file=sys.stderr)
+    copy_source = {"Bucket": src_bucket, "Key": src_key}
+    print(f"Renaming r2://{src_bucket}/{src_key} -> r2://{dst_bucket}/{dst_key}")
+    s3_client.copy(copy_source, dst_bucket, dst_key)
+    s3_client.delete_object(Bucket=src_bucket, Key=src_key)
+    print("Rename complete.")
+  except ClientError as e:
+    fatal(f"mv failed: {e}")
 
 
 def main():
@@ -183,11 +167,11 @@ def main():
   parser_rm.set_defaults(func=handle_rm)
 
   parser_mv = subparsers.add_parser(
-      "mv", help="Move files locally or remotely (Copies then deletes source)")
+      "mv", help="Rename an R2 object (copy + delete)")
   parser_mv.add_argument("source",
-                         help="Source file path (local path or r2://bucket/key)")
+                         help="Source R2 path (r2://bucket/key)")
   parser_mv.add_argument("destination",
-                         help="Destination file path (local path or r2://bucket/key)")
+                         help="Destination R2 path (r2://bucket/key)")
   parser_mv.set_defaults(func=handle_mv)
 
   args = parser.parse_args()
