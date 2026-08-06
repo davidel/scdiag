@@ -1,4 +1,18 @@
 #!/usr/bin/env python3
+"""CloudFlare R2 CLI utility (S3-compatible).
+
+Provides ls/cp/rm/mv commands for R2 buckets via the boto3 S3 API.
+
+NOTE: This script could in theory be simplified by setting the standard
+AWS environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
+AWS_REGION) from the CloudFlare R2 ones and forwarding directly to the
+`aws s3` CLI (e.g. `aws s3 ls --endpoint-url <r2-endpoint>`). R2
+implements the S3 API, so the AWS CLI works as a drop-in client. That
+approach would remove the boto3 dependency and most of this script.
+However, keeping our own wrapper lets us tailor the interface (e.g.
+trailing-slash destination semantics, r2:// path prefixes) without
+depending on the `aws` CLI being installed.
+"""
 import argparse
 import os
 import sys
@@ -166,12 +180,9 @@ def main():
   parser_rm.add_argument("path", help="Target object key path starting with r2://")
   parser_rm.set_defaults(func=handle_rm)
 
-  parser_mv = subparsers.add_parser(
-      "mv", help="Rename an R2 object (copy + delete)")
-  parser_mv.add_argument("source",
-                         help="Source R2 path (r2://bucket/key)")
-  parser_mv.add_argument("destination",
-                         help="Destination R2 path (r2://bucket/key)")
+  parser_mv = subparsers.add_parser("mv", help="Rename an R2 object (copy + delete)")
+  parser_mv.add_argument("source", help="Source R2 path (r2://bucket/key)")
+  parser_mv.add_argument("destination", help="Destination R2 path (r2://bucket/key)")
   parser_mv.set_defaults(func=handle_mv)
 
   args = parser.parse_args()
