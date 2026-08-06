@@ -14,16 +14,8 @@ import logging
 
 from scdiag.logging_utils import fatal
 
-# Public registry
-
-REGISTRY = {}
-
-# Maps model name → loader fn
 _MODEL_REGISTRY = {}
-# Maps processor name → loader fn
 _PROCESSOR_REGISTRY = {}
-
-# Protocol helpers
 
 
 class ModelOutput:
@@ -56,8 +48,6 @@ def register_model(name):
     if name in _MODEL_REGISTRY:
       fatal(f"Model '{name}' is already registered.", ValueError)
     _MODEL_REGISTRY[name] = fn
-    # Also keep the legacy REGISTRY in sync for backwards compatibility.
-    REGISTRY[name] = fn
     return fn
 
   return wrapper
@@ -89,9 +79,6 @@ def register_processor(name):
 def is_custom_model(model_name):
   """Return *True* if *model_name* maps to a registered custom model."""
   return model_name in _MODEL_REGISTRY
-
-
-# Unified loading API
 
 
 def load_model(
@@ -131,7 +118,6 @@ def load_model(
         **kwargs,
     )
 
-  # HuggingFace path ---------------------------------------------------
   logging.info("Loading HuggingFace model '%s'.", model_name)
   model = AutoModelForImageClassification.from_pretrained(
       model_name,
@@ -173,6 +159,5 @@ def load_processor(
         **kwargs,
     )
 
-  # HuggingFace path ---------------------------------------------------
   logging.info("Loading HuggingFace processor '%s'.", model_name)
   return AutoImageProcessor.from_pretrained(model_name, cache_dir=cache_dir)

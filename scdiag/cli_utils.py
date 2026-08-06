@@ -13,8 +13,6 @@ Example::
 
 import argparse
 
-# Value parsing
-
 
 def parse_value(s):
   """Auto-convert a CLI string to a Python value.
@@ -78,9 +76,6 @@ def _split_list_items(s):
   if current:
     items.append("".join(current).strip())
   return items
-
-
-# Argparse action
 
 
 class KVPairAction(argparse.Action):

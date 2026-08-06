@@ -33,8 +33,6 @@ from scdiag.model_utils import DTYPE_MAP
 from scdiag.models import load_model, load_processor
 from scdiag.optim_factory import create_optimizer, create_scheduler
 
-# Loss function and CLI helpers for Phase 1 of the loss revision plan.
-
 
 def parse_class_multipliers(s, num_labels, label2id):
   """Parse a ``--class_multipliers`` string into a ``[num_labels]`` tensor.

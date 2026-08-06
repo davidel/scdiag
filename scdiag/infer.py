@@ -112,14 +112,12 @@ def main(argv=None):
   args = parse_args(argv)
   setup_logging(args.log_level)
 
-  # Device
   if args.device:
     device = args.device
   else:
     device = "cuda" if torch.cuda.is_available() else "cpu"
   logging.info(f"Using device: {device}")
 
-  # Load model
   model, processor = load_model_for_inference(
       model_name=args.model,
       checkpoint_path=args.checkpoint,
@@ -130,7 +128,6 @@ def main(argv=None):
   )
   transform = build_val_transform(processor, args.image_size)
 
-  # Load XGBoost if requested
   xgb_model = None
   if args.xgboost_model:
     from xgboost import XGBClassifier
@@ -138,13 +135,11 @@ def main(argv=None):
     xgb_model.load_model(args.xgboost_model)
     logging.info(f"Loaded XGBoost model: {args.xgboost_model}")
 
-  # Classify each image
   results = []
   for source in args.images:
     image = open_image(source)
     probs, pixel_values = predict_single(model, transform, image, device)
 
-    # Build sorted prediction list
     predictions = []
     for idx in probs.argsort(descending=True).tolist():
       predictions.append({
@@ -154,7 +149,6 @@ def main(argv=None):
     if args.top_k:
       predictions = predictions[:args.top_k]
 
-    # Log results
     logging.info(f"\n{source}")
     for p in predictions:
       logging.info(f"  {p['probability']:.1%}  {p['label']}")
@@ -164,7 +158,6 @@ def main(argv=None):
         "predictions": predictions,
     }
 
-    # XGBoost inference
     if xgb_model is not None:
       from scdiag.model_utils import extract_backbone_features
       with torch.no_grad():
@@ -185,7 +178,6 @@ def main(argv=None):
 
     results.append(result)
 
-  # Optional JSON output
   if args.output:
     with open(args.output, "w") as f:
       json.dump(results, f, indent=2)

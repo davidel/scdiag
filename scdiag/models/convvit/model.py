@@ -42,11 +42,9 @@ class ConvPatchEmbeddingBlock(nn.Module):
     self.skip_bn = nn.BatchNorm2d(out_channels)
 
   def forward(self, x):
-    # Main
     identity = x
     x = F.gelu(self.bn1(self.conv1(x)))
     x = self.bn2(self.conv2(x))
-    # Skip
     skip = self.skip_bn(self.skip_proj(self.skip_pool(identity)))
     return F.gelu(x + skip)
 

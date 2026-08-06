@@ -15,8 +15,6 @@ from scdiag.datasets.hf_proxy import HFDatasetProxy
 from scdiag.datasets.image_folder import ImageFolderDataset
 from scdiag.logging_utils import fatal
 
-# Individual dataset back-ends
-
 
 class _HFDataset:
   """Lazy-loading wrapper around a HuggingFace ``datasets.Dataset``."""
@@ -83,9 +81,6 @@ class _HFDataset:
          image.height < self.min_resolution)):
       fatal(f"Image too small: {image.size}, min={self.min_resolution}", IndexError)
     return image
-
-
-# Ensemble
 
 
 class DermoscopyEnsemble:

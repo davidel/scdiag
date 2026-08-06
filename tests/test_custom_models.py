@@ -8,7 +8,6 @@ import torch
 from PIL import Image
 
 from scdiag.models import (
-    REGISTRY,
     ModelOutput,
     is_custom_model,
     load_model,
@@ -67,7 +66,7 @@ class TestRegistry:
     assert is_custom_model("") is False
 
   def test_registry_contains_convvit(self):
-    assert "convvit" in REGISTRY
+    assert is_custom_model("convvit") is True
 
   def test_register_duplicate_raises(self):
     with pytest.raises(ValueError, match="already registered"):
@@ -82,10 +81,10 @@ class TestRegistry:
     def _load(**kwargs):
       return "model", "processor"
 
-    assert "_test_model_xyz" in REGISTRY
-    assert REGISTRY["_test_model_xyz"] is _load
+    assert is_custom_model("_test_model_xyz") is True
     # cleanup
-    del REGISTRY["_test_model_xyz"]
+    from scdiag.models.registry import _MODEL_REGISTRY
+    del _MODEL_REGISTRY["_test_model_xyz"]
 
 
 class TestModelOutput:

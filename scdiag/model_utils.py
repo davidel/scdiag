@@ -16,8 +16,6 @@ DTYPE_MAP = {
     "bfloat16": torch.bfloat16,
 }
 
-# Backbone extraction
-
 
 def _find_head_module(model):
   """Locate the classification head on a model.
