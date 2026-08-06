@@ -30,6 +30,7 @@ Note:
 """
 
 import argparse
+import shutil
 import subprocess
 import sys
 import time
@@ -49,11 +50,18 @@ def download_isic_archive(target_dir, search_query=None, verbose=False, max_retr
   target_path = Path(target_dir)
   target_path.mkdir(parents=True, exist_ok=True)
 
+  # Check if the isic executable exists on the system path
+  isic_executable = shutil.which("isic")
+  if not isic_executable:
+    print(
+        "Error: 'isic-cli' is not installed or not found in system PATH.",
+        file=sys.stderr,
+    )
+    print("Please run: pip install isic-cli", file=sys.stderr)
+    raise RuntimeError("'isic' executable not found")
+
   # Build the isic command
-  cmd = [
-      sys.executable, "-m", "isic", "archive", "download", "--output",
-      str(target_path)
-  ]
+  cmd = [isic_executable, "archive", "download", "--output", str(target_path)]
 
   if search_query:
     cmd.extend(["--query", search_query])
@@ -121,27 +129,7 @@ def main():
       default=3,
       help="Number of retry attempts for failed downloads (default: 3)",
   )
-  parser.add_argument(
-      "--check_cli",
-      action="store_true",
-      help="Check if isic-cli is installed and exit",
-  )
   args = parser.parse_args()
-
-  # Check if isic-cli is installed
-  if args.check_cli:
-    try:
-      subprocess.run(
-          [sys.executable, "-m", "isic", "--help"],
-          check=True,
-          capture_output=True,
-      )
-      print("isic-cli is installed and ready to use.")
-      sys.exit(0)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-      print("isic-cli is not installed. Please install it with:\n"
-            "  pip install isic-cli")
-      sys.exit(1)
 
   # Check if output directory already has images
   image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp", ".gif"}
