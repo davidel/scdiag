@@ -106,7 +106,7 @@ def build_pretrain_dataset(args):
   return dataset
 
 
-def log_reconstruction(model, loader, writer, epoch, device, num_samples=8):
+def log_reconstruction(model, loader, writer, global_step, device, num_samples=8):
   """Log original / masked / reconstructed image grids to TensorBoard."""
   model.eval()
   images = next(iter(loader))[:num_samples].to(device)
@@ -146,10 +146,10 @@ def log_reconstruction(model, loader, writer, epoch, device, num_samples=8):
   mask_expanded = mask_expanded.permute(0, 5, 1, 3, 2, 4).reshape_as(masked)
   masked[mask_expanded.bool()] = 0.0
 
-  writer.add_image("recon/original", images[0], epoch)
-  writer.add_image("recon/target", target_imgs[0].clamp(0, 1), epoch)
-  writer.add_image("recon/masked", masked[0], epoch)
-  writer.add_image("recon/reconstructed", pred_imgs[0].clamp(0, 1), epoch)
+  writer.add_image("recon/original", images[0], global_step)
+  writer.add_image("recon/target", target_imgs[0].clamp(0, 1), global_step)
+  writer.add_image("recon/masked", masked[0], global_step)
+  writer.add_image("recon/reconstructed", pred_imgs[0].clamp(0, 1), global_step)
   model.train()
 
 
@@ -163,6 +163,7 @@ def train_one_epoch(
     global_step,
     writer,
     log_every=50,
+    vis_every=0,
     monitor=None,
     grad_accum_steps=1,
     scaler=None,
@@ -272,6 +273,9 @@ def train_one_epoch(
       last_log_time = time.time()
       window_samples = 0
       window_loss = 0.0
+
+    if (vis_every > 0 and global_step % vis_every == 0 and writer is not None):
+      log_reconstruction(model, loader, writer, global_step, device)
 
   avg_loss = total_loss / max(total_samples, 1)
   elapsed = time.time() - start_time
@@ -458,9 +462,9 @@ def parse_args(argv=None):
   parser.add_argument(
       "--vis_every",
       type=int,
-      default=10,
+      default=0,
       help="Log reconstruction visualisation to TensorBoard "
-      "every N epochs.",
+      "every N steps. 0 (default) = disabled.",
   )
 
   parser.add_argument(
@@ -646,6 +650,7 @@ def main(argv=None):
           global_step,
           writer,
           log_every=args.log_every,
+          vis_every=args.vis_every,
           monitor=grad_monitor,
           grad_accum_steps=args.grad_accum_steps,
           scaler=scaler,
@@ -666,9 +671,6 @@ def main(argv=None):
           args.checkpoint + "_latest.pt",
           gcs_uri=args.gcs_checkpoint,
       )
-
-      if epoch % args.vis_every == 0:
-        log_reconstruction(model, loader, writer, epoch, device)
 
   except KeyboardInterrupt:
     logging.warning("Interrupt detected!")
