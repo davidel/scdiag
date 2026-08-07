@@ -646,7 +646,7 @@ def train_xgboost_on_backbone(args, train_ds, val_ds, device, num_labels=None):
     logging.info(f"Loading checkpoint: {ckpt_path}")
     model_best, _ = load_model_for_inference(args.model,
                                              ckpt_path,
-                                             "cpu",
+                                             device="cpu",
                                              cache_dir=args.cache_dir,
                                              num_labels=num_labels,
                                              image_size=args.image_size)
