@@ -18,7 +18,8 @@ def rename_keys(state_dict, patterns):
 
     Each pattern is a string ``SEARCH;REPLACE`` where *SEARCH* is a
     Python regex and *REPLACE* is a replacement string that may use
-    ``$1``, ``$2``, … for capture groups.
+    ``$1``, ``$2``, … for capture groups (``$N`` is automatically
+    converted to ``\\g<N>`` for Python's ``re.sub``).
 
     Patterns are applied in order.  The last pattern wins for any key
     that matches multiple patterns.
@@ -37,6 +38,9 @@ def rename_keys(state_dict, patterns):
           f"Invalid --param_rename pattern {pat_str!r}: "
           "expected 'SEARCH;REPLACE'.", ValueError)
     search, replace = pat_str.split(";", 1)
+    # Python re.sub only supports \N backreferences, not $N.
+    # Convert user-friendly $N to \g<N> for clarity and safety.
+    replace = re.sub(r"\$(\d+)", r"\\g<\1>", replace)
     compiled.append((re.compile(search), replace))
 
   new_state = {}
