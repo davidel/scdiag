@@ -455,7 +455,7 @@ class TestBuildTransforms:
     img = Image.fromarray(np.random.randint(0, 256, (128, 128, 3), dtype=np.uint8))
     result = val_t(img)
     assert isinstance(result, torch.Tensor)
-    assert result.shape == (3, 128, 128)
+    assert result.shape == (3, 64, 64)
     assert result.dtype == torch.float32
 
 

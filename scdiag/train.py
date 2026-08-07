@@ -15,6 +15,7 @@ from sklearn.metrics import f1_score, precision_recall_fscore_support
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import v2
+from torchvision.transforms.v2 import InterpolationMode
 
 from scdiag.checkpointing import (
     checkpoint_dict,
@@ -200,7 +201,11 @@ def build_transforms(processor, image_size, train_aug_fn=None):
         *tail,
     ])
 
-  val_augmentations = v2.Compose(tail)
+  val_augmentations = v2.Compose([
+      v2.Resize(image_size, interpolation=InterpolationMode.BICUBIC),
+      v2.CenterCrop(image_size),
+      *tail,
+  ])
 
   return train_augmentations, val_augmentations
 
