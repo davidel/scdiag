@@ -48,6 +48,33 @@ def rename_keys(state_dict, patterns):
   return new_state
 
 
+def select_available_checkpoint(root_path):
+  """Return the best checkpoint path, falling back to latest.
+
+    Checkpoint files are assumed to follow the ``<root>_best.pt`` /
+    ``<root>_latest.pt`` naming convention.
+
+    Args:
+        root_path: The checkpoint root path (without ``_best.pt`` or
+            ``_latest.pt`` suffix).
+
+    Returns:
+        The path to the available checkpoint, or ``None`` if neither
+        exists.
+  """
+  best = root_path + "_best.pt"
+  latest = root_path + "_latest.pt"
+  if os.path.isfile(best):
+    return best
+  if os.path.isfile(latest):
+    logging.warning(f"Best checkpoint not found ({best}). "
+                    f"Falling back to latest: {latest}")
+    return latest
+  logging.error(f"No checkpoint found at {root_path} "
+                f"(tried {best}, {latest}).")
+  return None
+
+
 _VALID_STATE_FLAGS = {"opt", "sched", "amp", "none"}
 
 

@@ -638,67 +638,72 @@ def train_xgboost_on_backbone(args, train_ds, val_ds, device):
   logging.info("=" * 60)
 
   # 1. Load the best checkpoint into a fresh model
-  best_ckpt_path = args.checkpoint + "_best.pt"
-  logging.info(f"Loading best checkpoint: {best_ckpt_path}")
-  model_best, _ = load_model_for_inference(args.model,
-                                           best_ckpt_path,
-                                           "cpu",
-                                           cache_dir=args.cache_dir)
-  model_best = model_best.to(device)
+  from scdiag.checkpointing import select_available_checkpoint
 
-  # 2. Rebuild train and val datasets with val transforms (not train augs)
-  xgb_processor = load_processor(
-      args.model,
-      image_size=args.image_size,
-      cache_dir=args.cache_dir,
-      **args.proc_arg,
-  )
-  val_transform = build_val_transform(xgb_processor, args.image_size)
-  train_proxy = HFDatasetProxy(train_ds, transform=val_transform)
-  val_proxy = HFDatasetProxy(val_ds, transform=val_transform)
+  ckpt_path = select_available_checkpoint(args.checkpoint)
+  if ckpt_path is not None:
+    logging.info(f"Loading checkpoint: {ckpt_path}")
+    model_best, _ = load_model_for_inference(args.model,
+                                             ckpt_path,
+                                             "cpu",
+                                             cache_dir=args.cache_dir)
+    model_best = model_best.to(device)
 
-  # 3. Collect features
-  logging.info("Extracting train features...")
-  train_features, train_labels = collect_features(model_best, train_proxy, device)
-  logging.info(f"  Train features shape: {train_features.shape}")
+    # 2. Rebuild train and val datasets with val transforms (not train augs)
+    xgb_processor = load_processor(
+        args.model,
+        image_size=args.image_size,
+        cache_dir=args.cache_dir,
+        **args.proc_arg,
+    )
+    val_transform = build_val_transform(xgb_processor, args.image_size)
+    train_proxy = HFDatasetProxy(train_ds, transform=val_transform)
+    val_proxy = HFDatasetProxy(val_ds, transform=val_transform)
 
-  logging.info("Extracting val features...")
-  val_features, val_labels = collect_features(model_best, val_proxy, device)
-  logging.info(f"  Val features shape: {val_features.shape}")
+    # 3. Collect features
+    logging.info("Extracting train features...")
+    train_features, train_labels = collect_features(model_best, train_proxy,
+                                                    device)
+    logging.info(f"  Train features shape: {train_features.shape}")
 
-  # 4. Free the model — XGBoost doesn't need it anymore
-  del model_best
-  gc.collect()
-  torch.cuda.empty_cache()
+    logging.info("Extracting val features...")
+    val_features, val_labels = collect_features(model_best, val_proxy, device)
+    logging.info(f"  Val features shape: {val_features.shape}")
 
-  # 5. Train XGBoost
-  xgb_model = train_xgboost(
-      train_features,
-      train_labels,
-      max_depth=args.xgb_max_depth,
-      n_estimators=args.xgb_n_estimators,
-      learning_rate=args.xgb_learning_rate,
-      subsample=args.xgb_subsample,
-      colsample_bytree=args.xgb_colsample_bytree,
-      min_child_weight=args.xgb_min_child_weight,
-      gamma=args.xgb_gamma,
-      reg_alpha=args.xgb_reg_alpha,
-  )
+    # 4. Free the model — XGBoost doesn't need it anymore
+    del model_best
+    gc.collect()
+    torch.cuda.empty_cache()
 
-  # 6. Evaluate on val set
-  val_metrics = eval_xgboost(xgb_model,
-                             val_features,
-                             val_labels,
-                             id2label=train_proxy.id2label)
-  logging.info(f"XGBoost val accuracy: {val_metrics['accuracy']:.2%}")
-  for cls, acc in val_metrics["per_class_accuracy"].items():
-    logging.info(f"  {cls}: {acc:.2%}")
-  logging.info(f"Classification report:\n{val_metrics['classification_report']}")
-  logging.info(f"Confusion matrix:\n{val_metrics['confusion_matrix']}")
+    # 5. Train XGBoost
+    xgb_model = train_xgboost(
+        train_features,
+        train_labels,
+        max_depth=args.xgb_max_depth,
+        n_estimators=args.xgb_n_estimators,
+        learning_rate=args.xgb_learning_rate,
+        subsample=args.xgb_subsample,
+        colsample_bytree=args.xgb_colsample_bytree,
+        min_child_weight=args.xgb_min_child_weight,
+        gamma=args.xgb_gamma,
+        reg_alpha=args.xgb_reg_alpha,
+    )
 
-  # 7. Save the XGBoost model
-  xgb_model.save_model(args.xgboost_model)
-  logging.info(f"XGBoost model saved: {args.xgboost_model}")
+    # 6. Evaluate on val set
+    val_metrics = eval_xgboost(xgb_model,
+                               val_features,
+                               val_labels,
+                               id2label=train_proxy.id2label)
+    logging.info(f"XGBoost val accuracy: {val_metrics['accuracy']:.2%}")
+    for cls, acc in val_metrics["per_class_accuracy"].items():
+      logging.info(f"  {cls}: {acc:.2%}")
+    logging.info(f"Classification report:\n"
+                 f"{val_metrics['classification_report']}")
+    logging.info(f"Confusion matrix:\n{val_metrics['confusion_matrix']}")
+
+    # 7. Save the XGBoost model
+    xgb_model.save_model(args.xgboost_model)
+    logging.info(f"XGBoost model saved: {args.xgboost_model}")
 
 
 def mixup_data(x, y, alpha=0.2):
