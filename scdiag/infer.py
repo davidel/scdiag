@@ -125,6 +125,7 @@ def main(argv=None):
       cache_dir=args.cache_dir,
       model_kwargs=args.model_arg,
       proc_kwargs=args.proc_arg,
+      image_size=args.image_size,
   )
   transform = build_val_transform(processor, args.image_size)
 

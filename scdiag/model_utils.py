@@ -67,11 +67,13 @@ def build_val_transform(processor, image_size):
 def load_model_for_inference(
     model_name,
     checkpoint_path,
+    *,
     device="cuda",
     cache_dir=None,
     model_kwargs=None,
     proc_kwargs=None,
     num_labels=None,
+    image_size,
 ):
   """Load a fine-tuned model ready for inference.
 
@@ -89,6 +91,7 @@ def load_model_for_inference(
         num_labels: Number of output classes.  When ``None`` the function
             recovers it from the checkpoint metadata (``num_labels`` or
             ``id2label``).
+        image_size: Input resolution (pixels).
 
     Returns:
         (model, processor) tuple.
@@ -117,7 +120,7 @@ def load_model_for_inference(
       num_labels=num_labels,
       id2label=id2label,
       label2id=label2id,
-      image_size=224,
+      image_size=image_size,
       device=torch.device(device),
       checkpoint_path=checkpoint_path,
       cache_dir=cache_dir,
@@ -138,7 +141,7 @@ def load_model_for_inference(
 
   processor = load_processor(
       model_name,
-      image_size=224,
+      image_size=image_size,
       cache_dir=cache_dir,
       **(proc_kwargs or {}),
   )

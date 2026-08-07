@@ -648,7 +648,8 @@ def train_xgboost_on_backbone(args, train_ds, val_ds, device, num_labels=None):
                                              ckpt_path,
                                              "cpu",
                                              cache_dir=args.cache_dir,
-                                             num_labels=num_labels)
+                                             num_labels=num_labels,
+                                             image_size=args.image_size)
     model_best = model_best.to(device)
 
     # 2. Rebuild train and val datasets with val transforms (not train augs)
