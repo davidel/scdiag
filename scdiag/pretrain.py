@@ -247,7 +247,6 @@ def train_one_epoch(
       msg = (f"  [Step {step + 1}/{total_batches}]"
              f" loss={w_loss:.4f} ({avg_loss_so_far:.4f})"
              f" lr={lr_now:.2e} img/s={throughput:.0f}"
-             f" mask_ratio={mask_ratio:.2f}"
              f" accum={grad_accum_steps}")
       logging.info(msg)
       if gpu:
