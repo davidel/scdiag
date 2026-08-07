@@ -526,9 +526,10 @@ def parse_args(argv=None):
 
 def main(argv=None):
   args = parse_args(argv)
+  setup_logging(args.log_level)
+
   args.amp_dtype = getattr(torch, args.amp_dtype, None) if args.amp_dtype else None
 
-  setup_logging(args.log_level)
   logging.info("=" * 60)
   logging.info("SimMIM pre-training for ConvViT")
   logging.info("=" * 60)

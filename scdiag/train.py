@@ -944,14 +944,13 @@ def evaluate_performance(model,
 
 def main():
   args = parse_args()
+  setup_logging(args.log_level)
 
   # Convert string amp_dtype to torch.dtype.
   args.amp_dtype = getattr(torch, args.amp_dtype, None) if args.amp_dtype else None
 
   states_to_save = parse_state_flags(args.state_save)
   states_to_load = parse_state_flags(args.state_load)
-
-  setup_logging(args.log_level)
 
   device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
   logging.info(f"Using device: {device}")
