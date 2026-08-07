@@ -17,19 +17,19 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import v2
 
 from scdiag.checkpointing import (
-    checkpoint_dict,
-    parse_state_flags,
-    resume_checkpoint,
+  checkpoint_dict,
+  parse_state_flags,
+  resume_checkpoint,
 )
 from scdiag.cli_utils import KVPairAction
 from scdiag.datasets.hf_proxy import HFDatasetProxy
-from scdiag.storage_utils import save_checkpoint
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.grad_monitor import GradMonitor
 from scdiag.logging_utils import fatal, setup_logging
 from scdiag.models import load_model, load_processor
 from scdiag.optim_factory import create_optimizer, create_scheduler
 from scdiag.script_utils import load_extern
+from scdiag.storage_utils import save_checkpoint
 
 
 def parse_class_multipliers(s, num_labels, label2id):
@@ -488,6 +488,15 @@ def parse_args(argv=None):
       help="Path to a SimMIM pre-training checkpoint. Encoder weights are "
       "loaded (with shape-mismatched keys skipped) before training starts. "
       "Typically produced by scdiag-pretrain.",
+  )
+  parser.add_argument(
+      "--param_rename",
+      nargs="+",
+      default=None,
+      help="Regex-based key rename patterns for --pretrained_encoder. "
+      "Each pattern is 'SEARCH;REPLACE' where SEARCH is a Python regex "
+      "and REPLACE may use $1, $2, … for capture groups. "
+      "Example: 'encoder\\.(.*);model\\.$1'.",
   )
 
   parser.add_argument(
@@ -1017,12 +1026,15 @@ def main():
     from scdiag.checkpointing import load_checkpoint_weights
 
     logging.info(f"Loading pre-trained encoder from: {args.pretrained_encoder}")
+    if args.param_rename:
+      logging.info(f"  Key renames: {args.param_rename}")
     load_checkpoint_weights(
         args.pretrained_encoder,
         model,
         device=device,
         strict=False,
         exclude_prefixes=["head.", "cls_guided_pool.", "classifier."],
+        param_rename=args.param_rename,
     )
 
   total_params = sum(p.numel() for p in model.parameters())

@@ -6,10 +6,47 @@ Both scripts import these functions rather than maintaining separate copies.
 
 import logging
 import os
+import re
 
 import torch
 
 from scdiag.logging_utils import fatal
+
+
+def rename_keys(state_dict, patterns):
+  """Apply regex-based key renaming to a state dict.
+
+    Each pattern is a string ``SEARCH;REPLACE`` where *SEARCH* is a
+    Python regex and *REPLACE* is a replacement string that may use
+    ``$1``, ``$2``, … for capture groups.
+
+    Patterns are applied in order.  The last pattern wins for any key
+    that matches multiple patterns.
+
+    Args:
+        state_dict: The state dictionary to rename keys on.
+        patterns: List of ``"search;replace"`` strings.
+
+    Returns:
+        A new dictionary with renamed keys.
+  """
+  compiled = []
+  for pat_str in patterns:
+    if ";" not in pat_str:
+      fatal(
+          f"Invalid --param_rename pattern {pat_str!r}: "
+          "expected 'SEARCH;REPLACE'.", ValueError)
+    search, replace = pat_str.split(";", 1)
+    compiled.append((re.compile(search), replace))
+
+  new_state = {}
+  for key, value in state_dict.items():
+    new_key = key
+    for regex, replacement in compiled:
+      new_key = regex.sub(replacement, new_key)
+    new_state[new_key] = value
+  return new_state
+
 
 _VALID_STATE_FLAGS = {"opt", "sched", "amp", "none"}
 
@@ -115,7 +152,8 @@ def checkpoint_dict(model,
   if states_to_save is None or "opt" in states_to_save:
     d["optimizer_state_dict"] = optimizer.state_dict()
   if states_to_save is None or "sched" in states_to_save:
-    d["scheduler_state_dict"] = scheduler.state_dict() if scheduler is not None else None
+    d["scheduler_state_dict"] = scheduler.state_dict(
+    ) if scheduler is not None else None
   if "amp" in states_to_save:
     d["scaler_state_dict"] = scaler.state_dict() if scaler is not None else None
   d.update(extra)
@@ -228,7 +266,8 @@ def load_checkpoint_weights(path,
                             model,
                             device="cpu",
                             strict=False,
-                            exclude_prefixes=None):
+                            exclude_prefixes=None,
+                            param_rename=None):
   """Load model weights from a checkpoint, with optional key filtering.
 
     Useful for loading a pre-trained encoder into a model that may have
@@ -242,10 +281,13 @@ def load_checkpoint_weights(path,
         strict: If True, raise on missing/unexpected keys.
         exclude_prefixes: Optional list of key prefixes to skip
             (e.g. ``["decoder.", "head."]``).
+        param_rename: Optional list of ``"SEARCH;REPLACE"`` patterns
+            for renaming checkpoint keys via regex (see
+            :func:`rename_keys`).
 
     Returns:
         A ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys``.
-    """
+  """
   if not os.path.isfile(path):
     fatal(
         f"Checkpoint file not found: {path}. "
@@ -270,6 +312,9 @@ def load_checkpoint_weights(path,
         for k, v in state.items()
         if not any(k.startswith(p) for p in exclude_prefixes)
     }
+
+  if param_rename:
+    state = rename_keys(state, param_rename)
 
   filtered, skipped = filter_state_dict(state, model.state_dict())
   if skipped:
