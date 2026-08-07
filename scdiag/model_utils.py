@@ -1,6 +1,7 @@
 """Shared model loading and preprocessing utilities."""
 
 import logging
+from contextlib import contextmanager
 
 import numpy as np
 import torch
@@ -10,6 +11,30 @@ from torchvision.transforms.functional import InterpolationMode
 
 from scdiag.logging_utils import fatal
 from scdiag.models import load_model, load_processor
+
+
+@contextmanager
+def model_mode(model, mode):
+  """Context manager to temporarily set a model's training mode.
+
+    Args:
+        model: A ``torch.nn.Module``.
+        mode: Either ``"train"`` or ``"eval"``.
+
+    Yields the model itself so callers can write::
+
+        with model_mode(model, "eval"):
+            out = model(x)
+  """
+  was_training = model.training
+  try:
+    model.train(mode == "train")
+    yield model
+  finally:
+    if was_training:
+      model.train()
+    else:
+      model.eval()
 
 
 def _find_head_module(model):
@@ -166,14 +191,8 @@ def extract_backbone_features(model, pixel_values):
         ValueError: if no ``classifier`` attribute is found and the model
                     does not implement the protocol method.
     """
-  # Temporarily switch to eval mode for deterministic features.
-  was_training = model.training
-  model.eval()
-  try:
+  with model_mode(model, "eval"):
     return _extract_backbone_features_impl(model, pixel_values)
-  finally:
-    if was_training:
-      model.train()
 
 
 def _extract_backbone_features_impl(model, pixel_values):
