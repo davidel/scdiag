@@ -2,11 +2,11 @@
 
 Usage::
 
-    scdiag-pretrain \\
-        --datasets "HAM10000" "redlessone/Derm1M" \\
-        --image_size 448 \\
-        --batch_size 32 \\
-        --epochs 200 \\
+    scdiag-pretrain \
+        --datasets "HAM10000" "redlessone/Derm1M" \
+        --image_size 448 \
+        --batch_size 32 \
+        --epochs 200 \
         --output_dir ./checkpoints/pretrain
 
 The script trains the full ConvViT encoder (ConvNet stem + transformer) to
