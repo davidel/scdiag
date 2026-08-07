@@ -4,9 +4,7 @@ import argparse
 import gc
 import logging
 import os
-import tempfile
 import time
-import urllib.request
 
 import datasets
 import numpy as np
@@ -31,6 +29,7 @@ from scdiag.grad_monitor import GradMonitor
 from scdiag.logging_utils import fatal, setup_logging
 from scdiag.models import load_model, load_processor
 from scdiag.optim_factory import create_optimizer, create_scheduler
+from scdiag.script_utils import load_extern
 
 
 def parse_class_multipliers(s, num_labels, label2id):
@@ -160,34 +159,8 @@ def load_augmentation_script(path_or_url):
         FileNotFoundError: If a local path does not exist.
         ValueError: If the script does not define a callable
             ``create_train_transform``.
-    """
-  namespace = {}
-
-  if path_or_url.startswith(("http://", "https://")):
-    with urllib.request.urlopen(path_or_url) as resp:
-      code = resp.read().decode("utf-8")
-    # Use a named temp file so tracebacks show a meaningful filename.
-    with tempfile.NamedTemporaryFile(mode="w",
-                                     suffix=".py",
-                                     delete=False,
-                                     prefix="aug_") as tmp:
-      tmp.write(code)
-      tmp_path = tmp.name
-    try:
-      exec(compile(code, path_or_url, "exec"), namespace)  # noqa: S102
-    finally:
-      os.unlink(tmp_path)
-  else:
-    with open(path_or_url) as f:
-      code = f.read()
-    exec(compile(code, path_or_url, "exec"), namespace)  # noqa: S102
-
-  fn = namespace.get("create_train_transform")
-  if fn is None or not callable(fn):
-    fatal(
-        f"Script {path_or_url!r} does not define a callable "
-        "'create_train_transform(image_size, **kwargs)'.", ValueError)
-  return fn
+  """
+  return load_extern(path_or_url, "create_train_transform")
 
 
 def build_transforms(processor, image_size, train_aug_fn=None):

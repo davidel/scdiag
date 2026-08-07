@@ -5,13 +5,11 @@ scheduler creation with configurable versions driven by CLI arguments.
 """
 
 import logging
-import os
-import tempfile
-import urllib.request
 
 import torch.optim as optim
 
 from scdiag.logging_utils import fatal
+from scdiag.script_utils import extern_call
 
 
 def create_optimizer(params, *, name="AdamW", lr=1e-4, weight_decay=0.01, **kwargs):
@@ -101,32 +99,5 @@ def _load_scheduler_script(optimizer, path_or_url, **extra):
 
     The script must define a callable
     ``create_scheduler(optimizer, **kwargs)``.
-    """
-  namespace = {}
-
-  if path_or_url.startswith(("http://", "https://")):
-    with urllib.request.urlopen(path_or_url) as resp:
-      code = resp.read().decode("utf-8")
-    with tempfile.NamedTemporaryFile(mode="w",
-                                     suffix=".py",
-                                     delete=False,
-                                     prefix="sched_") as tmp:
-      tmp.write(code)
-      tmp_path = tmp.name
-    try:
-      exec(compile(code, path_or_url, "exec"), namespace)  # noqa: S102
-    finally:
-      os.unlink(tmp_path)
-  else:
-    with open(path_or_url) as f:
-      code = f.read()
-    exec(compile(code, path_or_url, "exec"), namespace)  # noqa: S102
-
-  fn = namespace.get("create_scheduler")
-  if fn is None or not callable(fn):
-    fatal(
-        f"Script {path_or_url!r} does not define a callable "
-        "'create_scheduler(optimizer, **kwargs)'.", ValueError)
-
-  logging.info("Loading custom scheduler from %s", path_or_url)
-  return fn(optimizer, **extra)
+  """
+  return extern_call(path_or_url, "create_scheduler", optimizer, **extra)
