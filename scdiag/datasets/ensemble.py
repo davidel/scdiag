@@ -77,13 +77,12 @@ class _HFDataset:
       image = Image.open(image)
     image = image.convert("RGB")
     if (self.min_resolution is not None and
-        (image.width < self.min_resolution or
-         image.height < self.min_resolution)):
+        (image.width < self.min_resolution or image.height < self.min_resolution)):
       fatal(f"Image too small: {image.size}, min={self.min_resolution}", IndexError)
     return image
 
 
-class DermoscopyEnsemble:
+class DatasetEnsemble:
   """Concatenation of multiple skin-lesion image datasets.
 
     Each constituent dataset is loaded lazily.  Images are returned as RGB
@@ -206,10 +205,8 @@ class DermoscopyEnsemble:
   def summary(self):
     """Return a human-readable summary of the ensemble."""
     self._ensure_loaded()
-    lines = [
-        (f"DermoscopyEnsemble: {len(self):,} images from "
-         f"{len(self._datasets)} dataset(s)")
-    ]
+    lines = [(f"DatasetEnsemble: {len(self):,} images from "
+              f"{len(self._datasets)} dataset(s)")]
     for i, ds in enumerate(self._datasets):
       lines.append(f"  [{i}] {ds.name}: {len(ds):,} images")
     return "\n".join(lines)

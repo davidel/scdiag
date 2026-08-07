@@ -32,7 +32,7 @@ from scdiag.checkpointing import (
     resume_checkpoint,
 )
 from scdiag.cli_utils import KVPairAction
-from scdiag.datasets.ensemble import DermoscopyEnsemble
+from scdiag.datasets.ensemble import DatasetEnsemble
 from scdiag.gcs_utils import save_checkpoint
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.grad_monitor import GradMonitor
@@ -57,7 +57,7 @@ def build_pretrain_transform(image_size=448):
 
 
 class _TransformWrapper:
-  """Apply a transform to a PIL image returned by DermoscopyEnsemble."""
+  """Apply a transform to a PIL image returned by DatasetEnsemble."""
 
   def __init__(self, dataset, transform):
     self._dataset = dataset
@@ -71,7 +71,7 @@ class _TransformWrapper:
 
 
 def build_pretrain_dataset(args):
-  """Build the DermoscopyEnsemble + transform pipeline."""
+  """Build the DatasetEnsemble + transform pipeline."""
   configs = []
   for name in args.datasets:
     name = name.strip()
@@ -94,7 +94,7 @@ def build_pretrain_dataset(args):
   if not configs:
     fatal("No datasets specified. Use --datasets <name1> <name2> ...", ValueError)
 
-  ensemble = DermoscopyEnsemble(
+  ensemble = DatasetEnsemble(
       configs,
       cache_dir=args.cache_dir,
       hf_token=args.hf_token,

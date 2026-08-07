@@ -1,9 +1,9 @@
-"""Tests for the DermoscopyEnsemble dataset."""
+"""Tests for the DatasetEnsemble dataset."""
 
 import pytest
 from PIL import Image
 
-from scdiag.datasets.ensemble import DermoscopyEnsemble
+from scdiag.datasets.ensemble import DatasetEnsemble
 from scdiag.datasets.image_folder import ImageFolderDataset
 
 
@@ -25,7 +25,7 @@ class TestImageFolderDataset:
     assert len(ds) == 0
 
 
-class TestDermoscopyEnsemble:
+class TestDatasetEnsemble:
 
   def test_imagefolder_ensemble(self, tmp_path):
     """Ensemble of two local image directories."""
@@ -48,7 +48,7 @@ class TestDermoscopyEnsemble:
             "source": "imagefolder"
         },
     ]
-    ensemble = DermoscopyEnsemble(configs)
+    ensemble = DatasetEnsemble(configs)
     assert len(ensemble) == 7
     assert ensemble.num_datasets == 2
 
@@ -63,7 +63,7 @@ class TestDermoscopyEnsemble:
     d.mkdir()
     for i in range(2):
       Image.new("RGB", (64, 64)).save(d / f"{i}.png")
-    ensemble = DermoscopyEnsemble([{"name": str(d), "source": "imagefolder"}])
+    ensemble = DatasetEnsemble([{"name": str(d), "source": "imagefolder"}])
     s = ensemble.summary()
     assert "2 images" in s
     assert "1 dataset" in s
@@ -71,12 +71,12 @@ class TestDermoscopyEnsemble:
   def test_graceful_failure(self, tmp_path):
     """Best-effort loading reports an error when every source fails."""
     configs = [{"name": "/nonexistent/path", "source": "imagefolder"}]
-    ensemble = DermoscopyEnsemble(configs)
+    ensemble = DatasetEnsemble(configs)
     with pytest.raises(RuntimeError, match="No datasets loaded"):
       len(ensemble)
 
   def test_empty_config(self):
-    ensemble = DermoscopyEnsemble([])
+    ensemble = DatasetEnsemble([])
     with pytest.raises(RuntimeError, match="No datasets loaded"):
       len(ensemble)
 
@@ -86,7 +86,7 @@ class TestDermoscopyEnsemble:
     d.mkdir()
     Image.new("RGB", (8, 8)).save(d / "small.png")
     Image.new("RGB", (64, 64)).save(d / "large.png")
-    ensemble = DermoscopyEnsemble([{
+    ensemble = DatasetEnsemble([{
         "name": str(d),
         "source": "imagefolder",
         "min_resolution": 32,
@@ -99,6 +99,6 @@ class TestDermoscopyEnsemble:
     d = tmp_path / "data"
     d.mkdir()
     Image.new("RGB", (64, 64)).save(d / "img.png")
-    ensemble = DermoscopyEnsemble([{"name": str(d), "source": "imagefolder"}])
+    ensemble = DatasetEnsemble([{"name": str(d), "source": "imagefolder"}])
     with pytest.raises(IndexError, match="out of range"):
       ensemble[9999]
