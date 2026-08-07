@@ -17,9 +17,9 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import v2
 
 from scdiag.checkpointing import (
-  checkpoint_dict,
-  parse_state_flags,
-  resume_checkpoint,
+    checkpoint_dict,
+    parse_state_flags,
+    resume_checkpoint,
 )
 from scdiag.cli_utils import KVPairAction
 from scdiag.datasets.hf_proxy import HFDatasetProxy
@@ -616,7 +616,7 @@ def parse_args(argv=None):
   return parser.parse_args(argv)
 
 
-def train_xgboost_on_backbone(args, train_ds, val_ds, device):
+def train_xgboost_on_backbone(args, train_ds, val_ds, device, num_labels=None):
   """Train XGBoost on backbone features after PyTorch training completes.
 
     Args:
@@ -624,6 +624,7 @@ def train_xgboost_on_backbone(args, train_ds, val_ds, device):
         train_ds: Training HF Dataset (raw, before proxy wrapping).
         val_ds: Validation HF Dataset (raw, before proxy wrapping).
         device: torch device.
+        num_labels: Number of output classes (forwarded to model loader).
     """
   from scdiag.datasets.hf_proxy import HFDatasetProxy
   from scdiag.model_utils import (
@@ -646,7 +647,8 @@ def train_xgboost_on_backbone(args, train_ds, val_ds, device):
     model_best, _ = load_model_for_inference(args.model,
                                              ckpt_path,
                                              "cpu",
-                                             cache_dir=args.cache_dir)
+                                             cache_dir=args.cache_dir,
+                                             num_labels=num_labels)
     model_best = model_best.to(device)
 
     # 2. Rebuild train and val datasets with val transforms (not train augs)
@@ -662,8 +664,7 @@ def train_xgboost_on_backbone(args, train_ds, val_ds, device):
 
     # 3. Collect features
     logging.info("Extracting train features...")
-    train_features, train_labels = collect_features(model_best, train_proxy,
-                                                    device)
+    train_features, train_labels = collect_features(model_best, train_proxy, device)
     logging.info(f"  Train features shape: {train_features.shape}")
 
     logging.info("Extracting val features...")
@@ -1192,7 +1193,11 @@ def main():
 
     if args.xgboost_model:
       # Access raw HF datasets (before proxy wrapping) for XGBoost.
-      train_xgboost_on_backbone(args, train_proxy.dataset, val_proxy.dataset, device)
+      train_xgboost_on_backbone(args,
+                                train_proxy.dataset,
+                                val_proxy.dataset,
+                                device,
+                                num_labels=num_labels)
 
 
 if __name__ == "__main__":

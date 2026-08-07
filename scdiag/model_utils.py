@@ -71,6 +71,7 @@ def load_model_for_inference(
     cache_dir=None,
     model_kwargs=None,
     proc_kwargs=None,
+    num_labels=None,
 ):
   """Load a fine-tuned model ready for inference.
 
@@ -85,36 +86,29 @@ def load_model_for_inference(
             :func:`load_model` (e.g. ``{"depth": 6}``).
         proc_kwargs: Optional dict of extra kwargs forwarded to
             :func:`load_processor`.
+        num_labels: Number of output classes.  When ``None`` the function
+            recovers it from the checkpoint metadata (``num_labels`` or
+            ``id2label``).
 
     Returns:
         (model, processor) tuple.
     """
   ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
-  if "model_state_dict" in ckpt:
-    state_dict = ckpt["model_state_dict"]
-  else:
-    logging.warning(
-        "Loading raw state dictionary from '%s'; checkpoint metadata is "
-        "unavailable.", checkpoint_path)
-    state_dict = ckpt
 
-  # Infer num_labels from the checkpoint's classifier head.
-  num_labels = None
-  head_keys = ("classifier.weight", "head.3.weight", "head.weight", "model.head.weight")
-  for key in head_keys:
-    if key in state_dict:
-      num_labels = state_dict[key].shape[0]
-      break
+  # --- Resolve num_labels (priority: explicit > checkpoint metadata) ---
+  if num_labels is None:
+    num_labels = ckpt.get("num_labels")
+  if num_labels is None and "id2label" in ckpt:
+    num_labels = len(ckpt["id2label"])
   if num_labels is None:
     fatal(
         "Cannot infer num_labels from checkpoint. "
-        f"Keys present: {list(state_dict.keys())[:10]}", ValueError)
+        "Expected 'num_labels' or 'id2label' in checkpoint metadata.", ValueError)
 
   # Load id2label mapping from checkpoint if available.
-  id2label = None
+  id2label = ckpt.get("id2label")
   label2id = None
-  if "id2label" in ckpt:
-    id2label = ckpt["id2label"]
+  if id2label is not None:
     label2id = {v: k for k, v in id2label.items()}
 
   # Use the unified registry — it dispatches to HF or custom transparently.

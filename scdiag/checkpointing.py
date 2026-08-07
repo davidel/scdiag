@@ -178,8 +178,12 @@ def checkpoint_dict(model,
       "model_state_dict": model.state_dict(),
       "epoch": epoch,
   }
-  if hasattr(model, "config") and hasattr(model.config, "id2label"):
-    d["id2label"] = model.config.id2label
+  # Persist num_labels so downstream loaders never need to guess.
+  if hasattr(model, "config"):
+    if hasattr(model.config, "num_labels"):
+      d["num_labels"] = model.config.num_labels
+    if hasattr(model.config, "id2label"):
+      d["id2label"] = model.config.id2label
   if states_to_save is None or "opt" in states_to_save:
     d["optimizer_state_dict"] = optimizer.state_dict()
   if states_to_save is None or "sched" in states_to_save:
