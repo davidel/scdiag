@@ -46,6 +46,10 @@ class ConvPatchEmbeddingBlock(nn.Module):
     x = F.gelu(self.bn1(self.conv1(x)))
     x = self.bn2(self.conv2(x))
     skip = self.skip_bn(self.skip_proj(self.skip_pool(identity)))
+    # conv2 (kernel=3, stride=2, pad=1) and AvgPool2d(2, 2) disagree
+    # by 1 px on odd spatial dims.  Crop the larger to match.
+    if x.shape[-2:] != skip.shape[-2:]:
+      x = x[:, :, :skip.shape[-2], :skip.shape[-1]]
     return F.gelu(x + skip)
 
 
