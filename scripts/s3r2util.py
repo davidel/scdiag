@@ -19,6 +19,7 @@ import sys
 
 import boto3
 from botocore.exceptions import ClientError
+from tqdm import tqdm
 
 
 def fatal(msg, code=1):
@@ -101,7 +102,14 @@ def handle_cp(args, s3_client):
   try:
     if not src_bucket and dst_bucket:
       print(f"Uploading {args.source} -> r2://{dst_bucket}/{dst_key}")
-      s3_client.upload_file(args.source, dst_bucket, dst_key)
+      if args.progress:
+        file_size = os.path.getsize(args.source)
+        with tqdm(total=file_size, unit="B", unit_scale=True,
+                  desc="Upload") as pbar:
+          s3_client.upload_file(args.source, dst_bucket, dst_key,
+                                Callback=pbar.update)
+      else:
+        s3_client.upload_file(args.source, dst_bucket, dst_key)
       print("Upload complete.")
 
     elif src_bucket and not dst_bucket:
@@ -109,13 +117,29 @@ def handle_cp(args, s3_client):
       local_dir = os.path.dirname(args.destination)
       if local_dir:
         os.makedirs(local_dir, exist_ok=True)
-      s3_client.download_file(src_bucket, src_key, args.destination)
+      if args.progress:
+        head = s3_client.head_object(Bucket=src_bucket, Key=src_key)
+        total = head["ContentLength"]
+        with tqdm(total=total, unit="B", unit_scale=True,
+                  desc="Download") as pbar:
+          s3_client.download_file(src_bucket, src_key, args.destination,
+                                  Callback=pbar.update)
+      else:
+        s3_client.download_file(src_bucket, src_key, args.destination)
       print("Download complete.")
 
     elif src_bucket and dst_bucket:
       print(f"Copying r2://{src_bucket}/{src_key} -> r2://{dst_bucket}/{dst_key}")
       copy_source = {"Bucket": src_bucket, "Key": src_key}
-      s3_client.copy(copy_source, dst_bucket, dst_key)
+      if args.progress:
+        head = s3_client.head_object(Bucket=src_bucket, Key=src_key)
+        total = head["ContentLength"]
+        with tqdm(total=total, unit="B", unit_scale=True,
+                  desc="Copy") as pbar:
+          s3_client.copy(copy_source, dst_bucket, dst_key,
+                         Callback=pbar.update)
+      else:
+        s3_client.copy(copy_source, dst_bucket, dst_key)
       print("Remote copy complete.")
 
     else:
@@ -173,6 +197,8 @@ def main():
                          help="Source file path (local path or r2://bucket/key)")
   parser_cp.add_argument("destination",
                          help="Destination file path (local path or r2://bucket/key)")
+  parser_cp.add_argument("--progress", action="store_true",
+                         help="Show a progress bar during transfer")
   parser_cp.set_defaults(func=handle_cp)
 
   parser_rm = subparsers.add_parser(
