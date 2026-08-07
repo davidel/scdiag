@@ -100,7 +100,8 @@ def load_model_for_inference(
 
   # Infer num_labels from the checkpoint's classifier head.
   num_labels = None
-  for key in ("classifier.weight", "head.3.weight", "head.weight"):
+  head_keys = ("classifier.weight", "head.3.weight", "head.weight", "model.head.weight")
+  for key in head_keys:
     if key in state_dict:
       num_labels = state_dict[key].shape[0]
       break
