@@ -29,7 +29,6 @@ from scdiag.gcs_utils import save_checkpoint
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.grad_monitor import GradMonitor
 from scdiag.logging_utils import fatal, setup_logging
-from scdiag.model_utils import DTYPE_MAP
 from scdiag.models import load_model, load_processor
 from scdiag.optim_factory import create_optimizer, create_scheduler
 
@@ -947,7 +946,7 @@ def main():
   args = parse_args()
 
   # Convert string amp_dtype to torch.dtype.
-  args.amp_dtype = DTYPE_MAP.get(args.amp_dtype, args.amp_dtype)
+  args.amp_dtype = getattr(torch, args.amp_dtype, None) if args.amp_dtype else None
 
   states_to_save = parse_state_flags(args.state_save)
   states_to_load = parse_state_flags(args.state_load)

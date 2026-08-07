@@ -37,7 +37,6 @@ from scdiag.gcs_utils import save_checkpoint
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.grad_monitor import GradMonitor
 from scdiag.logging_utils import fatal, setup_logging
-from scdiag.model_utils import DTYPE_MAP
 from scdiag.models.convvit.masked_encoder import ConvViTMaskedImageEncoder
 from scdiag.models.registry import load_model
 from scdiag.models.simmim import SimMIM, random_mask, simmim_loss, unpatchify
@@ -527,7 +526,7 @@ def parse_args(argv=None):
 
 def main(argv=None):
   args = parse_args(argv)
-  args.amp_dtype = DTYPE_MAP.get(args.amp_dtype, args.amp_dtype)
+  args.amp_dtype = getattr(torch, args.amp_dtype, None) if args.amp_dtype else None
 
   setup_logging(args.log_level)
   logging.info("=" * 60)

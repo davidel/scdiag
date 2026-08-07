@@ -11,11 +11,6 @@ from torchvision.transforms.functional import InterpolationMode
 from scdiag.logging_utils import fatal
 from scdiag.models import load_model, load_processor
 
-DTYPE_MAP = {
-    "float16": torch.float16,
-    "bfloat16": torch.bfloat16,
-}
-
 
 def _find_head_module(model):
   """Locate the classification head on a model.
