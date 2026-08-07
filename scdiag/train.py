@@ -23,7 +23,7 @@ from scdiag.checkpointing import (
 )
 from scdiag.cli_utils import KVPairAction
 from scdiag.datasets.hf_proxy import HFDatasetProxy
-from scdiag.gcs_utils import save_checkpoint
+from scdiag.storage_utils import save_checkpoint
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.grad_monitor import GradMonitor
 from scdiag.logging_utils import fatal, setup_logging
@@ -491,10 +491,10 @@ def parse_args(argv=None):
   )
 
   parser.add_argument(
-      "--gcs_checkpoint",
+      "--remote_checkpoint",
       type=str,
-      help="GCS URI to sync checkpoints to "
-      "(format: gs://BUCKET/PREFIX).",
+      help="Remote URI to sync checkpoints to "
+      "(format: gs://BUCKET/PREFIX or r2://BUCKET/PREFIX).",
   )
 
   xgb_group = parser.add_argument_group("xgboost")
@@ -1142,7 +1142,7 @@ def main():
                 best_top1=best_top1,
             ),
             args.checkpoint + "_best.pt",
-            gcs_uri=args.gcs_checkpoint,
+            remote_uri=args.remote_checkpoint,
         )
         logging.info(f"New best Top1, checkpoint saved: {best_top1:.2f}%")
 
@@ -1161,7 +1161,7 @@ def main():
             best_top1=best_top1,
         ),
         args.checkpoint + "_latest.pt",
-        gcs_uri=args.gcs_checkpoint,
+        remote_uri=args.remote_checkpoint,
     )
     logging.info("Checkpoint saved on exit.")
     writer.close()

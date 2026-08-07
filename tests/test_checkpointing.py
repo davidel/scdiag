@@ -9,7 +9,7 @@ from scdiag.checkpointing import (
     resume_checkpoint,
     load_checkpoint_weights,
 )
-from scdiag.gcs_utils import save_checkpoint
+from scdiag.storage_utils import save_checkpoint
 
 
 class TestFilterStateDict:

@@ -182,10 +182,10 @@ class TestParseArgs:
     args = train_mod.parse_args([])
     assert args.checkpoint == "scdiag"
 
-  def test_gcs_checkpoint(self):
+  def test_remote_checkpoint(self):
     train_mod = _import_train()
     args = train_mod.parse_args([
-        "--gcs_checkpoint",
+        "--remote_checkpoint",
         "gs://my-bucket/prefix",
     ])
-    assert args.gcs_checkpoint == "gs://my-bucket/prefix"
+    assert args.remote_checkpoint == "gs://my-bucket/prefix"

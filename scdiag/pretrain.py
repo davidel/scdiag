@@ -33,7 +33,7 @@ from scdiag.checkpointing import (
 )
 from scdiag.cli_utils import KVPairAction
 from scdiag.datasets.ensemble import DatasetEnsemble
-from scdiag.gcs_utils import save_checkpoint
+from scdiag.storage_utils import save_checkpoint
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.grad_monitor import GradMonitor
 from scdiag.logging_utils import fatal, setup_logging
@@ -398,11 +398,10 @@ def parse_args(argv=None):
       "automatically.",
   )
   parser.add_argument(
-      "--gcs_checkpoint",
+      "--remote_checkpoint",
       type=str,
-      help="GCS URI to sync checkpoints to "
-      "(format: gs://BUCKET/PREFIX). Requires "
-      "google-cloud-storage package.",
+      help="Remote URI to sync checkpoints to "
+      "(format: gs://BUCKET/PREFIX or r2://BUCKET/PREFIX).",
   )
   parser.add_argument(
       "--resume",
@@ -666,7 +665,7 @@ def main(argv=None):
               loss=avg_loss,
           ),
           args.checkpoint + "_latest.pt",
-          gcs_uri=args.gcs_checkpoint,
+          remote_uri=args.remote_checkpoint,
       )
 
   except KeyboardInterrupt:
@@ -682,7 +681,7 @@ def main(argv=None):
             loss=avg_loss if "avg_loss" in dir() else 0.0,
         ),
         args.checkpoint + "_latest.pt",
-        gcs_uri=args.gcs_checkpoint,
+        remote_uri=args.remote_checkpoint,
     )
     logging.info("Checkpoint saved on exit.")
     writer.close()
