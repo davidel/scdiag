@@ -11,6 +11,7 @@ import re
 import torch
 
 from scdiag.logging_utils import fatal
+from scdiag.param_align import AlignConfig, _report_to_str, align_state_dicts
 
 
 def rename_keys(state_dict, patterns):
@@ -301,27 +302,26 @@ def load_checkpoint_weights(path,
                             model,
                             device="cpu",
                             strict=False,
-                            exclude_prefixes=None,
-                            param_rename=None):
-  """Load model weights from a checkpoint, with optional key filtering.
+                            param_rename=None,
+                            max_distance=None):
+  """Load model weights from a source checkpoint, aligned by shape.
 
-    Useful for loading a pre-trained encoder into a model that may have
-    different head/pooling layers (e.g. loading SimMIM encoder weights
-    into a ConvViTForClassification).
+    ``align_state_dicts`` matches source keys to model keys by tensor
+    shape and weighted token distance.  ``param_rename`` patterns are
+    applied *before* alignment so that manual renames take priority.
 
     Args:
         path: Path to the checkpoint file.
         model: The model to load weights into.
         device: Device to map tensors to.
         strict: If True, raise on missing/unexpected keys.
-        exclude_prefixes: Optional list of key prefixes to skip
-            (e.g. ``["decoder.", "head."]``).
         param_rename: Optional list of ``"SEARCH;REPLACE"`` patterns
-            for renaming checkpoint keys via regex (see
-            :func:`rename_keys`).
+            for renaming checkpoint keys via regex before alignment.
+        max_distance: Override for ``AlignConfig.max_distance``.
+            ``None`` uses the default (0.25).
 
     Returns:
-        A ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys``.
+        The ``AlignReport`` produced by :func:`align_state_dicts`.
   """
   if not os.path.isfile(path):
     fatal(
@@ -331,8 +331,6 @@ def load_checkpoint_weights(path,
 
   ckpt = torch.load(path, map_location=device, weights_only=True)
 
-  # Accept either raw state_dict or wrapped checkpoint. This helper loads
-  # model weights only, so use the safe tensor-only deserializer.
   if "model_state_dict" in ckpt:
     state = ckpt["model_state_dict"]
   else:
@@ -341,25 +339,26 @@ def load_checkpoint_weights(path,
         "unavailable.", path)
     state = ckpt
 
-  if exclude_prefixes:
-    state = {
-        k: v
-        for k, v in state.items()
-        if not any(k.startswith(p) for p in exclude_prefixes)
-    }
-
   if param_rename:
     state = rename_keys(state, param_rename)
 
-  filtered, skipped = filter_state_dict(state, model.state_dict())
-  if skipped:
-    for k, reason in skipped:
-      logging.warning(f"  Skipped key '{k}': {reason}")
+  config_kwargs = {}
+  if max_distance is not None:
+    config_kwargs["max_distance"] = max_distance
+  config = AlignConfig(**config_kwargs) if config_kwargs else None
 
-  result = model.load_state_dict(filtered, strict=strict)
+  report = align_state_dicts(state, model.state_dict(), config=config)
+
+  logging.info(_report_to_str(report))
+
+  aligned = {}
+  for new_key, old_key in report.mapping.items():
+    aligned[new_key] = state[old_key]
+
+  result = model.load_state_dict(aligned, strict=strict)
   logging.info(f"  Loaded weights from {path}")
   if result.missing_keys:
     logging.warning(f"  Missing keys: {result.missing_keys}")
   if result.unexpected_keys:
     logging.warning(f"  Unexpected keys: {result.unexpected_keys}")
-  return result
+  return report

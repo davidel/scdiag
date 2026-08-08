@@ -1,12 +1,11 @@
 """Tests for the shared checkpointing utilities."""
 
 import os
-import pytest
+
 import torch
 
 from scdiag.checkpointing import (
     filter_state_dict,
-    resume_checkpoint,
     load_checkpoint_weights,
 )
 from scdiag.storage_utils import save_checkpoint
@@ -63,12 +62,12 @@ class TestLoadCheckpointWeights:
     new_model = nn.Linear(10, 5)
     load_checkpoint_weights(path, new_model)
 
-  def test_excludes_prefixes(self, tmp_path):
+  def test_skips_shape_mismatch(self, tmp_path):
+    """Keys with wrong shapes are silently skipped by alignment."""
     import torch.nn as nn
-    model = nn.Sequential(nn.Linear(10, 5), nn.Linear(5, 3))
-    state = model.state_dict()
+    model = nn.Linear(10, 5)
     path = str(tmp_path / "model.pt")
-    torch.save(state, path)
-    new_model = nn.Sequential(nn.Linear(10, 5), nn.Linear(5, 3))
-    # Load only layer.0 weights
-    load_checkpoint_weights(path, new_model, exclude_prefixes=["1."])
+    torch.save({"model_state_dict": model.state_dict()}, path)
+    new_model = nn.Linear(10, 8)  # different output dim
+    report = load_checkpoint_weights(path, new_model)
+    assert report.unused_old or report.unmatched_new

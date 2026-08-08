@@ -11,7 +11,7 @@ Usage::
 
 The script trains the full ConvViT encoder (ConvNet stem + transformer) to
 reconstruct masked image patches.  After training, the encoder weights can
-be loaded into a classification model via ``--pretrained_encoder`` in
+be loaded into a classification model via ``--source_checkpoint`` in
 ``scdiag-train``.
 """
 
@@ -33,7 +33,6 @@ from scdiag.checkpointing import (
 )
 from scdiag.cli_utils import KVPairAction
 from scdiag.datasets.ensemble import DatasetEnsemble
-from scdiag.storage_utils import save_checkpoint
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.grad_monitor import GradMonitor
 from scdiag.logging_utils import fatal, setup_logging
@@ -41,6 +40,7 @@ from scdiag.models.convvit.masked_encoder import ConvViTMaskedImageEncoder
 from scdiag.models.registry import load_model
 from scdiag.models.simmim import SimMIM, random_mask, simmim_loss, unpatchify
 from scdiag.optim_factory import create_optimizer, create_scheduler
+from scdiag.storage_utils import save_checkpoint
 
 
 def build_pretrain_transform(image_size=448):
@@ -508,6 +508,24 @@ def parse_args(argv=None):
       help="Extra scheduler kwargs (repeatable). "
       "Example: --sched_arg T_max=50 eta_min=1e-6",
   )
+  parser.add_argument(
+      "--source_checkpoint",
+      type=str,
+      help="Path to a source checkpoint to absorb parameters from. "
+      "Keys are aligned by shape and name before loading. "
+      "Useful for continuing from a prior pre-training run "
+      "or loading weights from a different architecture.",
+  )
+  parser.add_argument(
+      "--param_rename",
+      nargs="+",
+      default=None,
+      help="Regex-based key rename patterns for --source_checkpoint. "
+      "Each pattern is 'SEARCH;REPLACE' where SEARCH is a Python regex "
+      "and REPLACE may use $1, $2, … for capture groups. "
+      "Applied before shape-based alignment. "
+      "Example: 'encoder\\\\.(.*);model\\\\.$1'.",
+  )
 
   args = parser.parse_args(argv)
 
@@ -571,6 +589,19 @@ def main(argv=None):
   ).to(device)
   model._mask_ratio = args.mask_ratio
   model._last_mask_ratio = args.mask_ratio
+
+  if args.source_checkpoint:
+    from scdiag.checkpointing import load_checkpoint_weights
+
+    logging.info(f"Loading source checkpoint: {args.source_checkpoint}")
+    if args.param_rename:
+      logging.info(f"  Key renames: {args.param_rename}")
+    load_checkpoint_weights(
+        args.source_checkpoint,
+        model,
+        device=device,
+        param_rename=args.param_rename,
+    )
 
   num_params = sum(p.numel() for p in model.parameters()) / 1e6
   enc_params = sum(p.numel() for p in model.encoder.parameters()) / 1e6

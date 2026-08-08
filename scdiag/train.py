@@ -488,20 +488,21 @@ def parse_args(argv=None):
       help="Cache directory for downloaded datasets.",
   )
   parser.add_argument(
-      "--pretrained_encoder",
+      "--source_checkpoint",
       type=str,
-      help="Path to a SimMIM pre-training checkpoint. Encoder weights are "
-      "loaded (with shape-mismatched keys skipped) before training starts. "
+      help="Path to a source checkpoint to absorb parameters from. "
+      "Keys are aligned by shape and name before loading. "
       "Typically produced by scdiag-pretrain.",
   )
   parser.add_argument(
       "--param_rename",
       nargs="+",
       default=None,
-      help="Regex-based key rename patterns for --pretrained_encoder. "
+      help="Regex-based key rename patterns for --source_checkpoint. "
       "Each pattern is 'SEARCH;REPLACE' where SEARCH is a Python regex "
       "and REPLACE may use $1, $2, … for capture groups. "
-      "Example: 'encoder\\.(.*);model\\.$1'.",
+      "Applied before shape-based alignment. "
+      "Example: 'encoder\\\\.(.*);model\\\\.$1'.",
   )
 
   parser.add_argument(
@@ -661,14 +662,13 @@ def train_xgboost_on_backbone(args,
   ckpt_path = select_available_checkpoint(args.checkpoint)
   if ckpt_path is not None:
     logging.info(f"Loading checkpoint: {ckpt_path}")
-    model_best, xgb_processor = load_model_for_inference(
-        args.model,
-        ckpt_path,
-        device="cpu",
-        cache_dir=args.cache_dir,
-        num_labels=num_labels,
-        image_size=args.image_size,
-        proc_kwargs=args.proc_arg)
+    model_best, xgb_processor = load_model_for_inference(args.model,
+                                                         ckpt_path,
+                                                         device="cpu",
+                                                         cache_dir=args.cache_dir,
+                                                         num_labels=num_labels,
+                                                         image_size=args.image_size,
+                                                         proc_kwargs=args.proc_arg)
     model_best = model_best.to(device)
 
     # 2. Rebuild train and val datasets with val transforms (not train augs)
@@ -1048,19 +1048,17 @@ def main():
       **args.model_arg,
   )
 
-  # Optionally load SimMIM pre-trained encoder weights
-  if args.pretrained_encoder:
+  # Optionally load weights from a source checkpoint
+  if args.source_checkpoint:
     from scdiag.checkpointing import load_checkpoint_weights
 
-    logging.info(f"Loading pre-trained encoder from: {args.pretrained_encoder}")
+    logging.info(f"Loading source checkpoint: {args.source_checkpoint}")
     if args.param_rename:
       logging.info(f"  Key renames: {args.param_rename}")
     load_checkpoint_weights(
-        args.pretrained_encoder,
+        args.source_checkpoint,
         model,
         device=device,
-        strict=False,
-        exclude_prefixes=["head.", "cls_guided_pool.", "classifier."],
         param_rename=args.param_rename,
     )
 
