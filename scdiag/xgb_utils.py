@@ -17,7 +17,8 @@ def train_xgboost(train_features,
                   colsample_bytree=0.8,
                   min_child_weight=1,
                   gamma=0.0,
-                  reg_alpha=0.0):
+                  reg_alpha=0.0,
+                  use_gpu=False):
   """Train an XGBoost classifier on backbone features.
 
   Args:
@@ -31,6 +32,7 @@ def train_xgboost(train_features,
       min_child_weight: Minimum sum of instance weight in a child.
       gamma: Minimum loss reduction for a split.
       reg_alpha: L1 regularization term.
+      use_gpu: If True, train on GPU with tree_method='hist' and device='cuda'.
 
   Returns:
       Fitted XGBClassifier.
@@ -38,8 +40,7 @@ def train_xgboost(train_features,
   num_class = len(set(train_labels))
   logging.info(f"Training XGBoost: {len(train_labels)} samples, {num_class} classes")
 
-  # XGBoost requires explicit num_class for multi:softprob.
-  xgb_model = XGBClassifier(
+  xgb_kwargs = dict(
       objective="multi:softprob",
       num_class=num_class,
       max_depth=max_depth,
@@ -53,6 +54,12 @@ def train_xgboost(train_features,
       random_state=42,
       verbosity=0,
   )
+  if use_gpu:
+    xgb_kwargs["tree_method"] = "hist"
+    xgb_kwargs["device"] = "cuda"
+    logging.info("XGBoost: using GPU (device=cuda)")
+
+  xgb_model = XGBClassifier(**xgb_kwargs)
 
   xgb_model.fit(train_features, train_labels)
   logging.info("XGBoost training complete")

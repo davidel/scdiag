@@ -565,6 +565,12 @@ def parse_args(argv=None):
       default=0.0,
       help="XGBoost L1 regularization.",
   )
+  xgb_group.add_argument(
+      "--xgb_use_gpu",
+      action="store_true",
+      default=False,
+      help="Use GPU for XGBoost training (requires xgboost with CUDA support).",
+  )
 
   parser.add_argument(
       "--model_arg",
@@ -702,6 +708,7 @@ def train_xgboost_on_backbone(args,
         min_child_weight=args.xgb_min_child_weight,
         gamma=args.xgb_gamma,
         reg_alpha=args.xgb_reg_alpha,
+        use_gpu=args.xgb_use_gpu,
     )
 
     # 6. Evaluate on val set
