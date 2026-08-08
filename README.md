@@ -25,8 +25,9 @@ self-supervised pre-training (SimMIM) on multi-source dermoscopy datasets.
   prioritizing rare or clinically critical classes (e.g. melanoma detection).
 - **Mixup** — optional Mixup regularization (`--mixup_alpha`) for reducing
   overfitting on small datasets.
-- **Pre-trained encoder loading** — load SimMIM pre-trained encoder weights via
-  `--pretrained_encoder` to boost downstream performance on small datasets.
+- **Source checkpoint absorption** — load weights from any source checkpoint via
+  `--source_checkpoint`. Keys are automatically aligned by shape and name,
+  so renames across architectures just work.
 - **Custom model registry** — use any HuggingFace `AutoModelForImageClassification`
   model, or register custom architectures via the `scdiag.models` registry.
   First custom model: **ConvViT** (multi-block conv stem + ViT encoder with
@@ -127,6 +128,8 @@ scdiag-train --model google/vit-base-patch16-224 \
 | `--xgboost_model` | `None` | Output path for XGBoost model. If set, train XGBoost on backbone features after training. |
 | `--xgb_max_depth` | `6` | XGBoost max tree depth |
 | `--xgb_n_estimators` | `200` | XGBoost number of trees |
+| `--source_checkpoint` | `None` | Path to a source checkpoint to absorb parameters from. Keys are aligned by shape and name before loading. |
+| `--param_rename` | `None` | Regex-based key rename patterns for `--source_checkpoint`. Each pattern is `SEARCH;REPLACE` where SEARCH is a Python regex and REPLACE may use `$1`, `$2`, etc. Applied before shape-based alignment. |
 | `--xgb_learning_rate` | `0.1` | XGBoost learning rate |
 | `--xgb_subsample` | `0.8` | XGBoost row sampling ratio |
 | `--xgb_colsample_bytree` | `0.8` | XGBoost column sampling ratio |
@@ -196,7 +199,7 @@ Then load the pre-trained encoder during supervised fine-tuning:
 ```bash
 scdiag-train --model convvit \
              --dataset marmal88/skin_cancer \
-             --pretrained_encoder ./checkpoints/convvit_simmim_latest.pt \
+             --source_checkpoint ./checkpoints/convvit_simmim_latest.pt \
              --epochs 100
 ```
 
@@ -231,6 +234,8 @@ scdiag-train --model convvit \
 | `--opt_arg` | `{}` | Extra optimizer kwargs (repeatable). Example: `--opt_arg betas=0.9,0.999` |
 | `--scheduler` | `None` | `torch.optim.lr_scheduler` class name (case-sensitive), or a `.py` script path. Examples: `CosineAnnealingLR`, `StepLR`. Default: no scheduler |
 | `--sched_arg` | `{}` | Extra scheduler kwargs (repeatable). Example: `--sched_arg T_max=50` |
+| `--source_checkpoint` | `None` | Path to a source checkpoint to absorb parameters from. Useful for continuing from a prior run or loading weights from a different architecture. |
+| `--param_rename` | `None` | Regex-based key rename patterns for `--source_checkpoint`. Each pattern is `SEARCH;REPLACE` where SEARCH is a Python regex and REPLACE may use `$1`, `$2`, etc. Applied before shape-based alignment. |
 
 ### Dataset Ensemble
 
@@ -357,7 +362,8 @@ scdiag-train --model convvit --model_arg depth=6 num_heads=8 dropout=0.2
 
 ConvViT supports SimMIM self-supervised pre-training via `scdiag-pretrain`.
 Pre-trained encoder weights can be loaded into the supervised training pipeline
-via `--pretrained_encoder`.
+via `--source_checkpoint`. Use `--param_rename` for manual key rewriting before
+automatic shape-based alignment.
 
 ## Development
 
