@@ -1207,6 +1207,8 @@ def main():
     del optimizer
     del scaler
     del scheduler
+    del train_loader
+    del val_loader
     gc.collect()
     torch.cuda.empty_cache()
 
