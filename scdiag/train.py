@@ -655,21 +655,17 @@ def train_xgboost_on_backbone(args,
   ckpt_path = select_available_checkpoint(args.checkpoint)
   if ckpt_path is not None:
     logging.info(f"Loading checkpoint: {ckpt_path}")
-    model_best, _ = load_model_for_inference(args.model,
-                                             ckpt_path,
-                                             device="cpu",
-                                             cache_dir=args.cache_dir,
-                                             num_labels=num_labels,
-                                             image_size=args.image_size)
+    model_best, xgb_processor = load_model_for_inference(
+        args.model,
+        ckpt_path,
+        device="cpu",
+        cache_dir=args.cache_dir,
+        num_labels=num_labels,
+        image_size=args.image_size,
+        proc_kwargs=args.proc_arg)
     model_best = model_best.to(device)
 
     # 2. Rebuild train and val datasets with val transforms (not train augs)
-    xgb_processor = load_processor(
-        args.model,
-        image_size=args.image_size,
-        cache_dir=args.cache_dir,
-        **args.proc_arg,
-    )
     val_transform = build_val_transform(xgb_processor, args.image_size)
     train_proxy = HFDatasetProxy(train_ds, transform=val_transform)
     val_proxy = HFDatasetProxy(val_ds, transform=val_transform)
