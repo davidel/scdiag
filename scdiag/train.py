@@ -284,6 +284,11 @@ def load_and_split_dataset(
   )
 
 
+def _fmt_weights(weights, decimals=3):
+  """Format a 1-D tensor as a human-readable list string."""
+  return "[" + ", ".join(f"{v:.{decimals}f}" for v in weights.tolist()) + "]"
+
+
 def compute_class_weights(train_dataset, num_labels):
   """Compute inverse-frequency class weights as a CPU tensor.
 
@@ -1000,7 +1005,7 @@ def main():
   logging.info(f"num_labels: {num_labels}")
 
   w_freq = compute_class_weights(train_proxy.dataset, num_labels)
-  logging.info(f"Inverse-frequency weights: {w_freq.tolist()}")
+  logging.info(f"Inverse-frequency weights: {_fmt_weights(w_freq)}")
 
   # Convert proxy label2id (str values) to int values for parse_class_multipliers.
   label2id_int = {k: int(v) for k, v in train_proxy.label2id.items()}
@@ -1011,10 +1016,10 @@ def main():
       num_labels,
       label2id_int,
   )
-  logging.info(f"Clinical multipliers (M_c): {clinical_m.tolist()}")
+  logging.info(f"Clinical multipliers (M_c): {_fmt_weights(clinical_m)}")
 
   class_weights = (w_freq * clinical_m).to(device)
-  logging.info(f"Final class weights (W_freq x M_c): {class_weights.tolist()}")
+  logging.info(f"Final class weights (W_freq x M_c): {_fmt_weights(class_weights)}")
 
   if len(train_proxy) < args.batch_size:
     fatal(
