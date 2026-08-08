@@ -621,7 +621,12 @@ def parse_args(argv=None):
   return parser.parse_args(argv)
 
 
-def train_xgboost_on_backbone(args, train_ds, val_ds, device, num_labels=None):
+def train_xgboost_on_backbone(args,
+                              train_ds,
+                              val_ds,
+                              device,
+                              num_labels=None,
+                              batch_size=32):
   """Train XGBoost on backbone features after PyTorch training completes.
 
     Args:
@@ -630,6 +635,7 @@ def train_xgboost_on_backbone(args, train_ds, val_ds, device, num_labels=None):
         val_ds: Validation HF Dataset (raw, before proxy wrapping).
         device: torch device.
         num_labels: Number of output classes (forwarded to model loader).
+        batch_size: Feature-extraction batch size.
     """
   from scdiag.datasets.hf_proxy import HFDatasetProxy
   from scdiag.model_utils import (
@@ -670,11 +676,17 @@ def train_xgboost_on_backbone(args, train_ds, val_ds, device, num_labels=None):
 
     # 3. Collect features
     logging.info("Extracting train features...")
-    train_features, train_labels = collect_features(model_best, train_proxy, device)
+    train_features, train_labels = collect_features(model_best,
+                                                    train_proxy,
+                                                    device,
+                                                    batch_size=batch_size)
     logging.info(f"  Train features shape: {train_features.shape}")
 
     logging.info("Extracting val features...")
-    val_features, val_labels = collect_features(model_best, val_proxy, device)
+    val_features, val_labels = collect_features(model_best,
+                                                val_proxy,
+                                                device,
+                                                batch_size=batch_size)
     logging.info(f"  Val features shape: {val_features.shape}")
 
     # 4. Free the model — XGBoost doesn't need it anymore
@@ -1194,6 +1206,7 @@ def main():
     del model
     del optimizer
     del scaler
+    del scheduler
     gc.collect()
     torch.cuda.empty_cache()
 
@@ -1203,7 +1216,8 @@ def main():
                                 train_proxy.dataset,
                                 val_proxy.dataset,
                                 device,
-                                num_labels=num_labels)
+                                num_labels=num_labels,
+                                batch_size=args.batch_size)
 
 
 if __name__ == "__main__":
