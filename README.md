@@ -121,7 +121,7 @@ scdiag-train --model google/vit-base-patch16-224 \
 | `--log_level` | `INFO` | Logging level |
 | `--log_dir` | `None` | TensorBoard log directory (default: `<checkpoint_dir>/logs`) |
 | `--cache_dir` | `None` | HuggingFace cache directory |
-| `--gcs_checkpoint` | `None` | GCS URI for checkpoint sync (`gs://BUCKET/PREFIX`) |
+| `--remote_checkpoint` | `None` | Remote URI for checkpoint sync (`gs://BUCKET/PREFIX` or `r2://BUCKET/PREFIX`). |
 | `--mixup_alpha` | `0.0` | Mixup alpha (0 = disabled, recommended: `0.2`) |
 | `--state_save` | `opt,sched,amp` | Comma-separated states to save: `opt`, `sched`, `amp`, `none` |
 | `--state_load` | `opt,sched,amp` | Comma-separated states to restore on resume: `opt`, `sched`, `amp`, `none` |
@@ -136,6 +136,7 @@ scdiag-train --model google/vit-base-patch16-224 \
 | `--xgb_min_child_weight` | `1` | XGBoost min child weight |
 | `--xgb_gamma` | `0.0` | XGBoost min split loss |
 | `--xgb_reg_alpha` | `0.0` | XGBoost L1 regularization |
+| `--xgb_use_gpu` | `False` | Use GPU for XGBoost training (requires xgboost with CUDA support). |
 | `--model_arg` | `{}` | Override model configuration (repeatable). Example: `--model_arg depth=6 num_heads=8` |
 | `--proc_arg` | `{}` | Override processor configuration (repeatable). Example: `--proc_arg image_size=384` |
 | `--optimizer` | `AdamW` | `torch.optim` optimizer class name (case-sensitive). Examples: `AdamW`, `Adam`, `SGD` |
@@ -161,7 +162,7 @@ scdiag-train --model facebook/convnextv2-base-22k-224 \
              --lr 3e-5 \
              --mixup_alpha 0.2 \
              --amp_dtype bfloat16 \
-             --gcs_checkpoint gs://YOUR_BUCKET/scdiag
+             --remote_checkpoint gs://YOUR_BUCKET/scdiag
 ```
 
 The checkpoint's backbone weights are loaded (`strict=False`), while the
