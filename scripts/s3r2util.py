@@ -312,13 +312,12 @@ def handle_mv(args, s3_client):
     src_bucket, _ = parse_r2_path(source)
     if not src_bucket:
       fatal(f"Source must be an R2 path: {source}")
-    # Extract the raw key exactly as stored in R2 (preserving leading '/').
-    # parse_r2_path strips it, which would cause a 404 on copy.
-    src_key = source.split("/", 2)[2]
+    # Extract the key portion: "r2://bucket/key" -> "key"
+    src_key = source.split("/", 3)[3]
 
     # --- Wildcard source ---------------------------------------------
     if _has_wildcard(source):
-      src_prefix = source.split("/", 2)[2]
+      src_prefix = source.split("/", 3)[3]
       matches = _expand_wildcard(s3_client, source)
       _, dst_prefix = parse_r2_path(destination)
 
