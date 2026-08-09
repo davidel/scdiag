@@ -849,7 +849,6 @@ def train_one_epoch(
 
     # Periodic step-level logging.
     if (batch_idx + 1) % args.log_every == 0 or (batch_idx + 1) == total_batches:
-      global_step = epoch * total_batches + batch_idx
       elapsed = time.time() - last_log_time
       throughput = window_samples / elapsed if elapsed > 0 else 0
       lr_now = optimizer.param_groups[0]["lr"]
