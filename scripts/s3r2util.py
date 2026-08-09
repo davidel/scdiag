@@ -14,7 +14,9 @@ trailing-slash destination semantics, r2:// path prefixes) without
 depending on the `aws` CLI being installed.
 """
 import argparse
+import fnmatch
 import os
+import re
 import sys
 
 import boto3
@@ -68,6 +70,65 @@ def parse_r2_path(path):
   return None, None
 
 
+def _has_wildcard(path):
+  """Check if path contains shell wildcard characters (* or ?)."""
+  return "*" in path or "?" in path
+
+
+def _get_static_prefix(pattern):
+  """Return the longest prefix of *pattern* that contains no wildcard chars."""
+  m = re.search(r"[*?]", pattern)
+  return pattern[:m.start()] if m else pattern
+
+
+def _expand_wildcard(s3_client, r2_path):
+  """Expand a wildcard R2 path via server-side prefix listing + client-side fnmatch.
+
+  Returns a list of (bucket, key) tuples for all matching objects.
+  """
+  bucket, pattern = parse_r2_path(r2_path)
+  if not bucket:
+    fatal(f"Wildcard path must start with r2://: {r2_path}")
+
+  prefix = _get_static_prefix(pattern)
+  try:
+    paginator = s3_client.get_paginator("list_objects_v2")
+    page_iter = paginator.paginate(Bucket=bucket, Prefix=prefix)
+  except ClientError as exc:
+    fatal(f"Error listing objects with prefix '{prefix}': {exc}")
+
+  matches = []
+  for page in page_iter:
+    for obj in page.get("Contents", []):
+      if fnmatch.fnmatch(obj["Key"], pattern):
+        matches.append((bucket, obj["Key"]))
+
+  if not matches:
+    fatal(f"No objects matched pattern: {r2_path}")
+  return matches
+
+
+def _compute_dest_key(src_key, src_prefix, dst_prefix):
+  """Map a matched source key to a destination key.
+
+  Args:
+    src_key: the full object key of the matched source object.
+    src_prefix: the static (non-wildcard) prefix of the source pattern.
+    dst_prefix: the destination prefix (bucket/key/path).
+  """
+  relative = src_key[len(src_prefix):]
+  return dst_prefix + relative
+
+
+def _format_size(num_bytes):
+  """Format byte count as a human-readable string (KB, MB, GB, TB)."""
+  for unit in ("B", "KB", "MB", "GB", "TB"):
+    if abs(num_bytes) < 1024:
+      return f"{num_bytes:.2f} {unit}"
+    num_bytes /= 1024
+  return f"{num_bytes:.2f} PB"
+
+
 def handle_ls(args, s3_client):
   bucket, prefix = parse_r2_path(args.path)
   if not bucket:
@@ -85,7 +146,8 @@ def handle_ls(args, s3_client):
       if "Contents" in page:
         found = True
         for obj in page["Contents"]:
-          print(f"{obj['LastModified']}  {obj['Size']:12} B  {obj['Key']}")
+          local_time = obj["LastModified"].astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
+          print(f"{local_time}  {_format_size(obj['Size']):>14s}  {obj['Key']}")
 
     if not found:
       print(f"No objects found in r2://{bucket}/{prefix}")
@@ -95,6 +157,51 @@ def handle_ls(args, s3_client):
 
 
 def handle_cp(args, s3_client):
+  # --- Wildcard expansion for R2 sources -----------------------------
+  if _has_wildcard(args.source):
+    src_bucket, src_prefix = parse_r2_path(args.source)
+    if not src_bucket:
+      fatal("Wildcard source must start with r2://")
+    matches = _expand_wildcard(s3_client, args.source)
+    dst_bucket, dst_prefix = parse_r2_path(args.destination)
+
+    if not dst_bucket:
+      # R2 -> local wildcard copy
+      local_dir = args.destination
+      if not os.path.isdir(local_dir):
+        fatal(f"Destination directory does not exist: {local_dir}")
+
+      print(f"Wildcard downloading {len(matches)} object(s) -> {local_dir}/")
+      total_size = 0
+      for _, obj_key in matches:
+        head = s3_client.head_object(Bucket=src_bucket, Key=obj_key)
+        total_size += head["ContentLength"]
+      with tqdm(total=total_size, unit="B", unit_scale=True, desc="Download") as pbar:
+        for _, obj_key in matches:
+          local_path = os.path.join(local_dir, os.path.basename(obj_key))
+          s3_client.download_file(src_bucket, obj_key, local_path, Callback=pbar.update)
+      print(f"Downloaded {len(matches)} object(s).")
+
+    else:
+      # R2 -> R2 wildcard copy
+      print(f"Wildcard copying {len(matches)} object(s) -> "
+            f"r2://{dst_bucket}/{dst_prefix}")
+      with tqdm(total=len(matches), unit="file", desc="Copy") as pbar:
+        for _, obj_key in matches:
+          dest_key = _compute_dest_key(obj_key, src_prefix, dst_prefix)
+          s3_client.copy(
+              {
+                  "Bucket": src_bucket,
+                  "Key": obj_key
+              },
+              dst_bucket,
+              dest_key,
+          )
+          pbar.update(1)
+      print(f"Copied {len(matches)} object(s).")
+    return
+
+  # --- Single-file logic (unchanged) ---------------------------------
   src_bucket, src_key = parse_r2_path(args.source)
   destination = _resolve_destination(args.source, args.destination)
   dst_bucket, dst_key = parse_r2_path(destination)
@@ -104,10 +211,8 @@ def handle_cp(args, s3_client):
       print(f"Uploading {args.source} -> r2://{dst_bucket}/{dst_key}")
       if args.progress:
         file_size = os.path.getsize(args.source)
-        with tqdm(total=file_size, unit="B", unit_scale=True,
-                  desc="Upload") as pbar:
-          s3_client.upload_file(args.source, dst_bucket, dst_key,
-                                Callback=pbar.update)
+        with tqdm(total=file_size, unit="B", unit_scale=True, desc="Upload") as pbar:
+          s3_client.upload_file(args.source, dst_bucket, dst_key, Callback=pbar.update)
       else:
         s3_client.upload_file(args.source, dst_bucket, dst_key)
       print("Upload complete.")
@@ -120,9 +225,10 @@ def handle_cp(args, s3_client):
       if args.progress:
         head = s3_client.head_object(Bucket=src_bucket, Key=src_key)
         total = head["ContentLength"]
-        with tqdm(total=total, unit="B", unit_scale=True,
-                  desc="Download") as pbar:
-          s3_client.download_file(src_bucket, src_key, args.destination,
+        with tqdm(total=total, unit="B", unit_scale=True, desc="Download") as pbar:
+          s3_client.download_file(src_bucket,
+                                  src_key,
+                                  args.destination,
                                   Callback=pbar.update)
       else:
         s3_client.download_file(src_bucket, src_key, args.destination)
@@ -134,10 +240,8 @@ def handle_cp(args, s3_client):
       if args.progress:
         head = s3_client.head_object(Bucket=src_bucket, Key=src_key)
         total = head["ContentLength"]
-        with tqdm(total=total, unit="B", unit_scale=True,
-                  desc="Copy") as pbar:
-          s3_client.copy(copy_source, dst_bucket, dst_key,
-                         Callback=pbar.update)
+        with tqdm(total=total, unit="B", unit_scale=True, desc="Copy") as pbar:
+          s3_client.copy(copy_source, dst_bucket, dst_key, Callback=pbar.update)
       else:
         s3_client.copy(copy_source, dst_bucket, dst_key)
       print("Remote copy complete.")
@@ -170,6 +274,33 @@ def handle_mv(args, s3_client):
   if not src_bucket or not dst_bucket:
     fatal("Both source and destination must be R2 paths (r2://bucket/key)")
 
+  # --- Wildcard expansion for R2 sources -----------------------------
+  if _has_wildcard(args.source):
+    src_prefix = parse_r2_path(args.source)[1]
+    matches = _expand_wildcard(s3_client, args.source)
+    dst_prefix = dst_key
+
+    print(f"Wildcard renaming {len(matches)} object(s):")
+    try:
+      with tqdm(total=len(matches), unit="file", desc="Move") as pbar:
+        for _, obj_key in matches:
+          dest_key = _compute_dest_key(obj_key, src_prefix, dst_prefix)
+          s3_client.copy(
+              {
+                  "Bucket": src_bucket,
+                  "Key": obj_key
+              },
+              dst_bucket,
+              dest_key,
+          )
+          s3_client.delete_object(Bucket=src_bucket, Key=obj_key)
+          pbar.update(1)
+      print(f"Moved {len(matches)} object(s).")
+    except ClientError as e:
+      fatal(f"mv failed: {e}")
+    return
+
+  # --- Single-file logic (unchanged) ---------------------------------
   try:
     copy_source = {"Bucket": src_bucket, "Key": src_key}
     print(f"Renaming r2://{src_bucket}/{src_key} -> r2://{dst_bucket}/{dst_key}")
@@ -194,10 +325,14 @@ def main():
 
   parser_cp = subparsers.add_parser("cp", help="Copy files locally or remotely")
   parser_cp.add_argument("source",
-                         help="Source file path (local path or r2://bucket/key)")
+                         help="Source file path (local path or r2://bucket/key). "
+                         "Wildcards (*, ?) are supported for R2 sources.")
   parser_cp.add_argument("destination",
-                         help="Destination file path (local path or r2://bucket/key)")
-  parser_cp.add_argument("--progress", action="store_true",
+                         help="Destination file path (local path or r2://bucket/key). "
+                         "For wildcard copies to a local destination, this must be an "
+                         "existing directory.")
+  parser_cp.add_argument("--progress",
+                         action="store_true",
                          help="Show a progress bar during transfer")
   parser_cp.set_defaults(func=handle_cp)
 
@@ -207,7 +342,9 @@ def main():
   parser_rm.set_defaults(func=handle_rm)
 
   parser_mv = subparsers.add_parser("mv", help="Rename an R2 object (copy + delete)")
-  parser_mv.add_argument("source", help="Source R2 path (r2://bucket/key)")
+  parser_mv.add_argument("source",
+                         help="Source R2 path (r2://bucket/key). "
+                         "Wildcards (*, ?) are supported.")
   parser_mv.add_argument("destination", help="Destination R2 path (r2://bucket/key)")
   parser_mv.set_defaults(func=handle_mv)
 
