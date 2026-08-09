@@ -64,18 +64,18 @@ def parse_r2_path(path):
   return None, None
 
 
-def _has_wildcard(path):
+def has_wildcard(path):
   """Check if path contains shell wildcard characters (* or ?)."""
   return "*" in path or "?" in path
 
 
-def _get_static_prefix(pattern):
+def get_static_prefix(pattern):
   """Return the longest prefix of *pattern* that contains no wildcard chars."""
   m = re.search(r"[*?]", pattern)
   return pattern[:m.start()] if m else pattern
 
 
-def _expand_wildcard(s3_client, r2_path):
+def expand_wildcard(s3_client, r2_path):
   """Expand a wildcard R2 path via server-side prefix listing + client-side fnmatch.
 
   Returns a list of (bucket, key, size) tuples for all matching objects.
@@ -85,7 +85,7 @@ def _expand_wildcard(s3_client, r2_path):
   if not bucket:
     fatal(f"Wildcard path must start with r2://: {r2_path}")
 
-  prefix = _get_static_prefix(pattern)
+  prefix = get_static_prefix(pattern)
 
   # Try the prefix as-is first, then fall back to toggling leading '/'.
   # Some buckets store keys with a leading '/' (e.g. '/content/file.pt')
@@ -116,7 +116,7 @@ def _expand_wildcard(s3_client, r2_path):
   return matches
 
 
-def _compute_dest_key(src_key, src_prefix, dst_prefix):
+def compute_dest_key(src_key, src_prefix, dst_prefix):
   """Map a matched source key to a destination key.
 
   Args:
@@ -131,7 +131,7 @@ def _compute_dest_key(src_key, src_prefix, dst_prefix):
   return dst_prefix.rstrip("/") + "/" + relative.lstrip("/")
 
 
-def _format_size(num_bytes):
+def format_size(num_bytes):
   """Format byte count as a human-readable string (KB, MB, GB, TB)."""
   for unit in ("B", "KB", "MB", "GB", "TB"):
     if abs(num_bytes) < 1024:
@@ -140,7 +140,7 @@ def _format_size(num_bytes):
   return f"{num_bytes:.2f} PB"
 
 
-def _format_date(d):
+def format_date(d):
   """Format a datetime to local time string (YYYY-MM-DD HH:MM:SS tz)."""
   return d.astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
 
@@ -163,7 +163,7 @@ def handle_ls(args, s3_client):
         found = True
         for obj in page["Contents"]:
           local_time = obj["LastModified"].astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
-          print(f"{local_time}  {_format_size(obj['Size']):>14s}  {obj['Key']}")
+          print(f"{local_time}  {format_size(obj['Size']):>14s}  {obj['Key']}")
 
     if not found:
       print(f"No objects found in r2://{bucket}/{prefix}")
@@ -172,7 +172,7 @@ def handle_ls(args, s3_client):
     fatal(f"ls failed: {e}")
 
 
-def _is_dir_destination(destination):
+def is_dir_destination(destination):
   """Check if the destination should be treated as a directory.
 
   Returns True if it ends with '/' or is an existing local directory.
@@ -183,7 +183,7 @@ def _is_dir_destination(destination):
 def handle_cp(args, s3_client):
   sources = args.sources
   destination = args.destination
-  is_dir = _is_dir_destination(destination) or len(sources) > 1
+  is_dir = is_dir_destination(destination) or len(sources) > 1
 
   if len(sources) > 1 and not is_dir:
     fatal("Multiple sources require a directory destination (existing "
@@ -191,11 +191,11 @@ def handle_cp(args, s3_client):
 
   for source in sources:
     # --- Wildcard R2 source ------------------------------------------
-    if _has_wildcard(source):
+    if has_wildcard(source):
       src_bucket, src_prefix = parse_r2_path(source)
       if not src_bucket:
         fatal(f"Wildcard source must start with r2://: {source}")
-      matches = _expand_wildcard(s3_client, source)
+      matches = expand_wildcard(s3_client, source)
       dst_bucket, dst_prefix = parse_r2_path(destination)
 
       if not dst_bucket:
@@ -221,7 +221,7 @@ def handle_cp(args, s3_client):
               f"r2://{dst_bucket}/{dst_prefix}")
         with tqdm(total=len(matches), unit="file", desc="Copy") as pbar:
           for _, obj_key, _ in matches:
-            dest_key = _compute_dest_key(obj_key, src_prefix, dst_prefix)
+            dest_key = compute_dest_key(obj_key, src_prefix, dst_prefix)
             s3_client.copy(
                 {
                     "Bucket": src_bucket,
@@ -321,7 +321,7 @@ def handle_rm(args, s3_client):
           else:
             batch.append(obj["Key"])
             if len(batch) >= 1000:
-              deleted += _batch_delete(s3_client, bucket, batch)
+              deleted += batch_delete(s3_client, bucket, batch)
               batch = []
 
       if args.dry_run:
@@ -330,7 +330,7 @@ def handle_rm(args, s3_client):
 
       # Flush remaining batch.
       if batch:
-        deleted += _batch_delete(s3_client, bucket, batch)
+        deleted += batch_delete(s3_client, bucket, batch)
 
       if total == 0:
         print(f"No objects found under r2://{bucket}/{key}")
@@ -359,10 +359,10 @@ def handle_du(args, s3_client):
     prefix = ""
 
   # Determine if the user passed a wildcard.
-  if _has_wildcard(path):
-    matches = _expand_wildcard(s3_client, path)
+  if has_wildcard(path):
+    matches = expand_wildcard(s3_client, path)
     total = sum(size for _, _, size in matches)
-    print(f"{_format_size(total)}\t{len(matches)} object(s)\t{path}")
+    print(f"{format_size(total)}\t{len(matches)} object(s)\t{path}")
   else:
     # Plain prefix listing — accumulate sizes as we paginate.
     try:
@@ -373,12 +373,12 @@ def handle_du(args, s3_client):
         for obj in page.get("Contents", []):
           total += obj["Size"]
           count += 1
-      print(f"{_format_size(total)}\t{count} object(s)\tr2://{bucket}/{prefix}")
+      print(f"{format_size(total)}\t{count} object(s)\tr2://{bucket}/{prefix}")
     except (ClientError, BotoCoreError) as e:
       fatal(f"du failed: {e}")
 
 
-def _batch_delete(s3_client, bucket, keys):
+def batch_delete(s3_client, bucket, keys):
   """Delete a list of keys in batches of 1000, checking for errors."""
   deleted = 0
   errors = []
@@ -401,13 +401,13 @@ def _batch_delete(s3_client, bucket, keys):
   return deleted
 
 
-def _local_file_info(path):
+def local_file_info(path):
   """Return (size, mtime_epoch) for a local file."""
   stat = os.stat(path)
   return stat.st_size, stat.st_mtime
 
 
-def _r2_object_index(s3_client, bucket, prefix):
+def r2_object_index(s3_client, bucket, prefix):
   """Build {key: (size, last_modified_epoch)} for all objects under prefix."""
   index = {}
   paginator = s3_client.get_paginator("list_objects_v2")
@@ -417,14 +417,14 @@ def _r2_object_index(s3_client, bucket, prefix):
   return index
 
 
-def _should_upload(local_size, local_mtime, remote_size, remote_mtime):
+def should_upload(local_size, local_mtime, remote_size, remote_mtime):
   """Decide whether a local file should be uploaded based on size/mtime."""
   if remote_size is None:
     return True  # Object doesn't exist remotely.
   return (local_size != remote_size) or (local_mtime > remote_mtime)
 
 
-def _should_download(local_size, local_mtime, remote_size, remote_mtime):
+def should_download(local_size, local_mtime, remote_size, remote_mtime):
   """Decide whether a remote object should be downloaded to local."""
   if local_size is None:
     return True  # Local file doesn't exist.
@@ -448,13 +448,13 @@ def handle_sync(args, s3_client):
 
   if src_bucket:
     # R2 -> local direction.
-    _sync_r2_to_local(s3_client, src_bucket, src_prefix, dst, args)
+    sync_r2_to_local(s3_client, src_bucket, src_prefix, dst, args)
   else:
     # Local -> R2 direction.
-    _sync_local_to_r2(s3_client, src, dst_bucket, dst_prefix, args)
+    sync_local_to_r2(s3_client, src, dst_bucket, dst_prefix, args)
 
 
-def _sync_local_to_r2(s3_client, local_dir, r2_bucket, r2_prefix, args):
+def sync_local_to_r2(s3_client, local_dir, r2_bucket, r2_prefix, args):
   """Upload changed local files to R2."""
   if not os.path.isdir(local_dir):
     fatal(f"Source directory does not exist: {local_dir}")
@@ -464,7 +464,7 @@ def _sync_local_to_r2(s3_client, local_dir, r2_bucket, r2_prefix, args):
     r2_prefix += "/"
 
   # Build remote index.
-  remote = _r2_object_index(s3_client, r2_bucket, r2_prefix)
+  remote = r2_object_index(s3_client, r2_bucket, r2_prefix)
 
   # Collect local files.
   to_upload = []
@@ -477,14 +477,14 @@ def _sync_local_to_r2(s3_client, local_dir, r2_bucket, r2_prefix, args):
       r2_key = (r2_prefix + rel_path).replace("\\", "/")
       local_rel_keys.add(r2_key)
 
-      local_size, local_mtime = _local_file_info(local_path)
+      local_size, local_mtime = local_file_info(local_path)
       remote_size, remote_mtime = remote.get(r2_key, (None, None))
 
       # Apply exclude filter.
       if args.exclude and fnmatch.fnmatch(rel_path, args.exclude):
         continue
 
-      if _should_upload(local_size, local_mtime, remote_size, remote_mtime):
+      if should_upload(local_size, local_mtime, remote_size, remote_mtime):
         to_upload.append((local_path, r2_key, local_size))
 
   # Handle --delete: remove remote objects not present locally.
@@ -501,7 +501,7 @@ def _sync_local_to_r2(s3_client, local_dir, r2_bucket, r2_prefix, args):
   if args.dry_run:
     for local_path, r2_key, size in to_upload:
       print(
-          f"  upload: {local_path} -> r2://{r2_bucket}/{r2_key}  ({_format_size(size)})"
+          f"  upload: {local_path} -> r2://{r2_bucket}/{r2_key}  ({format_size(size)})"
       )
     for r2_key in to_delete:
       print(f"  delete: r2://{r2_bucket}/{r2_key}")
@@ -521,13 +521,13 @@ def _sync_local_to_r2(s3_client, local_dir, r2_bucket, r2_prefix, args):
   # Delete.
   if to_delete:
     print(f"Deleting {len(to_delete)} object(s) ...")
-    _batch_delete(s3_client, r2_bucket, to_delete)
+    batch_delete(s3_client, r2_bucket, to_delete)
 
   print(f"Sync complete: {len(to_upload)} uploaded, {len(to_delete)} deleted, "
         f"{len(remote) - len(to_upload)} unchanged.")
 
 
-def _sync_r2_to_local(s3_client, r2_bucket, r2_prefix, local_dir, args):
+def sync_r2_to_local(s3_client, r2_bucket, r2_prefix, local_dir, args):
   """Download changed R2 objects to local directory."""
   if not local_dir:
     fatal("Local destination must be a directory.")
@@ -536,7 +536,7 @@ def _sync_r2_to_local(s3_client, r2_bucket, r2_prefix, local_dir, args):
     r2_prefix += "/"
 
   # Build remote index.
-  remote = _r2_object_index(s3_client, r2_bucket, r2_prefix)
+  remote = r2_object_index(s3_client, r2_bucket, r2_prefix)
 
   # Build local index (keys relative to r2_prefix).
   local_files = {}  # {rel_path: (size, mtime)}
@@ -545,7 +545,7 @@ def _sync_r2_to_local(s3_client, r2_bucket, r2_prefix, local_dir, args):
       for fname in files:
         local_path = os.path.join(root, fname)
         rel_path = os.path.relpath(local_path, local_dir)
-        local_files[rel_path] = _local_file_info(local_path)
+        local_files[rel_path] = local_file_info(local_path)
 
   to_download = []
   for r2_key, (remote_size, remote_mtime) in remote.items():
@@ -558,7 +558,7 @@ def _sync_r2_to_local(s3_client, r2_bucket, r2_prefix, local_dir, args):
       continue
 
     local_size, local_mtime = local_files.get(rel_path, (None, None))
-    if _should_download(local_size, local_mtime, remote_size, remote_mtime):
+    if should_download(local_size, local_mtime, remote_size, remote_mtime):
       to_download.append((r2_key, rel_path, remote_size))
 
   # Handle --delete: remove local files not present on R2.
@@ -578,7 +578,7 @@ def _sync_r2_to_local(s3_client, r2_bucket, r2_prefix, local_dir, args):
   if args.dry_run:
     for r2_key, rel_path, size in to_download:
       print(
-          f"  download: r2://{r2_bucket}/{r2_key} -> {os.path.join(local_dir, rel_path)}  ({_format_size(size)})"
+          f"  download: r2://{r2_bucket}/{r2_key} -> {os.path.join(local_dir, rel_path)}  ({format_size(size)})"
       )
     for rel_path in to_delete:
       print(f"  delete: {os.path.join(local_dir, rel_path)}")
@@ -671,10 +671,10 @@ def handle_rb(args, s3_client):
           total += 1
           batch.append(obj["Key"])
           if len(batch) >= 1000:
-            deleted += _batch_delete(s3_client, bucket_name, batch)
+            deleted += batch_delete(s3_client, bucket_name, batch)
             batch = []
       if batch:
-        deleted += _batch_delete(s3_client, bucket_name, batch)
+        deleted += batch_delete(s3_client, bucket_name, batch)
       print(f"Deleted {deleted}/{total} object(s) from {bucket_name} ...")
 
     s3_client.delete_bucket(Bucket=bucket_name)
@@ -686,7 +686,7 @@ def handle_rb(args, s3_client):
     fatal(f"rb failed: {e}")
 
 
-def _parse_relative_date(s):
+def parse_relative_date(s):
   """Parse a relative date string like '7d', '24h', '30m' into seconds."""
   m = re.match(r"^(\d+)([dhms])$", s)
   if not m:
@@ -695,7 +695,7 @@ def _parse_relative_date(s):
   return val * {"d": 86400, "h": 3600, "m": 60, "s": 1}[unit]
 
 
-def _parse_date_filter(s):
+def parse_date_filter(s):
   """Parse a date filter: ISO 8601 or relative ('7d', '24h', '-7d').
 
   Returns epoch seconds. Relative dates are computed from now.
@@ -705,7 +705,7 @@ def _parse_date_filter(s):
   stripped = s.lstrip("-")
   m = re.match(r"^(\d+)([dhms])$", stripped)
   if m:
-    return time.time() - _parse_relative_date(stripped)
+    return time.time() - parse_relative_date(stripped)
 
   # Try ISO 8601 date.
   try:
@@ -724,8 +724,8 @@ def handle_find(args, s3_client):
     prefix = ""
 
   # Parse date filters into epoch seconds.
-  newer_than = _parse_date_filter(args.newer_than) if args.newer_than else None
-  older_than = _parse_date_filter(args.older_than) if args.older_than else None
+  newer_than = parse_date_filter(args.newer_than) if args.newer_than else None
+  older_than = parse_date_filter(args.older_than) if args.older_than else None
 
   ext_filter = f".{args.ext}" if args.ext else None
 
@@ -753,7 +753,7 @@ def handle_find(args, s3_client):
         if args.name and not fnmatch.fnmatch(os.path.basename(key), args.name):
           continue
 
-        print(f"{_format_date(obj['LastModified'])}\t{_format_size(size)}\t"
+        print(f"{format_date(obj['LastModified'])}\t{format_size(size)}\t"
               f"r2://{bucket}/{key}")
         matches += 1
         total_size += size
@@ -784,9 +784,9 @@ def handle_mv(args, s3_client):
     src_key = source.split("/", 3)[3].lstrip("/")
 
     # --- Wildcard source ---------------------------------------------
-    if _has_wildcard(source):
+    if has_wildcard(source):
       src_prefix = src_key  # already normalized
-      matches = _expand_wildcard(s3_client, source)
+      matches = expand_wildcard(s3_client, source)
       _, dst_prefix = parse_r2_path(destination)
 
       print(f"Wildcard moving {len(matches)} object(s):")
@@ -794,7 +794,7 @@ def handle_mv(args, s3_client):
         if args.progress:
           with tqdm(total=len(matches), unit="file", desc="Move") as pbar:
             for _, obj_key, _ in matches:
-              dest_key = _compute_dest_key(obj_key, src_prefix, dst_prefix)
+              dest_key = compute_dest_key(obj_key, src_prefix, dst_prefix)
               s3_client.copy(
                   {
                       "Bucket": src_bucket,
@@ -807,7 +807,7 @@ def handle_mv(args, s3_client):
               pbar.update(1)
         else:
           for _, obj_key, _ in matches:
-            dest_key = _compute_dest_key(obj_key, src_prefix, dst_prefix)
+            dest_key = compute_dest_key(obj_key, src_prefix, dst_prefix)
             s3_client.copy(
                 {
                     "Bucket": src_bucket,
