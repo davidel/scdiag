@@ -255,7 +255,6 @@ def handle_cp(args, s3_client):
             s3_client.upload_file(source, dst_bucket, dst_key, Callback=pbar.update)
         else:
           s3_client.upload_file(source, dst_bucket, dst_key)
-        print("Upload complete.")
 
       elif src_bucket and not dst_bucket:
         print(f"Downloading r2://{src_bucket}/{src_key} -> {dest_path}")
