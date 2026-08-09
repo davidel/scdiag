@@ -22,7 +22,7 @@ import sys
 import time
 
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 from tqdm import tqdm
 
 
@@ -32,9 +32,9 @@ def fatal(msg, code=1):
 
 
 def create_s3_client():
-  account_id = os.getenv("CLOUDFLARE_ACCOUNT_ID")
-  access_key_id = os.getenv("R2_ACCESS_KEY_ID")
-  secret_access_key = os.getenv("R2_SECRET_ACCESS_KEY")
+  account_id = (os.getenv("CLOUDFLARE_ACCOUNT_ID") or "").strip()
+  access_key_id = (os.getenv("R2_ACCESS_KEY_ID") or "").strip()
+  secret_access_key = (os.getenv("R2_SECRET_ACCESS_KEY") or "").strip()
 
   if not all([account_id, access_key_id, secret_access_key]):
     fatal("Missing credentials. Please set CLOUDFLARE_ACCOUNT_ID, "
@@ -78,7 +78,8 @@ def _get_static_prefix(pattern):
 def _expand_wildcard(s3_client, r2_path):
   """Expand a wildcard R2 path via server-side prefix listing + client-side fnmatch.
 
-  Returns a list of (bucket, key) tuples for all matching objects.
+  Returns a list of (bucket, key, size) tuples for all matching objects.
+  Size comes from the list_objects_v2 response (no extra HEAD requests).
   """
   bucket, pattern = parse_r2_path(r2_path)
   if not bucket:
@@ -104,10 +105,10 @@ def _expand_wildcard(s3_client, r2_path):
         for obj in page.get("Contents", []):
           key = obj["Key"].lstrip("/")
           if fnmatch.fnmatch(key, pattern):
-            matches.append((bucket, key))
+            matches.append((bucket, key, obj["Size"]))
       if matches:
         break
-  except ClientError as exc:
+  except (ClientError, BotoCoreError) as exc:
     fatal(f"Error listing objects: {exc}")
 
   if not matches:
@@ -124,7 +125,10 @@ def _compute_dest_key(src_key, src_prefix, dst_prefix):
     dst_prefix: the destination prefix (bucket/key/path).
   """
   relative = src_key[len(src_prefix):]
-  return dst_prefix + relative
+  if not relative:
+    return dst_prefix
+  # Ensure exactly one '/' between prefix and relative.
+  return dst_prefix.rstrip("/") + "/" + relative.lstrip("/")
 
 
 def _format_size(num_bytes):
@@ -164,7 +168,7 @@ def handle_ls(args, s3_client):
     if not found:
       print(f"No objects found in r2://{bucket}/{prefix}")
 
-  except ClientError as e:
+  except (ClientError, BotoCoreError) as e:
     fatal(f"ls failed: {e}")
 
 
@@ -200,13 +204,10 @@ def handle_cp(args, s3_client):
         if not os.path.isdir(local_dir):
           fatal(f"Destination directory does not exist: {local_dir}")
 
+        total_size = sum(size for _, _, size in matches)
         print(f"Wildcard downloading {len(matches)} object(s) -> {local_dir}/")
-        total_size = 0
-        for _, obj_key in matches:
-          head = s3_client.head_object(Bucket=src_bucket, Key=obj_key)
-          total_size += head["ContentLength"]
         with tqdm(total=total_size, unit="B", unit_scale=True, desc="Download") as pbar:
-          for _, obj_key in matches:
+          for _, obj_key, _ in matches:
             local_path = os.path.join(local_dir, os.path.basename(obj_key))
             s3_client.download_file(src_bucket,
                                     obj_key,
@@ -219,7 +220,7 @@ def handle_cp(args, s3_client):
         print(f"Wildcard copying {len(matches)} object(s) -> "
               f"r2://{dst_bucket}/{dst_prefix}")
         with tqdm(total=len(matches), unit="file", desc="Copy") as pbar:
-          for _, obj_key in matches:
+          for _, obj_key, _ in matches:
             dest_key = _compute_dest_key(obj_key, src_prefix, dst_prefix)
             s3_client.copy(
                 {
@@ -296,7 +297,7 @@ def handle_cp(args, s3_client):
       else:
         fatal("Both source and destination cannot be local files.")
 
-    except ClientError as e:
+    except (ClientError, BotoCoreError) as e:
       fatal(f"cp failed: {e}")
 
 
@@ -309,41 +310,40 @@ def handle_rm(args, s3_client):
     # List all objects under the prefix and batch-delete them.
     try:
       paginator = s3_client.get_paginator("list_objects_v2")
-      to_delete = []
+      total = 0
+      deleted = 0
+      batch = []
       for page in paginator.paginate(Bucket=bucket, Prefix=key):
         for obj in page.get("Contents", []):
-          to_delete.append({"Key": obj["Key"]})
-
-      if not to_delete:
-        print(f"No objects found under r2://{bucket}/{key}")
-        return
+          total += 1
+          if args.dry_run:
+            print(f"  would delete: {obj['Key']}")
+          else:
+            batch.append(obj["Key"])
+            if len(batch) >= 1000:
+              deleted += _batch_delete(s3_client, bucket, batch)
+              batch = []
 
       if args.dry_run:
-        for entry in to_delete:
-          print(f"  would delete: {entry['Key']}")
-        print(f"Would delete {len(to_delete)} object(s).")
+        print(f"Would delete {total} object(s).")
         return
 
-      print(f"Deleting {len(to_delete)} object(s) under r2://{bucket}/{key} ...")
-      # delete_objects accepts up to 1000 keys per request.
-      for i in range(0, len(to_delete), 1000):
-        batch = to_delete[i:i + 1000]
-        s3_client.delete_objects(
-            Bucket=bucket,
-            Delete={
-                "Objects": batch,
-                "Quiet": True
-            },
-        )
-      print(f"Deleted {len(to_delete)} object(s).")
-    except ClientError as e:
+      # Flush remaining batch.
+      if batch:
+        deleted += _batch_delete(s3_client, bucket, batch)
+
+      if total == 0:
+        print(f"No objects found under r2://{bucket}/{key}")
+      else:
+        print(f"Deleted {deleted}/{total} object(s).")
+    except (ClientError, BotoCoreError) as e:
       fatal(f"rm failed: {e}")
   else:
     try:
       print(f"Deleting r2://{bucket}/{key}")
       s3_client.delete_object(Bucket=bucket, Key=key)
       print("Delete complete.")
-    except ClientError as e:
+    except (ClientError, BotoCoreError) as e:
       fatal(f"rm failed: {e}")
 
 
@@ -361,10 +361,7 @@ def handle_du(args, s3_client):
   # Determine if the user passed a wildcard.
   if _has_wildcard(path):
     matches = _expand_wildcard(s3_client, path)
-    total = 0
-    for _, key in matches:
-      head = s3_client.head_object(Bucket=bucket, Key=key)
-      total += head["ContentLength"]
+    total = sum(size for _, _, size in matches)
     print(f"{_format_size(total)}\t{len(matches)} object(s)\t{path}")
   else:
     # Plain prefix listing — accumulate sizes as we paginate.
@@ -377,8 +374,31 @@ def handle_du(args, s3_client):
           total += obj["Size"]
           count += 1
       print(f"{_format_size(total)}\t{count} object(s)\tr2://{bucket}/{prefix}")
-    except ClientError as e:
+    except (ClientError, BotoCoreError) as e:
       fatal(f"du failed: {e}")
+
+
+def _batch_delete(s3_client, bucket, keys):
+  """Delete a list of keys in batches of 1000, checking for errors."""
+  deleted = 0
+  errors = []
+  for i in range(0, len(keys), 1000):
+    batch = keys[i:i + 1000]
+    resp = s3_client.delete_objects(
+        Bucket=bucket,
+        Delete={
+            "Objects": batch,
+            "Quiet": True
+        },
+    )
+    deleted += len(batch) - len(resp.get("Errors", []))
+    for err in resp.get("Errors", []):
+      errors.append(f"  {err['Key']}: {err['Code']} - {err.get('Message', '')}")
+  if errors:
+    print(f"WARNING: {len(errors)} deletion error(s):", file=sys.stderr)
+    for e in errors:
+      print(e, file=sys.stderr)
+  return deleted
 
 
 def _local_file_info(path):
@@ -501,15 +521,7 @@ def _sync_local_to_r2(s3_client, local_dir, r2_bucket, r2_prefix, args):
   # Delete.
   if to_delete:
     print(f"Deleting {len(to_delete)} object(s) ...")
-    for i in range(0, len(to_delete), 1000):
-      batch = [{"Key": k} for k in to_delete[i:i + 1000]]
-      s3_client.delete_objects(
-          Bucket=r2_bucket,
-          Delete={
-              "Objects": batch,
-              "Quiet": True
-          },
-      )
+    _batch_delete(s3_client, r2_bucket, to_delete)
 
   print(f"Sync complete: {len(to_upload)} uploaded, {len(to_delete)} deleted, "
         f"{len(remote) - len(to_upload)} unchanged.")
@@ -586,6 +598,9 @@ def _sync_r2_to_local(s3_client, r2_bucket, r2_prefix, local_dir, args):
         s3_client.download_file(r2_bucket, r2_key, local_path, Callback=pbar.update)
     else:
       s3_client.download_file(r2_bucket, r2_key, local_path)
+    # Sync local mtime to match remote so next sync doesn't re-download.
+    remote_mtime = remote[r2_key][1]
+    os.utime(local_path, (remote_mtime, remote_mtime))
 
   # Delete.
   for rel_path in to_delete:
@@ -613,7 +628,7 @@ def handle_presign(args, s3_client):
         ExpiresIn=args.expires,
     )
     print(url)
-  except ClientError as e:
+  except (ClientError, BotoCoreError) as e:
     fatal(f"presign failed: {e}")
 
 
@@ -627,8 +642,9 @@ def handle_mb(args, s3_client):
         CreateBucketConfiguration={"LocationConstraint": "auto"},
     )
     print(f"Bucket created: r2://{bucket_name}")
-  except ClientError as e:
-    if e.response["Error"]["Code"] == "BucketAlreadyExists":
+  except (ClientError, BotoCoreError) as e:
+    if hasattr(e, 'response') and e.response.get(
+        "Error", {}).get("Code") == "BucketAlreadyExists":
       fatal(f"Bucket already exists: {bucket_name}")
     fatal(f"mb failed: {e}")
 
@@ -645,28 +661,27 @@ def handle_rb(args, s3_client):
       fatal("Bucket is not empty. Use --force to delete all objects first.")
 
     if has_objects and args.force:
-      # Delete all objects recursively.
+      # Delete all objects recursively (streaming, no OOM).
       paginator = s3_client.get_paginator("list_objects_v2")
-      to_delete = []
+      total = 0
+      deleted = 0
+      batch = []
       for page in paginator.paginate(Bucket=bucket_name):
         for obj in page.get("Contents", []):
-          to_delete.append({"Key": obj["Key"]})
-
-      print(f"Deleting {len(to_delete)} object(s) from {bucket_name} ...")
-      for i in range(0, len(to_delete), 1000):
-        batch = to_delete[i:i + 1000]
-        s3_client.delete_objects(
-            Bucket=bucket_name,
-            Delete={
-                "Objects": batch,
-                "Quiet": True
-            },
-        )
+          total += 1
+          batch.append(obj["Key"])
+          if len(batch) >= 1000:
+            deleted += _batch_delete(s3_client, bucket_name, batch)
+            batch = []
+      if batch:
+        deleted += _batch_delete(s3_client, bucket_name, batch)
+      print(f"Deleted {deleted}/{total} object(s) from {bucket_name} ...")
 
     s3_client.delete_bucket(Bucket=bucket_name)
     print(f"Bucket deleted: r2://{bucket_name}")
-  except ClientError as e:
-    if e.response["Error"]["Code"] == "NoSuchBucket":
+  except (ClientError, BotoCoreError) as e:
+    if hasattr(e, 'response') and e.response.get("Error",
+                                                 {}).get("Code") == "NoSuchBucket":
       fatal(f"Bucket does not exist: {bucket_name}")
     fatal(f"rb failed: {e}")
 
@@ -680,6 +695,26 @@ def _parse_relative_date(s):
   return val * {"d": 86400, "h": 3600, "m": 60, "s": 1}[unit]
 
 
+def _parse_date_filter(s):
+  """Parse a date filter: ISO 8601 or relative ('7d', '24h', '-7d').
+
+  Returns epoch seconds. Relative dates are computed from now.
+  The leading '-' is optional for relative dates.
+  """
+  # Try relative date first (e.g. '7d', '-7d', '24h').
+  stripped = s.lstrip("-")
+  m = re.match(r"^(\d+)([dhms])$", stripped)
+  if m:
+    return time.time() - _parse_relative_date(stripped)
+
+  # Try ISO 8601 date.
+  try:
+    return dt.datetime.fromisoformat(s).timestamp()
+  except ValueError:
+    fatal(f"Invalid date format: {s}. Use ISO 8601 (e.g. 2025-01-15) "
+          "or relative (e.g. 7d, -24h).")
+
+
 def handle_find(args, s3_client):
   """Filter R2 objects by size, date, or name pattern under a prefix."""
   bucket, prefix = parse_r2_path(args.path)
@@ -689,18 +724,8 @@ def handle_find(args, s3_client):
     prefix = ""
 
   # Parse date filters into epoch seconds.
-  newer_than = None
-  older_than = None
-  if args.newer_than:
-    if args.newer_than.startswith("-"):
-      newer_than = time.time() - _parse_relative_date(args.newer_than[1:])
-    else:
-      newer_than = dt.datetime.fromisoformat(args.newer_than).timestamp()
-  if args.older_than:
-    if args.older_than.startswith("-"):
-      older_than = time.time() - _parse_relative_date(args.older_than[1:])
-    else:
-      older_than = dt.datetime.fromisoformat(args.older_than).timestamp()
+  newer_than = _parse_date_filter(args.newer_than) if args.newer_than else None
+  older_than = _parse_date_filter(args.older_than) if args.older_than else None
 
   ext_filter = f".{args.ext}" if args.ext else None
 
@@ -732,7 +757,7 @@ def handle_find(args, s3_client):
               f"r2://{bucket}/{key}")
         matches += 1
         total_size += size
-  except ClientError as e:
+  except (ClientError, BotoCoreError) as e:
     fatal(f"find failed: {e}")
 
 
@@ -768,7 +793,7 @@ def handle_mv(args, s3_client):
       try:
         if args.progress:
           with tqdm(total=len(matches), unit="file", desc="Move") as pbar:
-            for _, obj_key in matches:
+            for _, obj_key, _ in matches:
               dest_key = _compute_dest_key(obj_key, src_prefix, dst_prefix)
               s3_client.copy(
                   {
@@ -781,7 +806,7 @@ def handle_mv(args, s3_client):
               s3_client.delete_object(Bucket=src_bucket, Key=obj_key)
               pbar.update(1)
         else:
-          for _, obj_key in matches:
+          for _, obj_key, _ in matches:
             dest_key = _compute_dest_key(obj_key, src_prefix, dst_prefix)
             s3_client.copy(
                 {
@@ -793,7 +818,7 @@ def handle_mv(args, s3_client):
             )
             s3_client.delete_object(Bucket=src_bucket, Key=obj_key)
         print(f"Moved {len(matches)} object(s).")
-      except ClientError as e:
+      except (ClientError, BotoCoreError) as e:
         fatal(f"mv failed: {e}")
       continue
 
@@ -818,7 +843,7 @@ def handle_mv(args, s3_client):
       )
       s3_client.delete_object(Bucket=src_bucket, Key=src_key)
       print("Move complete.")
-    except ClientError as e:
+    except (ClientError, BotoCoreError) as e:
       fatal(f"mv failed: {e}")
 
 
