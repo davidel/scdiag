@@ -307,6 +307,40 @@ def handle_rm(args, s3_client):
     fatal(f"rm failed: {e}")
 
 
+def handle_du(args, s3_client):
+  """Report total size of objects matching an R2 prefix or wildcard pattern."""
+  path = args.path
+  bucket, prefix = parse_r2_path(path)
+  if not bucket:
+    fatal("'du' target must start with r2://")
+
+  # If no filter given, list the entire bucket.
+  if not prefix:
+    prefix = ""
+
+  # Determine if the user passed a wildcard.
+  if _has_wildcard(path):
+    matches = _expand_wildcard(s3_client, path)
+    total = 0
+    for _, key in matches:
+      head = s3_client.head_object(Bucket=bucket, Key=key)
+      total += head["ContentLength"]
+    print(f"{_format_size(total)}\t{len(matches)} object(s)\t{path}")
+  else:
+    # Plain prefix listing — accumulate sizes as we paginate.
+    try:
+      paginator = s3_client.get_paginator("list_objects_v2")
+      total = 0
+      count = 0
+      for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents", []):
+          total += obj["Size"]
+          count += 1
+      print(f"{_format_size(total)}\t{count} object(s)\tr2://{bucket}/{prefix}")
+    except ClientError as e:
+      fatal(f"du failed: {e}")
+
+
 def handle_mv(args, s3_client):
   """Renames R2 objects (copy + delete). All paths must be r2://."""
   sources = args.sources
@@ -434,6 +468,14 @@ def main():
                          "When multiple sources are given, the destination is "
                          "treated as a directory prefix.")
   parser_mv.set_defaults(func=handle_mv)
+
+  parser_du = subparsers.add_parser(
+      "du", help="Report total size of objects under a prefix or matching a wildcard")
+  parser_du.add_argument(
+      "path",
+      help="R2 prefix or wildcard pattern (e.g. r2://bucket/prefix/ or "
+      "r2://bucket/prefix/*.pt)")
+  parser_du.set_defaults(func=handle_du)
 
   args = parser.parse_args()
   s3_client = create_s3_client()
