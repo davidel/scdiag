@@ -764,11 +764,16 @@ def train_one_epoch(
     args,
     writer=None,
     monitor=None,
+    global_step=0,
 ):
   """Train for one epoch.
 
     If ``args.grad_accum_steps > 1``, gradients are accumulated over that many
     micro-batches before stepping the optimizer.
+
+    *global_step* is the running count of actual optimizer steps across all
+    epochs (used for the gradient monitor so it receives contiguous step
+    numbers).  The updated value is returned.
     """
   model.train()
   total_loss, correct_top1, total_samples = 0.0, 0, 0
@@ -816,16 +821,17 @@ def train_one_epoch(
         # Gradient monitor must read AFTER unscale_() so it sees the true
         # gradient magnitudes, not the scaled values.
         if monitor is not None:
-          monitor.step(epoch * total_batches + batch_idx)
+          monitor.step(global_step)
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         scaler.step(optimizer)
         scaler.update()
       else:
         if monitor is not None:
-          monitor.step(epoch * total_batches + batch_idx)
+          monitor.step(global_step)
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
       optimizer.zero_grad(set_to_none=True)
+      global_step += 1
 
     with torch.no_grad():
       orig_targets = (targets if not use_mixup else
@@ -900,7 +906,7 @@ def train_one_epoch(
   elapsed = time.time() - start_time
   logging.info(f"  Train stats -> loss: {avg_loss:.4f} | top1: {top1:.2f}%"
                f" | time: {elapsed:.1f}s")
-  return avg_loss, top1
+  return avg_loss, top1, global_step
 
 
 def evaluate_performance(model,
@@ -1109,7 +1115,7 @@ def main():
   ckpt_latest = args.checkpoint + "_latest.pt"
   ckpt_best = args.checkpoint + "_best.pt"
 
-  start_epoch, best_top1 = resume_checkpoint(
+  start_epoch, best_top1, ckpt_extra = resume_checkpoint(
       ckpt_latest,
       ckpt_best,
       model,
@@ -1125,13 +1131,23 @@ def main():
   if args.grad_monitor >= 0:
     grad_monitor = GradMonitor(model, log_every=args.grad_monitor)
     logging.info(f"Gradient monitoring enabled (every {args.grad_monitor} steps).")
+
+  # Running count of actual optimizer steps (across epochs) for the
+  # gradient monitor so it receives contiguous step numbers.
+  # Prefer the exact value saved in the checkpoint; fall back to the
+  # formula-based estimate for checkpoints saved before this field existed.
+  optimizer_global_step = ckpt_extra.get(
+      "global_step",
+      start_epoch * (len(train_loader) // args.grad_accum_steps),
+  )
+
   try:
     for epoch in range(start_epoch, args.epochs):
       effective_batch = args.batch_size * args.grad_accum_steps
       logging.info(f"=== Epoch {epoch + 1}/{args.epochs} "
                    f"(eff_batch={effective_batch}) ===")
 
-      train_loss, train_t1 = train_one_epoch(
+      train_loss, train_t1, optimizer_global_step = train_one_epoch(
           model,
           train_loader,
           criterion,
@@ -1145,6 +1161,7 @@ def main():
           args,
           writer=writer,
           monitor=grad_monitor,
+          global_step=optimizer_global_step,
       )
 
       if scheduler is not None:
@@ -1182,6 +1199,7 @@ def main():
                 states_to_save=states_to_save,
                 scaler=scaler,
                 best_top1=best_top1,
+                global_step=optimizer_global_step,
             ),
             args.checkpoint + "_best.pt",
             remote_uri=args.remote_checkpoint,
@@ -1201,6 +1219,7 @@ def main():
             states_to_save=states_to_save,
             scaler=scaler,
             best_top1=best_top1,
+            global_step=optimizer_global_step,
         ),
         args.checkpoint + "_latest.pt",
         remote_uri=args.remote_checkpoint,

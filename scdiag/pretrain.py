@@ -639,10 +639,11 @@ def main(argv=None):
   states_to_load = parse_state_flags(args.state_load)
 
   start_epoch = 0
+  ckpt_extra = {}
   if args.resume:
     ckpt_latest = args.checkpoint + "_latest.pt"
     ckpt_best = args.checkpoint + "_best.pt"
-    start_epoch, _ = resume_checkpoint(
+    start_epoch, _, ckpt_extra = resume_checkpoint(
         ckpt_latest,
         ckpt_best,
         model,
@@ -657,7 +658,10 @@ def main(argv=None):
   writer = SummaryWriter(log_dir=args.log_dir)
 
   completed_epoch = start_epoch - 1  # last fully completed (-1 = none yet)
-  global_step = start_epoch * (len(loader) // args.grad_accum_steps)
+  global_step = ckpt_extra.get(
+      "global_step",
+      start_epoch * (len(loader) // args.grad_accum_steps),
+  )
   grad_monitor = None
   if args.grad_monitor >= 0:
     grad_monitor = GradMonitor(model, log_every=args.grad_monitor)
@@ -692,6 +696,7 @@ def main(argv=None):
               completed_epoch,
               states_to_save=states_to_save,
               loss=avg_loss,
+              global_step=global_step,
           ),
           args.checkpoint + "_latest.pt",
           remote_uri=args.remote_checkpoint,
@@ -708,6 +713,7 @@ def main(argv=None):
             completed_epoch,
             states_to_save=states_to_save,
             loss=avg_loss if "avg_loss" in dir() else 0.0,
+            global_step=global_step,
         ),
         args.checkpoint + "_latest.pt",
         remote_uri=args.remote_checkpoint,
