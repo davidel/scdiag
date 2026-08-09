@@ -401,6 +401,60 @@ def handle_presign(args, s3_client):
     fatal(f"presign failed: {e}")
 
 
+def handle_mb(args, s3_client):
+  """Create a new R2 bucket."""
+  bucket_name = args.bucket
+  try:
+    # R2 requires LocationConstraint when creating buckets.
+    s3_client.create_bucket(
+        Bucket=bucket_name,
+        CreateBucketConfiguration={"LocationConstraint": "auto"},
+    )
+    print(f"Bucket created: r2://{bucket_name}")
+  except ClientError as e:
+    if e.response["Error"]["Code"] == "BucketAlreadyExists":
+      fatal(f"Bucket already exists: {bucket_name}")
+    fatal(f"mb failed: {e}")
+
+
+def handle_rb(args, s3_client):
+  """Remove an R2 bucket. Must be empty unless --force is used."""
+  bucket_name = args.bucket
+  try:
+    # Check if bucket has objects.
+    resp = s3_client.list_objects_v2(Bucket=bucket_name, MaxKeys=1)
+    has_objects = resp.get("KeyCount", 0) > 0
+
+    if has_objects and not args.force:
+      fatal("Bucket is not empty. Use --force to delete all objects first.")
+
+    if has_objects and args.force:
+      # Delete all objects recursively.
+      paginator = s3_client.get_paginator("list_objects_v2")
+      to_delete = []
+      for page in paginator.paginate(Bucket=bucket_name):
+        for obj in page.get("Contents", []):
+          to_delete.append({"Key": obj["Key"]})
+
+      print(f"Deleting {len(to_delete)} object(s) from {bucket_name} ...")
+      for i in range(0, len(to_delete), 1000):
+        batch = to_delete[i:i + 1000]
+        s3_client.delete_objects(
+            Bucket=bucket_name,
+            Delete={
+                "Objects": batch,
+                "Quiet": True
+            },
+        )
+
+    s3_client.delete_bucket(Bucket=bucket_name)
+    print(f"Bucket deleted: r2://{bucket_name}")
+  except ClientError as e:
+    if e.response["Error"]["Code"] == "NoSuchBucket":
+      fatal(f"Bucket does not exist: {bucket_name}")
+    fatal(f"rb failed: {e}")
+
+
 def _parse_relative_date(s):
   """Parse a relative date string like '7d', '24h', '30m' into seconds."""
   m = re.match(r"^(\d+)([dhms])$", s)
@@ -636,6 +690,17 @@ def main():
                            "basename (e.g. '*.pt')")
   parser_find.add_argument("--ext", help="Shorthand for --name *.EXT")
   parser_find.set_defaults(func=handle_find)
+
+  parser_mb = subparsers.add_parser("mb", help="Create a new R2 bucket")
+  parser_mb.add_argument("bucket", help="Bucket name (without r2:// prefix)")
+  parser_mb.set_defaults(func=handle_mb)
+
+  parser_rb = subparsers.add_parser("rb", help="Remove an R2 bucket")
+  parser_rb.add_argument("bucket", help="Bucket name (without r2:// prefix)")
+  parser_rb.add_argument("--force",
+                         action="store_true",
+                         help="Delete all objects before removing the bucket")
+  parser_rb.set_defaults(func=handle_rb)
 
   args = parser.parse_args()
   s3_client = create_s3_client()
