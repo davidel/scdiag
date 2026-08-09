@@ -298,12 +298,46 @@ def handle_rm(args, s3_client):
   if not bucket or not key:
     fatal("Target must be a specific object starting with r2://bucket/key")
 
-  try:
-    print(f"Deleting r2://{bucket}/{key}")
-    s3_client.delete_object(Bucket=bucket, Key=key)
-    print("Delete complete.")
-  except ClientError as e:
-    fatal(f"rm failed: {e}")
+  if args.recursive:
+    # List all objects under the prefix and batch-delete them.
+    try:
+      paginator = s3_client.get_paginator("list_objects_v2")
+      to_delete = []
+      for page in paginator.paginate(Bucket=bucket, Prefix=key):
+        for obj in page.get("Contents", []):
+          to_delete.append({"Key": obj["Key"]})
+
+      if not to_delete:
+        print(f"No objects found under r2://{bucket}/{key}")
+        return
+
+      if args.dry_run:
+        for entry in to_delete:
+          print(f"  would delete: {entry['Key']}")
+        print(f"Would delete {len(to_delete)} object(s).")
+        return
+
+      print(f"Deleting {len(to_delete)} object(s) under r2://{bucket}/{key} ...")
+      # delete_objects accepts up to 1000 keys per request.
+      for i in range(0, len(to_delete), 1000):
+        batch = to_delete[i:i + 1000]
+        s3_client.delete_objects(
+            Bucket=bucket,
+            Delete={
+                "Objects": batch,
+                "Quiet": True
+            },
+        )
+      print(f"Deleted {len(to_delete)} object(s).")
+    except ClientError as e:
+      fatal(f"rm failed: {e}")
+  else:
+    try:
+      print(f"Deleting r2://{bucket}/{key}")
+      s3_client.delete_object(Bucket=bucket, Key=key)
+      print("Delete complete.")
+    except ClientError as e:
+      fatal(f"rm failed: {e}")
 
 
 def handle_du(args, s3_client):
@@ -452,9 +486,15 @@ def main():
                          help="Show a progress bar during transfer")
   parser_cp.set_defaults(func=handle_cp)
 
-  parser_rm = subparsers.add_parser(
-      "rm", help="Remove an object from R2 (Format: r2://bucket-name/key)")
+  parser_rm = subparsers.add_parser("rm", help="Remove an object or directory from R2")
   parser_rm.add_argument("path", help="Target object key path starting with r2://")
+  parser_rm.add_argument("-r",
+                         "--recursive",
+                         action="store_true",
+                         help="Delete all objects under the given prefix")
+  parser_rm.add_argument("--dry-run",
+                         action="store_true",
+                         help="Show what would be deleted without deleting")
   parser_rm.set_defaults(func=handle_rm)
 
   parser_mv = subparsers.add_parser("mv", help="Rename R2 objects (copy + delete)")
