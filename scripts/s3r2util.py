@@ -217,8 +217,17 @@ def handle_cp(args, s3_client):
     src_bucket, src_key = parse_r2_path(source)
 
     if is_dir:
-      dest_path = (destination + source if destination.endswith("/") else os.path.join(
-          destination, os.path.basename(source)))
+      if src_bucket:
+        # R2 -> R2 dir: preserve full key structure
+        dest_path = (destination +
+                     src_key if destination.endswith("/") else destination + "/" +
+                     src_key)
+      else:
+        # Local -> R2 dir: key is relative path from cwd
+        rel_key = os.path.relpath(source)
+        dest_path = (destination +
+                     rel_key if destination.endswith("/") else destination + "/" +
+                     rel_key)
     else:
       dest_path = destination
 
@@ -333,11 +342,15 @@ def handle_mv(args, s3_client):
       continue
 
     # --- Single source ------------------------------------------------
+    _, dst_prefix = parse_r2_path(destination)
+
     if is_dir:
-      dest_key = (destination + src_key if destination.endswith("/") else os.path.join(
-          destination, src_key).replace("\\", "/"))
+      if destination.endswith("/"):
+        dest_key = dst_prefix + src_key
+      else:
+        dest_key = dst_prefix + "/" + src_key
     else:
-      _, dest_key = parse_r2_path(destination)
+      dest_key = dst_prefix
 
     print(f"Moving r2://{src_bucket}/{src_key} -> r2://{dst_bucket}/{dest_key}")
     try:
