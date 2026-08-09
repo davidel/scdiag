@@ -309,17 +309,18 @@ def handle_mv(args, s3_client):
           "(ending with '/').")
 
   for source in sources:
-    src_bucket, src_key = parse_r2_path(source)
+    src_bucket, _ = parse_r2_path(source)
     if not src_bucket:
       fatal(f"Source must be an R2 path: {source}")
+    # Extract the raw key exactly as stored in R2 (preserving leading '/').
+    # parse_r2_path strips it, which would cause a 404 on copy.
+    src_key = source.split("/", 2)[2]
 
     # --- Wildcard source ---------------------------------------------
     if _has_wildcard(source):
-      src_prefix = parse_r2_path(source)[1]
+      src_prefix = source.split("/", 2)[2]
       matches = _expand_wildcard(s3_client, source)
-      dst_prefix = (destination +
-                    src_prefix if destination.endswith("/") else destination + "/" +
-                    src_prefix)
+      _, dst_prefix = parse_r2_path(destination)
 
       print(f"Wildcard moving {len(matches)} object(s):")
       try:
