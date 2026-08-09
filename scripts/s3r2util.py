@@ -381,6 +381,222 @@ def handle_du(args, s3_client):
       fatal(f"du failed: {e}")
 
 
+def _local_file_info(path):
+  """Return (size, mtime_epoch) for a local file."""
+  stat = os.stat(path)
+  return stat.st_size, stat.st_mtime
+
+
+def _r2_object_index(s3_client, bucket, prefix):
+  """Build {key: (size, last_modified_epoch)} for all objects under prefix."""
+  index = {}
+  paginator = s3_client.get_paginator("list_objects_v2")
+  for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+    for obj in page.get("Contents", []):
+      index[obj["Key"]] = (obj["Size"], obj["LastModified"].timestamp())
+  return index
+
+
+def _should_upload(local_size, local_mtime, remote_size, remote_mtime):
+  """Decide whether a local file should be uploaded based on size/mtime."""
+  if remote_size is None:
+    return True  # Object doesn't exist remotely.
+  return (local_size != remote_size) or (local_mtime > remote_mtime)
+
+
+def _should_download(local_size, local_mtime, remote_size, remote_mtime):
+  """Decide whether a remote object should be downloaded to local."""
+  if local_size is None:
+    return True  # Local file doesn't exist.
+  return (local_size != remote_size) or (remote_mtime > local_mtime)
+
+
+def handle_sync(args, s3_client):
+  """Synchronize files between local directory and R2 prefix."""
+  src = args.source
+  dst = args.destination
+
+  # Determine direction from the r2:// prefixes.
+  src_bucket, src_prefix = parse_r2_path(src)
+  dst_bucket, dst_prefix = parse_r2_path(dst)
+
+  if src_bucket and dst_bucket:
+    fatal("sync between two R2 paths is not supported. Use cp instead.")
+
+  if not src_bucket and not dst_bucket:
+    fatal("sync between two local paths is not supported. Use cp instead.")
+
+  if src_bucket:
+    # R2 -> local direction.
+    _sync_r2_to_local(s3_client, src_bucket, src_prefix, dst, args)
+  else:
+    # Local -> R2 direction.
+    _sync_local_to_r2(s3_client, src, dst_bucket, dst_prefix, args)
+
+
+def _sync_local_to_r2(s3_client, local_dir, r2_bucket, r2_prefix, args):
+  """Upload changed local files to R2."""
+  if not os.path.isdir(local_dir):
+    fatal(f"Source directory does not exist: {local_dir}")
+
+  # Ensure r2_prefix ends with '/' for proper key construction.
+  if r2_prefix and not r2_prefix.endswith("/"):
+    r2_prefix += "/"
+
+  # Build remote index.
+  remote = _r2_object_index(s3_client, r2_bucket, r2_prefix)
+
+  # Collect local files.
+  to_upload = []
+  local_rel_keys = set()
+  for root, _, files in os.walk(local_dir):
+    for fname in files:
+      local_path = os.path.join(root, fname)
+      rel_path = os.path.relpath(local_path, local_dir)
+      # R2 key uses forward slashes, no leading '/'.
+      r2_key = (r2_prefix + rel_path).replace("\\", "/")
+      local_rel_keys.add(r2_key)
+
+      local_size, local_mtime = _local_file_info(local_path)
+      remote_size, remote_mtime = remote.get(r2_key, (None, None))
+
+      # Apply exclude filter.
+      if args.exclude and fnmatch.fnmatch(rel_path, args.exclude):
+        continue
+
+      if _should_upload(local_size, local_mtime, remote_size, remote_mtime):
+        to_upload.append((local_path, r2_key, local_size))
+
+  # Handle --delete: remove remote objects not present locally.
+  to_delete = []
+  if args.delete:
+    for r2_key in remote:
+      if r2_key not in local_rel_keys:
+        # Don't delete prefix markers or things we excluded.
+        if args.exclude and fnmatch.fnmatch(os.path.relpath(r2_key, r2_prefix),
+                                            args.exclude):
+          continue
+        to_delete.append(r2_key)
+
+  if args.dry_run:
+    for local_path, r2_key, size in to_upload:
+      print(
+          f"  upload: {local_path} -> r2://{r2_bucket}/{r2_key}  ({_format_size(size)})"
+      )
+    for r2_key in to_delete:
+      print(f"  delete: r2://{r2_bucket}/{r2_key}")
+    print(f"Would upload {len(to_upload)}, delete {len(to_delete)}, "
+          f"skip {len(remote) - len(to_upload) - len(to_delete)}.")
+    return
+
+  # Upload.
+  for local_path, r2_key, size in to_upload:
+    print(f"Uploading {local_path} -> r2://{r2_bucket}/{r2_key}")
+    if args.progress:
+      with tqdm(total=size, unit="B", unit_scale=True, desc="Upload") as pbar:
+        s3_client.upload_file(local_path, r2_bucket, r2_key, Callback=pbar.update)
+    else:
+      s3_client.upload_file(local_path, r2_bucket, r2_key)
+
+  # Delete.
+  if to_delete:
+    print(f"Deleting {len(to_delete)} object(s) ...")
+    for i in range(0, len(to_delete), 1000):
+      batch = [{"Key": k} for k in to_delete[i:i + 1000]]
+      s3_client.delete_objects(
+          Bucket=r2_bucket,
+          Delete={
+              "Objects": batch,
+              "Quiet": True
+          },
+      )
+
+  print(f"Sync complete: {len(to_upload)} uploaded, {len(to_delete)} deleted, "
+        f"{len(remote) - len(to_upload)} unchanged.")
+
+
+def _sync_r2_to_local(s3_client, r2_bucket, r2_prefix, local_dir, args):
+  """Download changed R2 objects to local directory."""
+  if not local_dir:
+    fatal("Local destination must be a directory.")
+
+  if r2_prefix and not r2_prefix.endswith("/"):
+    r2_prefix += "/"
+
+  # Build remote index.
+  remote = _r2_object_index(s3_client, r2_bucket, r2_prefix)
+
+  # Build local index (keys relative to r2_prefix).
+  local_files = {}  # {rel_path: (size, mtime)}
+  if os.path.isdir(local_dir):
+    for root, _, files in os.walk(local_dir):
+      for fname in files:
+        local_path = os.path.join(root, fname)
+        rel_path = os.path.relpath(local_path, local_dir)
+        local_files[rel_path] = _local_file_info(local_path)
+
+  to_download = []
+  for r2_key, (remote_size, remote_mtime) in remote.items():
+    rel_path = r2_key[len(r2_prefix):]  # Strip prefix.
+    if not rel_path:
+      continue  # Skip the prefix itself if it's an object.
+
+    # Apply exclude filter.
+    if args.exclude and fnmatch.fnmatch(rel_path, args.exclude):
+      continue
+
+    local_size, local_mtime = local_files.get(rel_path, (None, None))
+    if _should_download(local_size, local_mtime, remote_size, remote_mtime):
+      to_download.append((r2_key, rel_path, remote_size))
+
+  # Handle --delete: remove local files not present on R2.
+  to_delete = []
+  if args.delete:
+    remote_rel_keys = set()
+    for r2_key in remote:
+      rel_path = r2_key[len(r2_prefix):]
+      if rel_path:
+        remote_rel_keys.add(rel_path)
+    for rel_path in local_files:
+      if rel_path not in remote_rel_keys:
+        if args.exclude and fnmatch.fnmatch(rel_path, args.exclude):
+          continue
+        to_delete.append(rel_path)
+
+  if args.dry_run:
+    for r2_key, rel_path, size in to_download:
+      print(
+          f"  download: r2://{r2_bucket}/{r2_key} -> {os.path.join(local_dir, rel_path)}  ({_format_size(size)})"
+      )
+    for rel_path in to_delete:
+      print(f"  delete: {os.path.join(local_dir, rel_path)}")
+    print(f"Would download {len(to_download)}, delete {len(to_delete)}, "
+          f"skip {len(remote) - len(to_download)}.")
+    return
+
+  # Download.
+  for r2_key, rel_path, size in to_download:
+    local_path = os.path.join(local_dir, rel_path)
+    local_dir_path = os.path.dirname(local_path)
+    if local_dir_path:
+      os.makedirs(local_dir_path, exist_ok=True)
+    print(f"Downloading r2://{r2_bucket}/{r2_key} -> {local_path}")
+    if args.progress:
+      with tqdm(total=size, unit="B", unit_scale=True, desc="Download") as pbar:
+        s3_client.download_file(r2_bucket, r2_key, local_path, Callback=pbar.update)
+    else:
+      s3_client.download_file(r2_bucket, r2_key, local_path)
+
+  # Delete.
+  for rel_path in to_delete:
+    local_path = os.path.join(local_dir, rel_path)
+    print(f"Deleting {local_path}")
+    os.remove(local_path)
+
+  print(f"Sync complete: {len(to_download)} downloaded, {len(to_delete)} deleted, "
+        f"{len(remote) - len(to_download)} unchanged.")
+
+
 def handle_presign(args, s3_client):
   """Generate a time-limited pre-signed download URL for an R2 object."""
   bucket, key = parse_r2_path(args.path)
@@ -690,6 +906,27 @@ def main():
                            "basename (e.g. '*.pt')")
   parser_find.add_argument("--ext", help="Shorthand for --name *.EXT")
   parser_find.set_defaults(func=handle_find)
+
+  parser_sync = subparsers.add_parser(
+      "sync", help="Synchronize files between a local directory and an R2 prefix")
+  parser_sync.add_argument("source",
+                           help="Source path: local directory or r2://bucket/prefix/")
+  parser_sync.add_argument(
+      "destination", help="Destination path: r2://bucket/prefix/ or local directory")
+  parser_sync.add_argument(
+      "--delete",
+      action="store_true",
+      help="Remove files at destination that don't exist at source")
+  parser_sync.add_argument("--dry-run",
+                           action="store_true",
+                           help="Show what would be transferred without doing it")
+  parser_sync.add_argument("--progress",
+                           action="store_true",
+                           help="Show progress bars during transfer")
+  parser_sync.add_argument(
+      "--exclude",
+      help="Glob pattern for files to skip (matched against relative path)")
+  parser_sync.set_defaults(func=handle_sync)
 
   parser_mb = subparsers.add_parser("mb", help="Create a new R2 bucket")
   parser_mb.add_argument("bucket", help="Bucket name (without r2:// prefix)")
