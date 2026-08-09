@@ -374,6 +374,26 @@ def handle_du(args, s3_client):
       fatal(f"du failed: {e}")
 
 
+def handle_presign(args, s3_client):
+  """Generate a time-limited pre-signed download URL for an R2 object."""
+  bucket, key = parse_r2_path(args.path)
+  if not bucket or not key:
+    fatal("Target must be a specific object starting with r2://bucket/key")
+
+  try:
+    url = s3_client.generate_presigned_url(
+        "get_object",
+        Params={
+            "Bucket": bucket,
+            "Key": key
+        },
+        ExpiresIn=args.expires,
+    )
+    print(url)
+  except ClientError as e:
+    fatal(f"presign failed: {e}")
+
+
 def handle_mv(args, s3_client):
   """Renames R2 objects (copy + delete). All paths must be r2://."""
   sources = args.sources
@@ -515,6 +535,16 @@ def main():
       help="R2 prefix or wildcard pattern (e.g. r2://bucket/prefix/ or "
       "r2://bucket/prefix/*.pt)")
   parser_du.set_defaults(func=handle_du)
+
+  parser_presign = subparsers.add_parser(
+      "presign",
+      help="Generate a time-limited pre-signed download URL for an R2 object")
+  parser_presign.add_argument("path", help="R2 object path (r2://bucket/key)")
+  parser_presign.add_argument("--expires",
+                              type=int,
+                              default=3600,
+                              help="URL validity in seconds (default: 3600)")
+  parser_presign.set_defaults(func=handle_presign)
 
   args = parser.parse_args()
   s3_client = create_s3_client()
