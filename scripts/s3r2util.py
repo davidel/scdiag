@@ -343,12 +343,10 @@ def handle_mv(args, s3_client):
 
     # --- Single source ------------------------------------------------
     _, dst_prefix = parse_r2_path(destination)
+    src_basename = os.path.basename(src_key)
 
     if is_dir:
-      if destination.endswith("/"):
-        dest_key = dst_prefix + src_key
-      else:
-        dest_key = dst_prefix + "/" + src_key
+      dest_key = dst_prefix + src_basename
     else:
       dest_key = dst_prefix
 
