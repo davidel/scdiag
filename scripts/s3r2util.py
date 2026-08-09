@@ -83,17 +83,30 @@ def _expand_wildcard(s3_client, r2_path):
     fatal(f"Wildcard path must start with r2://: {r2_path}")
 
   prefix = _get_static_prefix(pattern)
-  try:
-    paginator = s3_client.get_paginator("list_objects_v2")
-    page_iter = paginator.paginate(Bucket=bucket, Prefix=prefix)
-  except ClientError as exc:
-    fatal(f"Error listing objects with prefix '{prefix}': {exc}")
+
+  # Try the prefix as-is first, then fall back to toggling leading '/'.
+  # Some buckets store keys with a leading '/' (e.g. '/content/file.pt')
+  # while parse_r2_path strips it (giving 'content/file.pt').
+  prefixes_to_try = [prefix]
+  if prefix.startswith("/"):
+    prefixes_to_try.append(prefix[1:])
+  elif prefix:
+    prefixes_to_try.append("/" + prefix)
 
   matches = []
-  for page in page_iter:
-    for obj in page.get("Contents", []):
-      if fnmatch.fnmatch(obj["Key"], pattern):
-        matches.append((bucket, obj["Key"]))
+  try:
+    paginator = s3_client.get_paginator("list_objects_v2")
+    for try_prefix in prefixes_to_try:
+      page_iter = paginator.paginate(Bucket=bucket, Prefix=try_prefix)
+      for page in page_iter:
+        for obj in page.get("Contents", []):
+          key = obj["Key"].lstrip("/")
+          if fnmatch.fnmatch(key, pattern):
+            matches.append((bucket, key))
+      if matches:
+        break
+  except ClientError as exc:
+    fatal(f"Error listing objects: {exc}")
 
   if not matches:
     fatal(f"No objects matched pattern: {r2_path}")
@@ -223,8 +236,8 @@ def handle_cp(args, s3_client):
                      src_key if destination.endswith("/") else destination + "/" +
                      src_key)
       else:
-        # Local -> R2 dir: key is relative path from cwd
-        rel_key = os.path.relpath(source)
+        # Local -> R2 dir: key is relative path from cwd (no leading '/')
+        rel_key = os.path.relpath(source).lstrip("/")
         dest_path = (destination +
                      rel_key if destination.endswith("/") else destination + "/" +
                      rel_key)
@@ -312,18 +325,33 @@ def handle_mv(args, s3_client):
     src_bucket, _ = parse_r2_path(source)
     if not src_bucket:
       fatal(f"Source must be an R2 path: {source}")
-    # Extract the key portion: "r2://bucket/key" -> "key"
-    src_key = source.split("/", 3)[3]
+    # Extract the key portion, stripping leading '/' to avoid
+    # creating double-slash R2 URLs.
+    src_key = source.split("/", 3)[3].lstrip("/")
 
     # --- Wildcard source ---------------------------------------------
     if _has_wildcard(source):
-      src_prefix = source.split("/", 3)[3]
+      src_prefix = src_key  # already normalized
       matches = _expand_wildcard(s3_client, source)
       _, dst_prefix = parse_r2_path(destination)
 
       print(f"Wildcard moving {len(matches)} object(s):")
       try:
-        with tqdm(total=len(matches), unit="file", desc="Move") as pbar:
+        if args.progress:
+          with tqdm(total=len(matches), unit="file", desc="Move") as pbar:
+            for _, obj_key in matches:
+              dest_key = _compute_dest_key(obj_key, src_prefix, dst_prefix)
+              s3_client.copy(
+                  {
+                      "Bucket": src_bucket,
+                      "Key": obj_key
+                  },
+                  dst_bucket,
+                  dest_key,
+              )
+              s3_client.delete_object(Bucket=src_bucket, Key=obj_key)
+              pbar.update(1)
+        else:
           for _, obj_key in matches:
             dest_key = _compute_dest_key(obj_key, src_prefix, dst_prefix)
             s3_client.copy(
@@ -335,7 +363,6 @@ def handle_mv(args, s3_client):
                 dest_key,
             )
             s3_client.delete_object(Bucket=src_bucket, Key=obj_key)
-            pbar.update(1)
         print(f"Moved {len(matches)} object(s).")
       except ClientError as e:
         fatal(f"mv failed: {e}")
