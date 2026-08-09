@@ -14,10 +14,12 @@ trailing-slash destination semantics, r2:// path prefixes) without
 depending on the `aws` CLI being installed.
 """
 import argparse
+import datetime as dt
 import fnmatch
 import os
 import re
 import sys
+import time
 
 import boto3
 from botocore.exceptions import ClientError
@@ -132,6 +134,11 @@ def _format_size(num_bytes):
       return f"{num_bytes:.2f} {unit}"
     num_bytes /= 1024
   return f"{num_bytes:.2f} PB"
+
+
+def _format_date(d):
+  """Format a datetime to local time string (YYYY-MM-DD HH:MM:SS tz)."""
+  return d.astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
 
 
 def handle_ls(args, s3_client):
@@ -394,6 +401,71 @@ def handle_presign(args, s3_client):
     fatal(f"presign failed: {e}")
 
 
+def _parse_relative_date(s):
+  """Parse a relative date string like '7d', '24h', '30m' into seconds."""
+  m = re.match(r"^(\d+)([dhms])$", s)
+  if not m:
+    fatal(f"Invalid relative date: {s}. Use e.g. '7d', '24h', '30m'.")
+  val, unit = int(m.group(1)), m.group(2)
+  return val * {"d": 86400, "h": 3600, "m": 60, "s": 1}[unit]
+
+
+def handle_find(args, s3_client):
+  """Filter R2 objects by size, date, or name pattern under a prefix."""
+  bucket, prefix = parse_r2_path(args.path)
+  if not bucket:
+    fatal("'find' target must start with r2://")
+  if not prefix:
+    prefix = ""
+
+  # Parse date filters into epoch seconds.
+  newer_than = None
+  older_than = None
+  if args.newer_than:
+    if args.newer_than.startswith("-"):
+      newer_than = time.time() - _parse_relative_date(args.newer_than[1:])
+    else:
+      newer_than = dt.datetime.fromisoformat(args.newer_than).timestamp()
+  if args.older_than:
+    if args.older_than.startswith("-"):
+      older_than = time.time() - _parse_relative_date(args.older_than[1:])
+    else:
+      older_than = dt.datetime.fromisoformat(args.older_than).timestamp()
+
+  ext_filter = f".{args.ext}" if args.ext else None
+
+  try:
+    paginator = s3_client.get_paginator("list_objects_v2")
+    matches = 0
+    total_size = 0
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+      for obj in page.get("Contents", []):
+        key = obj["Key"]
+        size = obj["Size"]
+        last_modified = obj["LastModified"].timestamp()
+
+        # Apply filters.
+        if args.min_size is not None and size < args.min_size:
+          continue
+        if args.max_size is not None and size > args.max_size:
+          continue
+        if newer_than is not None and last_modified < newer_than:
+          continue
+        if older_than is not None and last_modified > older_than:
+          continue
+        if ext_filter and not key.endswith(ext_filter):
+          continue
+        if args.name and not fnmatch.fnmatch(os.path.basename(key), args.name):
+          continue
+
+        print(f"{_format_date(obj['LastModified'])}\t{_format_size(size)}\t"
+              f"r2://{bucket}/{key}")
+        matches += 1
+        total_size += size
+  except ClientError as e:
+    fatal(f"find failed: {e}")
+
+
 def handle_mv(args, s3_client):
   """Renames R2 objects (copy + delete). All paths must be r2://."""
   sources = args.sources
@@ -545,6 +617,25 @@ def main():
                               default=3600,
                               help="URL validity in seconds (default: 3600)")
   parser_presign.set_defaults(func=handle_presign)
+
+  parser_find = subparsers.add_parser(
+      "find", help="Filter R2 objects by size, date, or name pattern under a prefix")
+  parser_find.add_argument("path", help="R2 prefix (r2://bucket/prefix/)")
+  parser_find.add_argument("--min-size", type=int, help="Minimum object size in bytes")
+  parser_find.add_argument("--max-size", type=int, help="Maximum object size in bytes")
+  parser_find.add_argument(
+      "--newer-than",
+      help="Only objects modified after this date (ISO 8601 or relative "
+      "like -7d, -24h)")
+  parser_find.add_argument(
+      "--older-than",
+      help="Only objects modified before this date (ISO 8601 or relative "
+      "like -7d, -24h)")
+  parser_find.add_argument("--name",
+                           help="Glob pattern to match against the object "
+                           "basename (e.g. '*.pt')")
+  parser_find.add_argument("--ext", help="Shorthand for --name *.EXT")
+  parser_find.set_defaults(func=handle_find)
 
   args = parser.parse_args()
   s3_client = create_s3_client()
