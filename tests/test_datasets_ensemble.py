@@ -69,16 +69,14 @@ class TestDatasetEnsemble:
     assert "1 dataset" in s
 
   def test_graceful_failure(self, tmp_path):
-    """Best-effort loading reports an error when every source fails."""
+    """Error raised at init when every source fails."""
     configs = [{"name": "/nonexistent/path", "source": "imagefolder"}]
-    ensemble = DatasetEnsemble(configs)
     with pytest.raises(RuntimeError, match="No datasets loaded"):
-      len(ensemble)
+      DatasetEnsemble(configs)
 
   def test_empty_config(self):
-    ensemble = DatasetEnsemble([])
     with pytest.raises(RuntimeError, match="No datasets loaded"):
-      len(ensemble)
+      DatasetEnsemble([])
 
   def test_small_image_still_loaded(self, tmp_path):
     """Small images should be loaded without filtering."""

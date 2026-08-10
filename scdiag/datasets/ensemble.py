@@ -16,7 +16,7 @@ from scdiag.logging_utils import fatal
 
 
 class _HFDataset:
-  """Lazy-loading wrapper around a HuggingFace ``datasets.Dataset``."""
+  """Wrapper around a HuggingFace ``datasets.Dataset``."""
 
   def __init__(self,
                name,
@@ -25,49 +25,26 @@ class _HFDataset:
                cache_dir=None,
                hf_token=None):
     self.name = name
-    self._split = split
     self._image_column = image_column
-    self._cache_dir = cache_dir
-    self._hf_token = hf_token
-    self._ds = None
-
-  def _load(self):
     from datasets import load_dataset
-    logging.info(f"Loading HF dataset '{self.name}' (split={self._split}) …")
+    logging.info(f"Loading HF dataset '{self.name}' (split={split}) …")
     ds = load_dataset(self.name,
-                      split=self._split,
-                      cache_dir=self._cache_dir,
-                      token=self._hf_token)
-    return self._detect_and_normalize_image_column(ds)
-
-  def _detect_and_normalize_image_column(self, ds):
-    """Detect the image column and ensure it returns decoded PIL images."""
-    if self._image_column is not None:
-      col = self._image_column
-    else:
+                      split=split,
+                      cache_dir=cache_dir,
+                      token=hf_token)
+    if self._image_column is None:
       col = HFDatasetProxy.detect_image_column(ds)
-    if col is None:
-      fatal(
-          f"Cannot auto-detect image column in '{self.name}'. "
-          f"Columns: {ds.column_names}. Set 'image_column' explicitly.", ValueError)
-    ds = HFDatasetProxy.normalize_image_column(ds, col)
-    self._image_column = col
-    return ds
-
-  def _ensure_loaded(self):
-    if self._ds is None:
-      self._ds = self._load()
+      if col is None:
+        fatal(
+            f"Cannot auto-detect image column in '{self.name}'. "
+            f"Columns: {ds.column_names}. Set 'image_column' explicitly.", ValueError)
+      self._image_column = col
+    self._ds = HFDatasetProxy.normalize_image_column(ds, self._image_column)
 
   def __len__(self):
-    self._ensure_loaded()
-    if self._ds is None:
-      return 0
     return len(self._ds)
 
   def __getitem__(self, idx):
-    self._ensure_loaded()
-    if self._ds is None:
-      fatal(f"Dataset '{self.name}' failed to load", IndexError)
     row = self._ds[idx]
     image = row[self._image_column]
     if not isinstance(image, Image.Image):
@@ -79,10 +56,9 @@ class _HFDataset:
 class DatasetEnsemble:
   """Concatenation of multiple skin-lesion image datasets.
 
-    Each constituent dataset is loaded lazily.  Images are returned as RGB
-    PIL :class:`PIL.Image.Image` objects — the caller (typically a
-    :class:`torchvision.transforms.v2.Compose` pipeline) handles resizing,
-    tensor conversion, and normalization.
+    Images are returned as RGB PIL :class:`PIL.Image.Image` objects —
+    the caller (typically a :class:`torchvision.transforms.v2.Compose`
+    pipeline) handles resizing, tensor conversion, and normalization.
 
     Args:
         dataset_configs: List of dicts describing each constituent dataset.
@@ -99,19 +75,9 @@ class DatasetEnsemble:
     """
 
   def __init__(self, dataset_configs, cache_dir=None, hf_token=None, strict=False):
-    self._configs = dataset_configs
-    self._cache_dir = cache_dir
-    self._hf_token = hf_token
-    self._strict = strict
-    self._datasets = []  # lazily populated
-    self._offsets = None  # prefix-sum of lengths
-    self._loaded = False
-
-  def _ensure_loaded(self):
-    if self._loaded:
-      return  # already loaded, including the empty-result case
-    self._loaded = True
-    for cfg in self._configs:
+    self._datasets = []
+    self._offsets = None
+    for cfg in dataset_configs:
       name = cfg["name"]
       source = cfg.get("source", "hf")
       try:
@@ -120,15 +86,14 @@ class DatasetEnsemble:
               name=name,
               split=cfg.get("split", "train"),
               image_column=cfg.get("image_column"),
-              cache_dir=self._cache_dir,
-              hf_token=self._hf_token,
+              cache_dir=cache_dir,
+              hf_token=hf_token,
           )
         elif source == "imagefolder":
           ds = ImageFolderDataset(root_dir=name)
         else:
           logging.warning(f"Unknown source '{source}' for dataset '{name}', skipping")
           continue
-        # Probe length to verify the dataset loads
         n = len(ds)
         if n == 0:
           logging.warning(f"Dataset '{name}' has 0 images, skipping")
@@ -136,24 +101,19 @@ class DatasetEnsemble:
         logging.info(f"  + {name}: {n:,} images")
         self._datasets.append(ds)
       except Exception:
-        if self._strict:
+        if strict:
           fatal(f"Failed to initialize dataset '{name}' ({source})", RuntimeError)
         logging.exception("  Failed to initialize dataset '%s' (%s); skipping.", name,
                           source)
 
-    # Build prefix-sum offsets for flat indexing
-    self._rebuild_offsets()
-    if not self._datasets:
-      fatal("No datasets loaded successfully", RuntimeError)
-
-  def _rebuild_offsets(self):
     offsets = [0]
     for ds in self._datasets:
       offsets.append(offsets[-1] + len(ds))
     self._offsets = offsets
+    if not self._datasets:
+      fatal("No datasets loaded successfully", RuntimeError)
 
   def __len__(self):
-    self._ensure_loaded()
     return self._offsets[-1] if self._offsets else 0
 
   def _get_item(self, idx):
@@ -164,7 +124,6 @@ class DatasetEnsemble:
     return self._datasets[ds_idx][local_idx]
 
   def __getitem__(self, idx):
-    self._ensure_loaded()
     if not self._datasets:
       fatal("No datasets loaded", RuntimeError)
     if idx < 0 or idx >= len(self):
@@ -173,12 +132,10 @@ class DatasetEnsemble:
 
   @property
   def num_datasets(self):
-    self._ensure_loaded()
     return len(self._datasets)
 
   def summary(self):
     """Return a human-readable summary of the ensemble."""
-    self._ensure_loaded()
     lines = [(f"DatasetEnsemble: {len(self):,} images from "
               f"{len(self._datasets)} dataset(s)")]
     for i, ds in enumerate(self._datasets):
