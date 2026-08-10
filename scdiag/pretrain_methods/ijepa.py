@@ -3,8 +3,6 @@
 Reference: Assran et al., "I-JEPA: Image-based Joint-Embedding
 Predictive Architecture", CVPR 2023.
 """
-from __future__ import annotations
-
 import copy
 
 import torch

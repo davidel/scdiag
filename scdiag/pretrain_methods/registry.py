@@ -1,6 +1,4 @@
 """Pre-training method registry."""
-from __future__ import annotations
-
 import logging
 
 from scdiag.logging_utils import fatal

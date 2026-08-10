@@ -1,6 +1,4 @@
 """SimMIM masked-image modeling pre-training method."""
-from __future__ import annotations
-
 import torch
 
 from scdiag.models.convvit.masked_encoder import ConvViTMaskedImageEncoder
