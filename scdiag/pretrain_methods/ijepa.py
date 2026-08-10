@@ -3,6 +3,7 @@
 Reference: Assran et al., "I-JEPA: Image-based Joint-Embedding
 Predictive Architecture", CVPR 2023.
 """
+
 import copy
 
 import torch
@@ -11,10 +12,6 @@ import torch.nn.functional as F
 
 from scdiag.pretrain_methods.base import PretrainMethod
 from scdiag.pretrain_methods.registry import register_method
-
-# ------------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------------
 
 
 class _PatchEmbedder(nn.Module):
@@ -72,13 +69,13 @@ class _Predictor(nn.Module):
   def forward(self, context, mask_indices):
     """Predict embeddings at *mask_indices* from *context*.
 
-    Args:
-      context: ``(B, N, D)`` student encoder output.
-      mask_indices: ``(B, M)`` long tensor of masked patch indices.
+        Args:
+          context: ``(B, N, D)`` student encoder output.
+          mask_indices: ``(B, M)`` long tensor of masked patch indices.
 
-    Returns:
-      ``(B, M, D)`` predicted embeddings.
-    """
+        Returns:
+          ``(B, M, D)`` predicted embeddings.
+        """
     _B, N, _ = context.shape
     x = self.input_proj(context) + self.pos_bias[:, :N, :]
     x = self.transformer(x)
@@ -99,8 +96,8 @@ def _random_crop(image_size, crop_size):
 def _make_block_mask(num_h, num_w, block_size_h, block_size_w, n_blocks, device):
   """Create block masks for I-JEPA target view.
 
-  Returns a boolean mask of shape ``(num_h * num_w,)`` where True = masked.
-  """
+    Returns a boolean mask of shape ``(num_h * num_w,)`` where True = masked.
+    """
   mask = torch.zeros(num_h * num_w, dtype=torch.bool, device=device)
   # Generate candidate block top-left corners.
   rows = torch.arange(0, num_h - block_size_h + 1, block_size_h, device=device)
@@ -113,11 +110,6 @@ def _make_block_mask(num_h, num_w, block_size_h, block_size_w, n_blocks, device)
     mask[r:r + block_size_h].unsqueeze(1).expand(-1, num_w)[:,
                                                             c:c + block_size_w] = True
   return mask
-
-
-# ------------------------------------------------------------------
-# I-JEPA method
-# ------------------------------------------------------------------
 
 
 @register_method
@@ -181,12 +173,14 @@ class IJEPAMethod(PretrainMethod):
         predictor_dim=args.predictor_dim,
     ).to(device)
 
-    return IJEPA(student=student,
-                 teacher=teacher,
-                 predictor=predictor,
-                 momentum=args.teacher_momentum,
-                 final_momentum=args.teacher_final_momentum,
-                 weight=args.ijepa_weight)
+    return IJEPA(
+        student=student,
+        teacher=teacher,
+        predictor=predictor,
+        momentum=args.teacher_momentum,
+        final_momentum=args.teacher_final_momentum,
+        weight=args.ijepa_weight,
+    )
 
   def train_step(self, model, images, global_step):
     model.train()
@@ -216,13 +210,15 @@ class IJEPAMethod(PretrainMethod):
 class IJEPA(nn.Module):
   """Full I-JEPA model with student, teacher, and predictor."""
 
-  def __init__(self,
-               student,
-               teacher,
-               predictor,
-               momentum=0.996,
-               final_momentum=1.0,
-               weight=1.0):
+  def __init__(
+      self,
+      student,
+      teacher,
+      predictor,
+      momentum=0.996,
+      final_momentum=1.0,
+      weight=1.0,
+  ):
     super().__init__()
     self.student = student
     self.teacher = teacher
@@ -254,10 +250,18 @@ class IJEPA(nn.Module):
     source_crop = _random_crop(min(H, W), source_size)
     target_crop = _random_crop(min(H, W), target_size)
 
-    source_view = images[:, :, source_crop[0]:source_crop[0] + source_crop[2],
-                         source_crop[1]:source_crop[1] + source_crop[3]]
-    target_view = images[:, :, target_crop[0]:target_crop[0] + target_crop[2],
-                         target_crop[1]:target_crop[1] + target_crop[3]]
+    source_view = images[
+        :,
+        :,
+        source_crop[0]:source_crop[0] + source_crop[2],
+        source_crop[1]:source_crop[1] + source_crop[3],
+    ]
+    target_view = images[
+        :,
+        :,
+        target_crop[0]:target_crop[0] + target_crop[2],
+        target_crop[1]:target_crop[1] + target_crop[3],
+    ]
 
     # -- Source: full context through student.
     z_s = self.student(source_view)  # (B, N_s, D)
