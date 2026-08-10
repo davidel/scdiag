@@ -27,8 +27,8 @@ class ConvViTProcessor:
       std=IMAGENET_STD,
   ):
     self.image_size = image_size
-    self.mean = mean
-    self.std = std
+    self._mean = mean
+    self._std = std
 
     self._transform = v2.Compose([
         v2.Resize(
@@ -62,12 +62,12 @@ class ConvViTProcessor:
   @property
   def image_mean(self):
     """HF-compatible normalization mean."""
-    return list(self.mean)
+    return list(self._mean)
 
   @property
   def image_std(self):
     """HF-compatible normalization std."""
-    return list(self.std)
+    return list(self._std)
 
   @property
   def size(self):
@@ -76,4 +76,4 @@ class ConvViTProcessor:
 
   def __repr__(self):
     return (f"ConvViTProcessor(image_size={self.image_size}, "
-            f"mean={self.mean}, std={self.std})")
+            f"mean={self._mean}, std={self._std})")

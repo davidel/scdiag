@@ -27,19 +27,19 @@ class ImageFolderDataset:
 
   def __init__(self, root_dir):
     self.name = str(root_dir)
-    self.root_dir = Path(root_dir)
+    self._root_dir = Path(root_dir)
     self._paths = []
 
   def _ensure_loaded(self):
     if self._paths:
       return
-    if not self.root_dir.is_dir():
-      logging.warning(f"ImageFolderDataset: '{self.root_dir}' is not a directory")
+    if not self._root_dir.is_dir():
+      logging.warning(f"ImageFolderDataset: '{self._root_dir}' is not a directory")
       return
     self._paths = sorted(
-        p for p in self.root_dir.rglob("*") if p.suffix.lower() in _IMAGE_EXTS)
+        p for p in self._root_dir.rglob("*") if p.suffix.lower() in _IMAGE_EXTS)
     logging.info(
-        f"ImageFolderDataset: found {len(self._paths):,} images in '{self.root_dir}'")
+        f"ImageFolderDataset: found {len(self._paths):,} images in '{self._root_dir}'")
 
   def __len__(self):
     self._ensure_loaded()

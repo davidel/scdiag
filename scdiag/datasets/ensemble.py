@@ -25,25 +25,25 @@ class _HFDataset:
                cache_dir=None,
                hf_token=None):
     self.name = name
-    self.split = split
-    self.image_column = image_column
-    self.cache_dir = cache_dir
-    self.hf_token = hf_token
+    self._split = split
+    self._image_column = image_column
+    self._cache_dir = cache_dir
+    self._hf_token = hf_token
     self._ds = None
 
   def _load(self):
     from datasets import load_dataset
-    logging.info(f"Loading HF dataset '{self.name}' (split={self.split}) …")
+    logging.info(f"Loading HF dataset '{self.name}' (split={self._split}) …")
     ds = load_dataset(self.name,
-                      split=self.split,
-                      cache_dir=self.cache_dir,
-                      token=self.hf_token)
+                      split=self._split,
+                      cache_dir=self._cache_dir,
+                      token=self._hf_token)
     return self._detect_and_normalize_image_column(ds)
 
   def _detect_and_normalize_image_column(self, ds):
     """Detect the image column and ensure it returns decoded PIL images."""
-    if self.image_column is not None:
-      col = self.image_column
+    if self._image_column is not None:
+      col = self._image_column
     else:
       col = HFDatasetProxy.detect_image_column(ds)
     if col is None:
@@ -51,7 +51,7 @@ class _HFDataset:
           f"Cannot auto-detect image column in '{self.name}'. "
           f"Columns: {ds.column_names}. Set 'image_column' explicitly.", ValueError)
     ds = HFDatasetProxy.normalize_image_column(ds, col)
-    self.image_column = col
+    self._image_column = col
     return ds
 
   def _ensure_loaded(self):
@@ -69,7 +69,7 @@ class _HFDataset:
     if self._ds is None:
       fatal(f"Dataset '{self.name}' failed to load", IndexError)
     row = self._ds[idx]
-    image = row[self.image_column]
+    image = row[self._image_column]
     if not isinstance(image, Image.Image):
       image = Image.open(image)
     image = image.convert("RGB")

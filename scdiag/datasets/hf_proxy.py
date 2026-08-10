@@ -59,20 +59,20 @@ class HFDatasetProxy:
   def __init__(self, hf_dataset, transform=None, image_column=None, label_column=None):
     self.dataset = self.normalize_image_column(hf_dataset, image_column)
     self.dataset = self.normalize_labels(self.dataset, label_column)
-    self.image_col = image_column or self.detect_image_column(self.dataset)
-    self.transform = transform
+    self._image_col = image_column or self.detect_image_column(self.dataset)
+    self._transform = transform
 
   def __len__(self):
     return len(self.dataset)
 
   def __getitem__(self, idx):
     item = self.dataset[idx]
-    image = item[self.image_col]
+    image = item[self._image_col]
     label = item["label"]
     if hasattr(image, "convert"):
       image = image.convert("RGB")
-    if self.transform is not None:
-      image = self.transform(image)
+    if self._transform is not None:
+      image = self._transform(image)
     return image, label
 
   @property
