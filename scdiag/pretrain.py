@@ -490,14 +490,10 @@ def parse_args(argv=None):
       "Example: 'encoder\\\\.(.*);model\\\\.$1'.",
   )
 
-  # Add method-specific arguments.
-  method_cls = get_method(
-      parser.get_default("method") if hasattr(parser, "get_default") else "simmim")
-  # We need to do a two-pass parse: first to get --method, then add its args.
-  # Parse just --method first.
+  # Two-pass parse: first to get --method, then add its args.
   known, _ = parser.parse_known_args(argv)
   method_cls = get_method(known.method)
-  method_cls.add_args(parser)
+  method_cls().add_args(parser)
 
   args = parser.parse_args(argv)
 
