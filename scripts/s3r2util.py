@@ -206,20 +206,39 @@ def handle_cp(args, s3_client):
 
         total_size = sum(size for _, _, size in matches)
         print(f"Wildcard downloading {len(matches)} object(s) -> {local_dir}/")
-        with tqdm(total=total_size, unit="B", unit_scale=True, desc="Download") as pbar:
+        if args.progress:
+          with tqdm(total=total_size, unit="B", unit_scale=True,
+                    desc="Download") as pbar:
+            for _, obj_key, _ in matches:
+              local_path = os.path.join(local_dir, os.path.basename(obj_key))
+              s3_client.download_file(src_bucket,
+                                      obj_key,
+                                      local_path,
+                                      Callback=pbar.update)
+        else:
           for _, obj_key, _ in matches:
             local_path = os.path.join(local_dir, os.path.basename(obj_key))
-            s3_client.download_file(src_bucket,
-                                    obj_key,
-                                    local_path,
-                                    Callback=pbar.update)
+            s3_client.download_file(src_bucket, obj_key, local_path)
         print(f"Downloaded {len(matches)} object(s).")
 
       else:
         # R2 wildcard -> R2 directory
         print(f"Wildcard copying {len(matches)} object(s) -> "
               f"r2://{dst_bucket}/{dst_prefix}")
-        with tqdm(total=len(matches), unit="file", desc="Copy") as pbar:
+        if args.progress:
+          with tqdm(total=len(matches), unit="file", desc="Copy") as pbar:
+            for _, obj_key, _ in matches:
+              dest_key = compute_dest_key(obj_key, src_prefix, dst_prefix)
+              s3_client.copy(
+                  {
+                      "Bucket": src_bucket,
+                      "Key": obj_key
+                  },
+                  dst_bucket,
+                  dest_key,
+              )
+              pbar.update(1)
+        else:
           for _, obj_key, _ in matches:
             dest_key = compute_dest_key(obj_key, src_prefix, dst_prefix)
             s3_client.copy(
@@ -230,7 +249,6 @@ def handle_cp(args, s3_client):
                 dst_bucket,
                 dest_key,
             )
-            pbar.update(1)
         print(f"Copied {len(matches)} object(s).")
       continue
 
@@ -501,8 +519,7 @@ def sync_local_to_r2(s3_client, local_dir, r2_bucket, r2_prefix, args):
   if args.dry_run:
     for local_path, r2_key, size in to_upload:
       print(
-          f"  upload: {local_path} -> r2://{r2_bucket}/{r2_key}  ({format_size(size)})"
-      )
+          f"  upload: {local_path} -> r2://{r2_bucket}/{r2_key}  ({format_size(size)})")
     for r2_key in to_delete:
       print(f"  delete: r2://{r2_bucket}/{r2_key}")
     print(f"Would upload {len(to_upload)}, delete {len(to_delete)}, "
