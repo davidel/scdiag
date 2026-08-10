@@ -82,13 +82,7 @@ class SimMIMMethod(PretrainMethod):
         "--decoder_depth",
         type=int,
         default=2,
-        help="Number of transformer layers in the decoder (default: 2).",
-    )
-    p.add_argument(
-        "--decoder_heads",
-        type=int,
-        default=12,
-        help="Number of attention heads in the decoder (default: 12).",
+        help="Number of Linear->GELU layers in the decoder (default: 2).",
     )
 
   def build(self, args, encoder, device):
@@ -97,7 +91,6 @@ class SimMIMMethod(PretrainMethod):
         enc,
         decoder_dim=args.decoder_dim,
         decoder_depth=args.decoder_depth,
-        decoder_heads=args.decoder_heads,
     ).to(device)
     model.mask_ratio = args.mask_ratio
     return model
@@ -117,9 +110,8 @@ class SimMIMMethod(PretrainMethod):
     return {
         "method": "simmim",
         "mask_ratio": model.mask_ratio,
-        "decoder_dim": model.decoder.dim,
-        "decoder_depth": model.decoder.depth,
-        "decoder_heads": model.decoder_heads,
+        "decoder_dim": args.decoder_dim,
+        "decoder_depth": args.decoder_depth,
     }
 
   def load_checkpoint_state(self, model, state, args):

@@ -70,12 +70,6 @@ class TestSimMIMMethod:
     class FakeModel:
       mask_ratio = 0.8
 
-      class decoder:
-        dim = 768
-        depth = 2
-
-      decoder_heads = 12
-
     model = FakeModel()
     state = method.get_checkpoint_state(model, args)
     assert state["mask_ratio"] == 0.8
@@ -98,12 +92,6 @@ class TestSimMIMMethod:
     class FakeModel:
       mask_ratio = 0.6
       _mask_ratio = 0.75  # Old-style attribute.
-
-      class decoder:
-        dim = 768
-        depth = 2
-
-      decoder_heads = 12
 
     model = FakeModel()
     # Empty state (no method_state in checkpoint).
