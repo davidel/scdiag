@@ -1,8 +1,5 @@
 # ruff: noqa
-"""Pre-training method registry.
-
-Each pre-training method registers itself via the ``METHODS`` dict.
-"""
+"""Pre-training method registry."""
 from scdiag.pretrain_methods.base import PretrainMethod
 from scdiag.pretrain_methods.registry import get_method, list_methods
 

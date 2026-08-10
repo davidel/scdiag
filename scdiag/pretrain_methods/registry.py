@@ -3,31 +3,31 @@ import logging
 
 from scdiag.logging_utils import fatal
 
-METHODS = {}
+_METHODS = {}
 
 
 def register_method(cls):
   """Class decorator that registers a pre-training method."""
   name = cls.NAME
-  if name in METHODS:
+  if name in _METHODS:
     fatal(f"Duplicate pre-training method name '{name}'", RuntimeError)
-  METHODS[name] = cls
+  _METHODS[name] = cls
   logging.debug("Registered pre-training method '%s'", name)
   return cls
 
 
 def get_method(name):
   """Look up a pre-training method by name."""
-  if name not in METHODS:
-    available = ", ".join(sorted(METHODS)) or "(none)"
+  if name not in _METHODS:
+    available = ", ".join(sorted(_METHODS)) or "(none)"
     fatal(
         f"Unknown pre-training method '{name}'. "
         f"Available: {available}",
         ValueError,
     )
-  return METHODS[name]
+  return _METHODS[name]
 
 
 def list_methods():
   """Return sorted list of registered method names."""
-  return sorted(METHODS)
+  return sorted(_METHODS)
