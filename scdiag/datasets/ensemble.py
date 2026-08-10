@@ -7,7 +7,6 @@ SimMIM / MAE pre-training.
 """
 
 import logging
-import random
 
 from PIL import Image
 
@@ -24,14 +23,12 @@ class _HFDataset:
                split="train",
                image_column=None,
                cache_dir=None,
-               hf_token=None,
-               min_resolution=None):
+               hf_token=None):
     self.name = name
     self.split = split
     self.image_column = image_column
     self.cache_dir = cache_dir
     self.hf_token = hf_token
-    self.min_resolution = min_resolution
     self._ds = None
 
   def _load(self):
@@ -76,9 +73,6 @@ class _HFDataset:
     if not isinstance(image, Image.Image):
       image = Image.open(image)
     image = image.convert("RGB")
-    if (self.min_resolution is not None and
-        (image.width < self.min_resolution or image.height < self.min_resolution)):
-      fatal(f"Image too small: {image.size}, min={self.min_resolution}", IndexError)
     return image
 
 
@@ -100,12 +94,9 @@ class DatasetEnsemble:
             - ``"split"`` (str): Dataset split (default ``"train"``).
             - ``"image_column"`` (str): Column name for images (auto-detected
               if omitted).
-            - ``"min_resolution"`` (int): Skip images smaller than this.
         cache_dir: HuggingFace cache directory.
         hf_token: HuggingFace token for gated datasets (e.g. Derm1M).
     """
-
-  _MAX_REPLACEMENT_ATTEMPTS = 32
 
   def __init__(self, dataset_configs, cache_dir=None, hf_token=None, strict=False):
     self._configs = dataset_configs
@@ -131,11 +122,9 @@ class DatasetEnsemble:
               image_column=cfg.get("image_column"),
               cache_dir=self._cache_dir,
               hf_token=self._hf_token,
-              min_resolution=cfg.get("min_resolution"),
           )
         elif source == "imagefolder":
-          ds = ImageFolderDataset(root_dir=name,
-                                  min_resolution=cfg.get("min_resolution"))
+          ds = ImageFolderDataset(root_dir=name)
         else:
           logging.warning(f"Unknown source '{source}' for dataset '{name}', skipping")
           continue
@@ -180,22 +169,7 @@ class DatasetEnsemble:
       fatal("No datasets loaded", RuntimeError)
     if idx < 0 or idx >= len(self):
       fatal(f"Index {idx} out of range for ensemble of length {len(self)}", IndexError)
-
-    try:
-      return self._get_item(idx)
-    except (IndexError, OSError, ValueError) as original_exc:
-      # Intentional training safeguard: avoid pre-scanning very large image
-      # collections. Replace an unusable sample with a random valid candidate.
-      for _ in range(self._MAX_REPLACEMENT_ATTEMPTS):
-        replacement_idx = random.randrange(len(self))
-        try:
-          return self._get_item(replacement_idx)
-        except (IndexError, OSError, ValueError):
-          continue
-      fatal(
-          "Unable to find a usable image after "
-          f"{self._MAX_REPLACEMENT_ATTEMPTS} attempts; original error: "
-          f"{original_exc}", RuntimeError)
+    return self._get_item(idx)
 
   @property
   def num_datasets(self):

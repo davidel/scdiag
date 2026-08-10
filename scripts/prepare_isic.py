@@ -12,6 +12,10 @@ Usage:
     python scripts/prepare_isic.py --output_dir ./isic_melanoma \
         --search 'diagnosis:"melanoma"'
 
+    # Filter out small images during download
+    python scripts/prepare_isic.py --output_dir ./isic_images \
+        --min_resolution 224
+
     # Download the SIIM-ISIC 2020 Challenge subset
     python scripts/prepare_isic.py --output_dir ./isic_2020 \
         --search "anonymous:true"
@@ -30,6 +34,7 @@ Note:
 """
 
 import argparse
+import logging
 import shutil
 import subprocess
 import sys
@@ -127,6 +132,13 @@ def main():
       help="Print detailed progress information",
   )
   parser.add_argument(
+      "--min_resolution",
+      type=int,
+      default=None,
+      help=
+      "After download, remove images whose width or height is smaller than this value",
+  )
+  parser.add_argument(
       "--max_retries",
       type=int,
       default=3,
@@ -161,6 +173,28 @@ def main():
         verbose=args.verbose,
         max_retries=args.max_retries,
     )
+
+    # Post-download resolution filtering.
+    if args.min_resolution is not None:
+      from PIL import Image
+      removed = 0
+      kept = 0
+      for fpath in sorted(output_path.rglob("*")):
+        if not fpath.is_file():
+          continue
+        if fpath.suffix.lower() not in image_exts:
+          continue
+        try:
+          with Image.open(fpath) as img:
+            if (img.width < args.min_resolution or img.height < args.min_resolution):
+              fpath.unlink()
+              removed += 1
+              continue
+        except OSError as exc:
+          logging.warning("Skipping unreadable image %s: %s", fpath, exc)
+        kept += 1
+      print(f"Resolution filter: kept {kept}, removed {removed} "
+            f"(min_resolution={args.min_resolution})")
 
     print("\n" + "=" * 60)
     print("DONE! Use the following command to pretrain:")

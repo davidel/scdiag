@@ -80,8 +80,8 @@ class TestDatasetEnsemble:
     with pytest.raises(RuntimeError, match="No datasets loaded"):
       len(ensemble)
 
-  def test_small_image_uses_random_replacement(self, tmp_path):
-    """A small image should be replaced without scanning the directory."""
+  def test_small_image_still_loaded(self, tmp_path):
+    """Small images should be loaded without filtering."""
     d = tmp_path / "data"
     d.mkdir()
     Image.new("RGB", (8, 8)).save(d / "small.png")
@@ -89,10 +89,8 @@ class TestDatasetEnsemble:
     ensemble = DatasetEnsemble([{
         "name": str(d),
         "source": "imagefolder",
-        "min_resolution": 32,
     }])
-    image = ensemble[0]
-    assert image.size == (64, 64)
+    assert len(ensemble) == 2
 
   def test_getitem_out_of_range(self, tmp_path):
     """Out-of-range indices should raise instead of duplicating data."""

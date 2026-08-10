@@ -87,7 +87,6 @@ def build_pretrain_dataset(args):
           "source": "hf",
           "split": "train",
           "image_column": args.image_column,
-          "min_resolution": 224,
       })
 
   if not configs:

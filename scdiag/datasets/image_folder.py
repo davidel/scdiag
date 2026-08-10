@@ -23,17 +23,12 @@ class ImageFolderDataset:
     ----------
     root_dir : str | Path
         Root directory containing images (recursively scanned).
-    min_resolution : int | None
-        If set, images whose width *or* height is smaller than this
-        value are silently skipped (an ``IndexError`` is raised so the
-        ``DataLoader`` retries the next index).
     """
 
-  def __init__(self, root_dir, min_resolution=None):
+  def __init__(self, root_dir):
     self.name = str(root_dir)
     self.root_dir = Path(root_dir)
-    self.min_resolution = min_resolution
-    self._paths: list[Path] = []
+    self._paths = []
 
   def _ensure_loaded(self):
     if self._paths:
@@ -56,8 +51,4 @@ class ImageFolderDataset:
       fatal(f"Index {idx} out of range for '{self.name}'", IndexError)
     path = self._paths[idx]
     image = Image.open(path).convert("RGB")
-    if (self.min_resolution is not None and
-        (image.width < self.min_resolution or
-         image.height < self.min_resolution)):
-      fatal(f"Image too small: {image.size}, min={self.min_resolution}", IndexError)
     return image

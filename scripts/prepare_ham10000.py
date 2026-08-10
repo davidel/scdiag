@@ -11,6 +11,7 @@ Output is an ImageFolder structure compatible with:
 Usage:
     python scripts/prepare_ham10000.py --output_dir ./ham10000_grouped
     python scripts/prepare_ham10000.py --output_dir ./ham10000_grouped --test_size 0.15 --val_size 0
+    python scripts/prepare_ham10000.py --output_dir ./ham10000_grouped --min_resolution 224
 """
 
 import argparse
@@ -112,6 +113,7 @@ def save_as_imagefolder(
     splits,
     output_dir,
     label_names=None,
+    min_resolution=None,
 ):
   """Save splits as ImageFolder structure.
 
@@ -119,6 +121,7 @@ def save_as_imagefolder(
         splits: Dict with 'train', 'val', 'test' keys containing lists of (image, label) tuples
         output_dir: Output directory path
         label_names: Optional dict mapping label_id -> class_name. If None, uses numeric names.
+        min_resolution: If set, skip images whose width or height is smaller than this value.
     """
   output_path = Path(output_dir)
 
@@ -145,12 +148,17 @@ def save_as_imagefolder(
       class_dir = output_path / split_name / class_name
       class_dir.mkdir(parents=True, exist_ok=True)
 
-      for i, image in enumerate(images):
-        dst_path = class_dir / f"{i:05d}.jpg"
+      saved = 0
+      for image in images:
+        if (min_resolution is not None and
+            (image.width < min_resolution or image.height < min_resolution)):
+          continue
+        dst_path = class_dir / f"{saved:05d}.jpg"
         # Save PIL Image as JPEG
         image.save(dst_path, "JPEG", quality=95)
+        saved += 1
 
-      print(f"  {class_name}: {len(images)} images")
+      print(f"  {class_name}: {saved}/{len(images)} images")
 
   print(f"\nSaved ImageFolder dataset to {output_dir}")
 
@@ -190,6 +198,12 @@ def main():
       type=int,
       default=42,
       help="Random seed for reproducibility (default: %(default)s)",
+  )
+  parser.add_argument(
+      "--min_resolution",
+      type=int,
+      default=None,
+      help="Skip images whose width or height is smaller than this value",
   )
   parser.add_argument(
       "--cache_dir",
@@ -250,7 +264,10 @@ def main():
   )
 
   # Save as ImageFolder
-  save_as_imagefolder(splits, args.output_dir, label_names)
+  save_as_imagefolder(splits,
+                      args.output_dir,
+                      label_names,
+                      min_resolution=args.min_resolution)
 
   print("\n" + "=" * 60)
   print("DONE! Use the following command to train with grouped splits:")

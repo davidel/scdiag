@@ -8,12 +8,14 @@ flat ImageFolder directory compatible with scdiag-pretrain.
 
 Usage:
     python scripts/prepare_derm1m.py --output_dir ./derm1m_images
+    python scripts/prepare_derm1m.py --output_dir ./derm1m_images --min_resolution 224
 
     Then use with pretraining:
     scdiag-pretrain --datasets ./derm1m_images --image_size 448 ...
 """
 
 import argparse
+import logging
 import os
 import shutil
 import tempfile
@@ -108,6 +110,12 @@ def main():
       "missing ones are downloaded. If omitted, a temp directory is used.",
   )
   parser.add_argument(
+      "--min_resolution",
+      type=int,
+      default=None,
+      help="Skip images whose width or height is smaller than this value",
+  )
+  parser.add_argument(
       "--skip_download",
       action="store_true",
       help="Fail instead of downloading missing zips (use with --zip_dir "
@@ -186,6 +194,15 @@ def main():
           ".gif",
       }:
         continue
+      # Optionally skip images smaller than --min_resolution.
+      if args.min_resolution is not None:
+        try:
+          from PIL import Image
+          with Image.open(fpath) as img:
+            if img.width < args.min_resolution or img.height < args.min_resolution:
+              continue
+        except OSError as exc:
+          logging.warning("Skipping unreadable image %s: %s", fpath, exc)
       image_count += 1
       ext = fpath.suffix.lower()
       dest = output_path / f"IMG_{image_count:08d}{ext}"
