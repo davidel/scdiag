@@ -2,10 +2,9 @@
 from __future__ import annotations
 
 import torch
-import torch.nn.functional as F
 
 from scdiag.models.convvit.masked_encoder import ConvViTMaskedImageEncoder
-from scdiag.models.simmim import SimMIM
+from scdiag.models.simmim import SimMIM, simmim_loss, unpatchify
 from scdiag.pretrain_methods.base import PretrainMethod
 from scdiag.pretrain_methods.registry import register_method
 
@@ -97,10 +96,8 @@ class SimMIMMethod(PretrainMethod):
 
   def train_step(self, model, images, global_step):
     mask = make_mask(images, model.patch_size, model.mask_ratio)
-    target = model.get_target(images)
-    masked = model.mask_tokens(images, mask)
-    output, target = model(masked, mask)
-    loss = F.l1_loss(output, target)
+    output, target = model(images, mask)
+    loss = simmim_loss(output, target, mask)
     return loss, {
         "loss": loss.item(),
         "mask_ratio": model.mask_ratio,
@@ -132,7 +129,11 @@ class SimMIMMethod(PretrainMethod):
     model.eval()
     samples = images[:num_samples].to(next(model.parameters()).device)
     mask = make_mask(samples, model.patch_size, model.mask_ratio)
-    masked = model.mask_tokens(samples, mask)
-    output, _target = model(masked, mask)
-    recon = model.unpatchify(output)
+    output, _target = model(samples, mask)
+    recon = unpatchify(
+        output,
+        patch_size=model.patch_size,
+        img_size=samples.shape[2],
+        channels=model.in_channels,
+    )
     return recon
