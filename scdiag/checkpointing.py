@@ -11,7 +11,7 @@ import re
 import torch
 
 from scdiag.logging_utils import fatal
-from scdiag.param_align import AlignConfig, _report_to_str, align_state_dicts
+from scdiag.param_align import AlignConfig, align_state_dicts, report_to_str
 
 
 def rename_keys(state_dict, patterns):
@@ -362,7 +362,7 @@ def load_checkpoint_weights(path,
 
   report = align_state_dicts(state, model.state_dict(), config=config)
 
-  logging.info(_report_to_str(report))
+  logging.info(report_to_str(report))
 
   aligned = {}
   for new_key, old_key in report.mapping.items():

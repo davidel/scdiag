@@ -94,7 +94,7 @@ AlignReport = namedtuple("AlignReport",
                          ["mapping", "unmatched_new", "unused_old", "divergent", "ok"])
 
 
-def _report_to_str(report):
+def report_to_str(report):
   lines = []
 
   if report.ok:
