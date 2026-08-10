@@ -40,20 +40,20 @@ def train_xgboost(train_features,
   num_class = len(set(train_labels))
   logging.info(f"Training XGBoost: {len(train_labels)} samples, {num_class} classes")
 
-  xgb_kwargs = dict(
-      objective="multi:softprob",
-      num_class=num_class,
-      max_depth=max_depth,
-      n_estimators=n_estimators,
-      learning_rate=learning_rate,
-      subsample=subsample,
-      colsample_bytree=colsample_bytree,
-      min_child_weight=min_child_weight,
-      gamma=gamma,
-      reg_alpha=reg_alpha,
-      random_state=42,
-      verbosity=0,
-  )
+  xgb_kwargs = {
+      "objective": "multi:softprob",
+      "num_class": num_class,
+      "max_depth": max_depth,
+      "n_estimators": n_estimators,
+      "learning_rate": learning_rate,
+      "subsample": subsample,
+      "colsample_bytree": colsample_bytree,
+      "min_child_weight": min_child_weight,
+      "gamma": gamma,
+      "reg_alpha": reg_alpha,
+      "random_state": 42,
+      "verbosity": 0,
+  }
   if use_gpu:
     xgb_kwargs["tree_method"] = "hist"
     xgb_kwargs["device"] = "cuda"

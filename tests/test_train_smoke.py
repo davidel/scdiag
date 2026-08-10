@@ -37,8 +37,8 @@ class TinyProcessor:
   image_std = [0.5, 0.5, 0.5]
 
   def __call__(self, image, return_tensors="pt"):
-    import torchvision.transforms.functional as F
     import numpy as np
+    import torchvision.transforms.functional as F
     from PIL import Image as PILImage
 
     if isinstance(image, torch.Tensor):

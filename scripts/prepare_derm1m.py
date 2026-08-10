@@ -22,8 +22,6 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-import requests
-
 # All zip file extensions we look for in the Derm1M dataset repo.
 _ZIP_EXT = ".zip"
 _DEFAULT_REPO_ID = "redlessone/Derm1M"
@@ -171,7 +169,7 @@ def main():
     print(f"  Extracting {zip_name} ...")
     with zipfile.ZipFile(zip_path, "r") as zf:
       zf.extractall(zip_dir)
-    print(f"    Done")
+    print("    Done")
 
   # Walk the extracted directories and copy images into the output folder.
   # Flatten everything into a single directory — ImageFolderDataset only

@@ -1,7 +1,6 @@
 """Tests for xgb_utils.py train_xgboost and eval_xgboost."""
 
 import numpy as np
-import pytest
 
 from scdiag.xgb_utils import eval_xgboost, train_xgboost
 

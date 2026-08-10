@@ -122,7 +122,7 @@ class TestSetupLogging:
     assert root.level == logging.WARNING
 
   def test_actual_log_output(self, capsys):
-    root = self._clear_root()
+    self._clear_root()
     setup_logging()
     logging.info("test message")
     captured = capsys.readouterr()

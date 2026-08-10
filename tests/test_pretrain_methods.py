@@ -59,7 +59,6 @@ class TestSimMIMMethod:
 
   def test_checkpoint_round_trip(self):
     """get_checkpoint_state / load_checkpoint_state preserves mask_ratio."""
-    from scdiag.pretrain_methods.simmim import SimMIMMethod
     method = SimMIMMethod()
 
     parser = argparse.ArgumentParser()
@@ -82,7 +81,6 @@ class TestSimMIMMethod:
 
   def test_backward_compat_old_checkpoint(self):
     """Old checkpoints with _mask_ratio are handled gracefully."""
-    from scdiag.pretrain_methods.simmim import SimMIMMethod
     method = SimMIMMethod()
 
     parser = argparse.ArgumentParser()

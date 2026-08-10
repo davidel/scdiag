@@ -1,16 +1,16 @@
 """Tests for the SimMIM pre-training components."""
 
-import torch
 import pytest
+import torch
 
 from scdiag.models.convvit.loader import load_convvit
 from scdiag.models.convvit.masked_encoder import ConvViTMaskedImageEncoder
 from scdiag.models.simmim import (
-    SimMIM,
-    patchify,
-    unpatchify,
-    random_mask,
-    simmim_loss,
+  SimMIM,
+  patchify,
+  random_mask,
+  simmim_loss,
+  unpatchify,
 )
 
 

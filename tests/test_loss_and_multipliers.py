@@ -1,6 +1,5 @@
 """Tests for CombinedFocalLoss and parse_class_multipliers (Phase 0)."""
 
-import logging
 
 import pytest
 import torch

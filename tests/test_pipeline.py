@@ -7,13 +7,13 @@ and without downloading anything from the Hub.
 
 import os
 import tempfile
+from unittest.mock import MagicMock, patch
 
+import datasets
+import numpy as np
 import pytest
 import torch
-import numpy as np
-import datasets
 from PIL import Image
-from unittest.mock import patch, MagicMock
 
 # Helpers
 
@@ -21,6 +21,7 @@ from unittest.mock import patch, MagicMock
 def _import_train():
   """Lazy-import scdiag.train so module-level fixtures resolve cleanly."""
   import importlib
+
   import scdiag.train
 
   importlib.reload(scdiag.train)
@@ -132,7 +133,7 @@ class TestDetectImageColumn:
           }),
       )
       with patch("scdiag.train.load_dataset", return_value=ds):
-        train_p, val_p = train_mod.load_and_split_dataset("fake_ds")
+        train_p, _val_p = train_mod.load_and_split_dataset("fake_ds")
 
       img = train_p.dataset[0]["image_file"]
       assert isinstance(img, Image.Image), (f"Expected PIL Image, got {type(img)}")
@@ -255,7 +256,7 @@ class TestLoadAndSplit:
     raw = _make_synthetic_dataset(label_col="label", image_col="image")
 
     with patch("scdiag.train.load_dataset", return_value=raw):
-      train_p, val_p = train_mod.load_and_split_dataset("fake_dataset")
+      train_p, _val_p = train_mod.load_and_split_dataset("fake_dataset")
 
     assert "label" in train_p.dataset.column_names
 
@@ -272,9 +273,9 @@ class TestLoadAndSplit:
         }),
     )
 
-    with patch("scdiag.train.load_dataset", return_value=ds):
-      with pytest.raises(ValueError, match="No image column"):
-        train_mod.load_and_split_dataset("fake_dataset")
+    with patch("scdiag.train.load_dataset", return_value=ds), \
+         pytest.raises(ValueError, match="No image column"):
+      train_mod.load_and_split_dataset("fake_dataset")
 
   def test_class_encode_non_classlabel_column(self):
     train_mod = _import_train()
@@ -295,7 +296,7 @@ class TestLoadAndSplit:
     )
 
     with patch("scdiag.train.load_dataset", return_value=raw):
-      train_p, val_p = train_mod.load_and_split_dataset("fake_dataset")
+      train_p, _val_p = train_mod.load_and_split_dataset("fake_dataset")
     assert "label" in train_p.dataset.column_names
 
 
@@ -335,7 +336,7 @@ class TestComputeClassWeights:
             "label": datasets.ClassLabel(names=["benign", "malignant"]),
         }),
     )
-    dataset_dict = datasets.DatasetDict({
+    datasets.DatasetDict({
         "train": train_ds,
         "test": raw,
     })
@@ -400,7 +401,7 @@ class TestHFDatasetProxy:
     ])
     raw = _make_synthetic_dataset(n=10)
     proxy = train_mod.HFDatasetProxy(raw, transform=transform)
-    image, label = proxy[0]
+    image, _label = proxy[0]
     assert isinstance(image, torch.Tensor)
     assert image.shape == (3, 32, 32)
 
@@ -571,7 +572,7 @@ class TestBuildTransformsWithCustomAug:
   def test_none_fn_uses_default(self):
     train_mod = _import_train()
     # Passing train_aug_fn=None should behave like the original default
-    train_t, val_t = train_mod.build_transforms(self._mock_processor(),
+    train_t, _val_t = train_mod.build_transforms(self._mock_processor(),
                                                 image_size=64,
                                                 train_aug_fn=None)
     img = Image.fromarray(np.random.randint(0, 256, (128, 128, 3), dtype=np.uint8))

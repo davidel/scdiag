@@ -7,15 +7,15 @@ import pytest
 import torch
 from PIL import Image
 
+from scdiag.model_utils import extract_backbone_features
 from scdiag.models import (
-    ModelOutput,
-    is_custom_model,
-    load_model,
-    register_model,
+  ModelOutput,
+  is_custom_model,
+  load_model,
+  register_model,
 )
 from scdiag.models.convvit.model import CustomPatchTransformer
 from scdiag.models.convvit.processor import ConvViTProcessor
-from scdiag.model_utils import extract_backbone_features
 
 
 class ConvViTConfig:
@@ -243,8 +243,9 @@ class TestConvViTForClassification:
 
   @pytest.fixture
   def wrapped_model(self):
-    from scdiag.models.convvit.loader import ConvViTForClassification
     from types import SimpleNamespace
+
+    from scdiag.models.convvit.loader import ConvViTForClassification
 
     model = CustomPatchTransformer(
         num_classes=5,
@@ -310,7 +311,7 @@ class TestLoadCustomModel:
     processor = load_processor("convvit", image_size=224)
     assert isinstance(model, torch.nn.Module)
     assert model.config.id2label == id2label
-    assert hasattr(processor, "__call__")
+    assert callable(processor)
 
     # End-to-end: image → processor → model → logits
     img = Image.new("RGB", (256, 256), color=(100, 150, 200))

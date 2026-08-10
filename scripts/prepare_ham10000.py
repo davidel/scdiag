@@ -16,7 +16,6 @@ Usage:
 
 import argparse
 import random
-import shutil
 from collections import defaultdict
 from pathlib import Path
 
@@ -88,7 +87,7 @@ def group_split_by_lesion_id(
   val_examples = get_examples(val_indices)
   test_examples = get_examples(test_indices)
 
-  print(f"\nSplit by lesion_id:")
+  print("\nSplit by lesion_id:")
   if n_val > 0:
     print(
         f"  Lesion IDs: {len(train_lesion_ids)} train, {len(val_lesion_ids)} val, {len(test_lesion_ids)} test"
@@ -230,7 +229,7 @@ def main():
     splits = list(raw.keys())
     print(f"Dataset has {len(splits)} splits: {splits}")
     dataset = concatenate_datasets([raw[split] for split in splits])
-    print(f"Merged into single dataset")
+    print("Merged into single dataset")
   else:
     # Single Dataset
     dataset = raw

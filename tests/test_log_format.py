@@ -6,15 +6,13 @@ and contain expected metrics.
 """
 
 import logging
-from unittest.mock import patch, MagicMock
-
-import numpy as np
-import pytest
+from unittest.mock import MagicMock, patch
 
 
 def _import_train():
   """Lazy-import scdiag.train so module-level fixtures resolve cleanly."""
   import importlib
+
   import scdiag.train
 
   importlib.reload(scdiag.train)
@@ -102,8 +100,9 @@ class TestGPUStatsFormat:
 
   def test_gpu_stats_str_empty_on_cpu(self):
     """gpu_stats_str should return empty string on CPU."""
-    train_mod = _import_train()
+    _import_train()
     import torch
+
     from scdiag.gpu_utils import gpu_stats_str
 
     result = gpu_stats_str(torch.device("cpu"))

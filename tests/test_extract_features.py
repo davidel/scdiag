@@ -1,10 +1,8 @@
 """Tests for model_utils.py extract_features and collect_features."""
 
 from collections import namedtuple
-from unittest.mock import MagicMock
 
 import numpy as np
-import pytest
 import torch
 
 from scdiag.model_utils import collect_features, extract_features

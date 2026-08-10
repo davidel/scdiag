@@ -4,10 +4,12 @@ import torch
 
 from scdiag.param_align import (
     AlignConfig,
+    AlignReport,
     _build_shape_dict,
     _find_best_match,
     _tokenize,
     align_state_dicts,
+    report_to_str,
     weighted_token_distance,
 )
 
@@ -471,3 +473,65 @@ class TestEdgeCases:
     assert "model.head.bias" in report.unmatched_new
 
     assert not report.divergent
+
+
+class TestReportToStr:
+
+  def test_ok_report(self):
+    """All-clear report with nothing to flag."""
+    report = AlignReport(
+        mapping={"a": "a"},
+        unmatched_new=[],
+        unused_old=[],
+        divergent=[],
+        ok=True,
+    )
+    out = report_to_str(report)
+    assert "matched" in out or "used" in out
+
+  def test_unmatched_new(self):
+    report = AlignReport(
+        mapping={"a": "a"},
+        unmatched_new=["b", "c"],
+        unused_old=[],
+        divergent=[],
+        ok=False,
+    )
+    out = report_to_str(report)
+    assert "b" in out
+    assert "c" in out
+
+  def test_unused_old(self):
+    report = AlignReport(
+        mapping={"a": "a"},
+        unmatched_new=[],
+        unused_old=["x", "y"],
+        divergent=[],
+        ok=False,
+    )
+    out = report_to_str(report)
+    assert "x" in out
+    assert "y" in out
+
+  def test_divergent(self):
+    report = AlignReport(
+        mapping={"a": "a"},
+        unmatched_new=[],
+        unused_old=[],
+        divergent=[("a", ["a", "b"])],
+        ok=False,
+    )
+    out = report_to_str(report)
+    assert "divergent" in out.lower() or "a" in out
+
+  def test_empty_mapping(self):
+    report = AlignReport(
+        mapping={},
+        unmatched_new=["head.weight"],
+        unused_old=["mask_token"],
+        divergent=[],
+        ok=False,
+    )
+    out = report_to_str(report)
+    assert "head.weight" in out
+    assert "mask_token" in out
