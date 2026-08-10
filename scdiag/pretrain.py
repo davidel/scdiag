@@ -1,18 +1,21 @@
-"""SimMIM self-supervised pre-training for ConvViT.
+"""Self-supervised pre-training for ConvViT.
+
+Supports multiple pre-training algorithms via the ``--method`` flag:
+``simmim`` (masked-image modeling) and ``ijepa`` (joint-embedding
+predictive architecture).
 
 Usage::
 
     scdiag-pretrain \
+        --method simmim \
         --datasets "HAM10000" "redlessone/Derm1M" \
         --image_size 448 \
         --batch_size 32 \
         --epochs 200 \
         --output_dir ./checkpoints/pretrain
 
-The script trains the full ConvViT encoder (ConvNet stem + transformer) to
-reconstruct masked image patches.  After training, the encoder weights can
-be loaded into a classification model via ``--source_checkpoint`` in
-``scdiag-train``.
+After training, the encoder weights can be loaded into a classification
+model via ``--source_checkpoint`` in ``scdiag-train``.
 """
 
 import argparse
@@ -36,10 +39,9 @@ from scdiag.datasets.ensemble import DatasetEnsemble
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.grad_monitor import GradMonitor
 from scdiag.logging_utils import fatal, setup_logging
-from scdiag.models.convvit.masked_encoder import ConvViTMaskedImageEncoder
 from scdiag.models.registry import load_model
-from scdiag.models.simmim import SimMIM, random_mask, simmim_loss, unpatchify
 from scdiag.optim_factory import create_optimizer, create_scheduler
+from scdiag.pretrain_methods import get_method, list_methods
 from scdiag.storage_utils import save_checkpoint
 
 
@@ -104,54 +106,33 @@ def build_pretrain_dataset(args):
   return dataset
 
 
-def log_reconstruction(model, loader, writer, global_step, device, num_samples=8):
-  """Log original / masked / reconstructed image grids to TensorBoard."""
+def log_validation_images(method,
+                          model,
+                          loader,
+                          writer,
+                          global_step,
+                          device,
+                          num_samples=8):
+  """Log method-specific validation images to TensorBoard.
+
+  Calls ``method.validate()`` which returns optional reconstruction
+  images.  If the method returns ``None`` (e.g. DINOv2), nothing is
+  logged.
+  """
   model.eval()
   images = next(iter(loader))[:num_samples].to(device)
-  _, _, H, W = images.shape
-
-  patch_size = model.patch_size
-  num_patches = model.num_patches
-
-  mask = random_mask(
-      images.shape[0],
-      num_patches,
-      mask_ratio=getattr(model, "_last_mask_ratio", 0.60),
-      device=device,
-  )
-
   with torch.no_grad():
-    pred, target = model(images, mask)
-
-  target_imgs = unpatchify(
-      target,
-      patch_size=patch_size,
-      img_size=H,
-      channels=model.in_channels,
-  )
-  pred_imgs = unpatchify(
-      pred,
-      patch_size=patch_size,
-      img_size=H,
-      channels=model.in_channels,
-  )
-
-  masked = images.clone()
-  p = patch_size
-  mask_expanded = mask.unsqueeze(-1).expand(-1, -1, p * p * model.in_channels)
-  channels = model.in_channels
-  mask_expanded = mask_expanded.reshape(images.shape[0], H // p, W // p, p, p, channels)
-  mask_expanded = mask_expanded.permute(0, 5, 1, 3, 2, 4).reshape_as(masked)
-  masked[mask_expanded.bool()] = 0.0
-
+    recon = method.validate(model, images, num_samples)
+  if recon is None:
+    return
+  # recon is (N, C, H, W) — log first sample.
   writer.add_image("recon/original", images[0], global_step)
-  writer.add_image("recon/target", target_imgs[0].clamp(0, 1), global_step)
-  writer.add_image("recon/masked", masked[0], global_step)
-  writer.add_image("recon/reconstructed", pred_imgs[0].clamp(0, 1), global_step)
+  writer.add_image("recon/reconstructed", recon[0].clamp(0, 1), global_step)
   model.train()
 
 
 def train_one_epoch(
+    method,
     model,
     loader,
     optimizer,
@@ -166,7 +147,7 @@ def train_one_epoch(
     grad_accum_steps=1,
     scaler=None,
 ):
-  """Run one epoch of SimMIM pre-training.
+  """Run one epoch of self-supervised pre-training.
 
     If *grad_accum_steps* > 1, gradients are accumulated over that many
     micro-batches before the optimizer steps and gradients are zeroed.
@@ -184,25 +165,17 @@ def train_one_epoch(
   window_samples = 0
   window_loss = 0.0
 
-  num_patches = model.num_patches
-  mask_ratio = getattr(model, "_mask_ratio", 0.60)
   total_batches = len(loader)
 
   for step, images in enumerate(loader):
     images = images.to(device, non_blocking=True)
-
-    mask = random_mask(images.shape[0],
-                       num_patches,
-                       mask_ratio=mask_ratio,
-                       device=device)
 
     with torch.amp.autocast(
         "cuda",
         dtype=amp_dtype,
         enabled=(amp_dtype is not None and device.type == "cuda"),
     ):
-      pred, target = model(images, mask)
-      loss = simmim_loss(pred, target, mask)
+      loss, _info = method.train_step(model, images, global_step)
 
     loss = loss / grad_accum_steps
     if amp_dtype == torch.float16 and scaler is not None:
@@ -271,7 +244,7 @@ def train_one_epoch(
       window_loss = 0.0
 
     if (vis_every > 0 and global_step % vis_every == 0 and writer is not None):
-      log_reconstruction(model, loader, writer, global_step, device)
+      log_validation_images(method, model, loader, writer, global_step, device)
 
   avg_loss = total_loss / max(total_samples, 1)
   elapsed = time.time() - start_time
@@ -282,10 +255,18 @@ def train_one_epoch(
 
 def parse_args(argv=None):
   parser = argparse.ArgumentParser(
-      description="SimMIM pre-training for ConvViT",
+      description="Self-supervised pre-training for ConvViT",
       formatter_class=argparse.ArgumentDefaultsHelpFormatter,
   )
 
+  available = ", ".join(list_methods()) or "(none)"
+  parser.add_argument(
+      "--method",
+      type=str,
+      default="simmim",
+      choices=list_methods(),
+      help=f"Pre-training method (available: {available}).",
+  )
   parser.add_argument(
       "--model",
       type=str,
@@ -326,23 +307,6 @@ def parse_args(argv=None):
                       default=448,
                       help="Input image size (square)")
   parser.add_argument("--num_workers", type=int, default=4, help="DataLoader workers")
-
-  parser.add_argument(
-      "--mask_ratio",
-      type=float,
-      default=0.60,
-      help="Fraction of patches to mask (SimMIM default: 0.60)",
-  )
-  parser.add_argument("--decoder_dim",
-                      type=int,
-                      default=768,
-                      help="Decoder hidden dimension")
-  parser.add_argument(
-      "--decoder_depth",
-      type=int,
-      default=2,
-      help="Number of Linear->GELU layers in decoder",
-  )
 
   parser.add_argument(
       "--batch_size",
@@ -526,6 +490,15 @@ def parse_args(argv=None):
       "Example: 'encoder\\\\.(.*);model\\\\.$1'.",
   )
 
+  # Add method-specific arguments.
+  method_cls = get_method(
+      parser.get_default("method") if hasattr(parser, "get_default") else "simmim")
+  # We need to do a two-pass parse: first to get --method, then add its args.
+  # Parse just --method first.
+  known, _ = parser.parse_known_args(argv)
+  method_cls = get_method(known.method)
+  method_cls.add_args(parser)
+
   args = parser.parse_args(argv)
 
   if args.log_dir is None:
@@ -544,8 +517,11 @@ def main(argv=None):
 
   args.amp_dtype = getattr(torch, args.amp_dtype, None) if args.amp_dtype else None
 
+  method_cls = get_method(args.method)
+  method = method_cls()
+
   logging.info("=" * 60)
-  logging.info("SimMIM pre-training for ConvViT")
+  logging.info(f"Pre-training method: {args.method}")
   logging.info("=" * 60)
   logging.info(f"Args: {vars(args)}")
 
@@ -580,14 +556,9 @@ def main(argv=None):
       device=device,
       **args.model_arg,
   )
-  encoder = ConvViTMaskedImageEncoder(base_model)
-  model = SimMIM(
-      encoder,
-      decoder_dim=args.decoder_dim,
-      decoder_depth=args.decoder_depth,
-  ).to(device)
-  model._mask_ratio = args.mask_ratio
-  model._last_mask_ratio = args.mask_ratio
+
+  model = method.build(args, base_model, device)
+  method.load_checkpoint_state(model, {}, args)  # initialize method state
 
   if args.source_checkpoint:
     from scdiag.checkpointing import load_checkpoint_weights
@@ -603,13 +574,9 @@ def main(argv=None):
     )
 
   num_params = sum(p.numel() for p in model.parameters()) / 1e6
-  enc_params = sum(p.numel() for p in model.encoder.parameters()) / 1e6
-  effective_batch = args.batch_size * args.grad_accum_steps
-  logging.info(
-      f"Model params: {num_params:.1f}M "
-      f"(encoder: {enc_params:.1f}M + decoder: {num_params - enc_params:.1f}M)")
+  logging.info(f"Model params: {num_params:.1f}M")
   logging.info(f"Effective batch size: {args.batch_size} x {args.grad_accum_steps}"
-               f" = {effective_batch}")
+               f" = {args.batch_size * args.grad_accum_steps}")
 
   optimizer = create_optimizer(
       model.parameters(),
@@ -652,6 +619,9 @@ def main(argv=None):
         device=device,
         states_to_load=states_to_load,
     )
+    # Restore method-specific state from checkpoint.
+    method_state = ckpt_extra.get("method_state", {})
+    method.load_checkpoint_state(model, method_state, args)
 
   os.makedirs(args.log_dir, exist_ok=True)
   writer = SummaryWriter(log_dir=args.log_dir)
@@ -668,6 +638,7 @@ def main(argv=None):
   try:
     for epoch in range(start_epoch, args.epochs):
       avg_loss, global_step = train_one_epoch(
+          method,
           model,
           loader,
           optimizer,
@@ -686,7 +657,9 @@ def main(argv=None):
       if scheduler is not None:
         scheduler.step()
       completed_epoch = epoch
+      method.on_epoch_end(model, epoch, writer)
 
+      method_state = method.get_checkpoint_state(model, args)
       save_checkpoint(
           checkpoint_dict(
               model,
@@ -696,6 +669,7 @@ def main(argv=None):
               states_to_save=states_to_save,
               loss=avg_loss,
               global_step=global_step,
+              method_state=method_state,
           ),
           args.checkpoint + "_latest.pt",
           remote_uri=args.remote_checkpoint,
@@ -704,6 +678,7 @@ def main(argv=None):
   except KeyboardInterrupt:
     logging.warning("Interrupt detected!")
   finally:
+    method_state = method.get_checkpoint_state(model, args)
     save_checkpoint(
         checkpoint_dict(
             model,
@@ -713,6 +688,7 @@ def main(argv=None):
             states_to_save=states_to_save,
             loss=avg_loss if "avg_loss" in dir() else 0.0,
             global_step=global_step,
+            method_state=method_state,
         ),
         args.checkpoint + "_latest.pt",
         remote_uri=args.remote_checkpoint,

@@ -2,7 +2,8 @@
 
 Fine-tune HuggingFace image-classification models for skin-lesion classification
 (and other image datasets) with a hand-rolled PyTorch training loop. Supports
-self-supervised pre-training (SimMIM) on multi-source dermoscopy datasets.
+self-supervised pre-training (SimMIM, I-JEPA) on multi-source dermoscopy
+datasets.
 
 ## Features
 
@@ -49,19 +50,25 @@ self-supervised pre-training (SimMIM) on multi-source dermoscopy datasets.
 
 ### Self-Supervised Pre-Training (`scdiag-pretrain`)
 
-- **SimMIM masked image modelling** — self-supervised pre-training for any
-  registered scdiag model. Masks 60% of patches, reconstructs raw pixel
-  values via a lightweight MLP decoder. No labels required.
+- **Pluggable pre-training methods** — select the algorithm via `--method`.
+  Currently supported:
+  - **`simmim`** (default) — masked image modelling. Masks ~60% of patches,
+    reconstructs raw pixel values via a lightweight MLP decoder.
+  - **`ijepa`** — joint-embedding predictive architecture (Assran et al.,
+    CVPR 2023). Predicts latent representations of masked blocks using a
+    student–teacher setup with EMA momentum ramping.
+  Each method adds its own CLI arguments (e.g. `--mask_ratio` for SimMIM,
+  `--teacher_momentum` for I-JEPA). New methods can be added by
+  implementing the `PretrainMethod` interface in `scdiag/pretrain_methods/`.
 - **Model-agnostic** — use `--model` to select any backbone registered in the
   model registry (e.g. `convvit`, or any HuggingFace model ID).
 - **Multi-source dataset ensemble** — stitches together multiple HuggingFace
   datasets (e.g. HAM10000, ISIC challenges, Derm1M) into a single unified
   pre-training corpus with flat indexing and lazy loading.
 - **Mixed precision** — AMP support (`float16` with GradScaler, or `bfloat16`).
-- **Configurable architecture** — decoder depth, mask ratio, image size, and
-  all training hyperparameters are exposed via CLI.
-- **Reconstruction visualisation** — periodic TensorBoard logging of original,
-  masked, and reconstructed images for qualitative monitoring.
+- **Reconstruction visualisation** — periodic TensorBoard logging of
+  method-specific validation images for qualitative monitoring (e.g.
+  original/masked/reconstructed for SimMIM).
 
 ## Installation
 
@@ -170,15 +177,14 @@ classifier head (different `num_classes`) is reinitialised and trained from
 scratch.  `--state_load none` ensures the old optimizer, scheduler, and
 scaler states are not carried over.
 
-## Pre-Training (SimMIM)
+## Pre-Training
 
 Pre-train any registered model's encoder on unlabeled dermoscopy images before
-fine-tuning. The SimMIM framework masks a configurable fraction of image
-patches and trains the encoder to reconstruct the original pixel values via a
-lightweight MLP decoder.
+fine-tuning. Use `--method` to select the algorithm (default: `simmim`).
 
 ```bash
-scdiag-pretrain --model convvit \
+scdiag-pretrain --method simmim \
+                --model convvit \
                 --datasets HAM10000 "redlessone/Derm1M" \
                 --cache_dir ~/.cache/huggingface \
                 --hf_token hf_XXXX \
@@ -188,9 +194,6 @@ scdiag-pretrain --model convvit \
                 --lr 1e-4 \
                 --scheduler CosineAnnealingLR \
                 --sched_arg T_max=200 --sched_arg eta_min=1e-6 \
-                --mask_ratio 0.60 \
-                --decoder_dim 768 \
-                --decoder_depth 2 \
                 --amp_dtype bfloat16 \
                 --checkpoint ./checkpoints/convvit_simmim
 ```
@@ -206,6 +209,7 @@ scdiag-train --model convvit \
 
 | Argument | Default | Description |
 |---|---|---|
+| `--method` | `simmim` | Pre-training method. Choices: `simmim`, `ijepa`. Method-specific args follow. |
 | `--model` | `convvit` | Model name registered in scdiag (e.g. `convvit`) or HuggingFace model ID. |
 | `--datasets` | (required) | Space-separated dataset names or local paths. HuggingFace IDs or directories. |
 | `--cache_dir` | `None` | HuggingFace cache directory for dataset and model downloads. |
@@ -213,9 +217,6 @@ scdiag-train --model convvit \
 | `--image_column` | auto-detected | Explicit HF image column for pretraining datasets |
 | `--strict_datasets` | `False` | Abort instead of skipping a dataset that fails to load |
 | `--image_size` | `448` | Input image size (square). |
-| `--mask_ratio` | `0.60` | Fraction of patches to mask (SimMIM default: 0.60). |
-| `--decoder_dim` | `768` | Decoder hidden dimension. |
-| `--decoder_depth` | `2` | Number of Linear→GELU layers in decoder. |
 | `--batch_size` | `32` | Per-GPU batch size. |
 | `--epochs` | `200` | Total pre-training epochs. |
 | `--lr` | `1e-4` | Peak learning rate for AdamW. |
@@ -253,10 +254,8 @@ first requested. By default, datasets that fail to load are logged and skipped
 (best-effort mode), and the run fails if no dataset loads successfully. Use
 `--strict_datasets` to abort on the first dataset-loading failure.
 
-Images smaller than the configured minimum resolution are not pre-scanned out
-of the corpus. During iteration, an unusable image is replaced by a randomly
-selected candidate, with a bounded number of attempts. This avoids scanning
-very large collections before pretraining while preventing infinite retries.
+Images that cannot be decoded are skipped with a warning. This avoids blocking
+pre-training on corrupted files while keeping the dataset pipeline fast.
 
 ### Preparing Datasets
 
