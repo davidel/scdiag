@@ -288,7 +288,8 @@ def parse_args(argv=None):
   )
   parser.add_argument(
       "--strict_datasets",
-      action="store_true",
+      action=argparse.BooleanOptionalAction,
+      default=False,
       help="Abort instead of skipping a dataset that fails to load.",
   )
   parser.add_argument(

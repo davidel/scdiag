@@ -573,7 +573,7 @@ def parse_args(argv=None):
   )
   xgb_group.add_argument(
       "--xgb_use_gpu",
-      action="store_true",
+      action=argparse.BooleanOptionalAction,
       default=False,
       help="Use GPU for XGBoost training (requires xgboost with CUDA support).",
   )
