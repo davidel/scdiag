@@ -83,20 +83,51 @@ def select_available_checkpoint(root_path):
 _VALID_STATE_FLAGS = {"opt", "sched", "amp", "none"}
 
 
+def _format_count(num, suffixes=("K", "M", "G", "T")):
+  """Format an integer count into a human-readable string with a suffix.
+
+    *suffixes* should have entries for 1024¹, 1024², 1024³, and 1024⁴
+    respectively.  Values below 1 024 are returned as-is with no suffix.
+    """
+  if num < 1024:
+    return f"{num}"
+  for power, sfx in enumerate(suffixes, start=1):
+    if num < 1024**(power + 1):
+      return f"{num / 1024**power:.2f}{sfx}"
+  # Exceeds the largest suffix — use the last one.
+  return f"{num / 1024**len(suffixes):.2f}{suffixes[-1]}"
+
+
 def _format_bytes(num_bytes):
-  """Convert a byte count into a human-readable string (KB, MB, GB)."""
+  """Convert a byte count into a human-readable string (B, KB, MB, GB)."""
   if num_bytes < 1024:
     return f"{num_bytes} B"
-  elif num_bytes < 1024**2:
-    return f"{num_bytes / 1024:.2f} KB"
-  elif num_bytes < 1024**3:
-    return f"{num_bytes / 1024**2:.2f} MB"
-  else:
-    return f"{num_bytes / 1024**3:.2f} GB"
+  return _format_count(num_bytes, suffixes=(" KB", " MB", " GB", " TB"))
 
 
-def log_model_params(model):
-  """Log every parameter name, shape, element count, and memory size.
+def create_model_report(model):
+  """Return a full model report string: network structure and parameter details.
+
+    The report includes the ``str(model)`` representation (layer tree), a
+    summary line with total/trainable parameter counts, and a detailed
+    per-parameter table showing name, shape, element count, and memory
+    size.
+    """
+  parts = []
+
+  parts.append(f"Model structure:\n{model}")
+
+  total = sum(p.numel() for p in model.parameters())
+  trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+  parts.append(f"Model params: {_format_count(total)} total, "
+               f"{_format_count(trainable)} trainable")
+
+  parts.append(_format_model_param_table(model))
+  return "\n".join(parts)
+
+
+def _format_model_param_table(model):
+  """Return a formatted table of every parameter's name, shape, count, and size.
 
     Finishes with a summary line showing total parameter count and total
     memory consumed by the model's parameters.  All columns are
@@ -104,8 +135,7 @@ def log_model_params(model):
     """
   params = list(model.named_parameters())
   if not params:
-    logging.info("Model has no parameters.")
-    return
+    return "Model has no parameters."
 
   # Pre-compute display values to determine column widths.
   rows = []
@@ -118,7 +148,7 @@ def log_model_params(model):
   # Column widths (header labels are included in the min width).
   name_w = max(len(r[0]) for r in rows)
   shape_w = max(len(r[1]) for r in rows)
-  params_w = max(len(f"{r[2]:,d}") for r in rows)
+  params_w = max(len(_format_count(r[2])) for r in rows)
   size_w = max(len(_format_bytes(r[3])) for r in rows)
 
   # Header.
@@ -126,21 +156,26 @@ def log_model_params(model):
             f"{'Params':>{params_w}}  {'Size':>{size_w}}")
   sep = "  " + "-" * (len(header) - 2)
 
-  logging.info("Model parameter details:")
-  logging.info(header)
-  logging.info(sep)
+  lines = []
+  lines.append("Model parameter details:")
+  lines.append(header)
+  lines.append(sep)
 
   total_params = 0
   total_bytes = 0
   for name, shape_str, numel, param_bytes in rows:
     total_params += numel
     total_bytes += param_bytes
-    logging.info(f"  {name:<{name_w}}  {shape_str:>{shape_w}}  "
-                 f"{numel:>{params_w},d}  {_format_bytes(param_bytes):>{size_w}}")
+    lines.append(
+        f"  {name:<{name_w}}  {shape_str:>{shape_w}}  "
+        f"{_format_count(numel):>{params_w}}  {_format_bytes(param_bytes):>{size_w}}")
 
-  logging.info(sep)
-  logging.info(f"  {'TOTAL':<{name_w}}  {'':>{shape_w}}  "
-               f"{total_params:>{params_w},d}  {_format_bytes(total_bytes):>{size_w}}")
+  lines.append(sep)
+  lines.append(
+      f"  {'TOTAL':<{name_w}}  {'':>{shape_w}}  "
+      f"{_format_count(total_params):>{params_w}}  {_format_bytes(total_bytes):>{size_w}}"
+  )
+  return "\n".join(lines)
 
 
 def parse_state_flags(flag_value):
@@ -273,8 +308,6 @@ def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scale
   if result.unexpected_keys:
     logging.warning(f"  Unexpected keys (ignored): "
                     f"{result.unexpected_keys}")
-
-  log_model_params(model)
 
   if "opt" in states_to_load and "optimizer_state_dict" in ckpt:
     if skipped:

@@ -31,6 +31,7 @@ from torchvision.transforms.functional import InterpolationMode
 
 from scdiag.checkpointing import (
     checkpoint_dict,
+    create_model_report,
     parse_state_flags,
     resume_checkpoint,
 )
@@ -570,8 +571,8 @@ def main(argv=None):
         param_rename=args.param_rename,
     )
 
-  num_params = sum(p.numel() for p in model.parameters()) / 1e6
-  logging.info(f"Model params: {num_params:.1f}M")
+  logging.info(create_model_report(model))
+
   logging.info(f"Effective batch size: {args.batch_size} x {args.grad_accum_steps}"
                f" = {args.batch_size * args.grad_accum_steps}")
 

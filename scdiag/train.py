@@ -19,6 +19,7 @@ from torchvision.transforms.v2 import InterpolationMode
 
 from scdiag.checkpointing import (
     checkpoint_dict,
+    create_model_report,
     parse_state_flags,
     resume_checkpoint,
 )
@@ -1072,10 +1073,7 @@ def main():
         param_rename=args.param_rename,
     )
 
-  total_params = sum(p.numel() for p in model.parameters())
-  trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-  logging.info(f"Model params: {total_params:,} total, {trainable:,} trainable")
-  logging.info(f"Model structure:\n{model}")
+  logging.info(create_model_report(model))
 
   if args.focal_gamma > 0 and args.label_smoothing > 0:
     logging.warning(
