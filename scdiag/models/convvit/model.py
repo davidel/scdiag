@@ -37,7 +37,7 @@ class ConvPatchEmbeddingBlock(nn.Module):
     self.conv2 = nn.Conv2d(mid_channels, out_channels, 3, stride=2, padding=1)
     self.bn2 = nn.BatchNorm2d(out_channels)
     # Skip path: avg pool + 1×1 projection
-    self.skip_pool = nn.AvgPool2d(2, stride=2)
+    self.skip_pool = nn.AvgPool2d(2, stride=2, ceil_mode=True)
     self.skip_proj = nn.Conv2d(in_channels, out_channels, 1)
     self.skip_bn = nn.BatchNorm2d(out_channels)
 
