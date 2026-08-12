@@ -29,6 +29,11 @@ class ConvViTForClassification(nn.Module):
     self.model = model
     self.config = config
 
+  @property
+  def classifier(self):
+    """Alias for the classification head, matching the HuggingFace convention."""
+    return self.model.head
+
   def forward(self, pixel_values=None, **kwargs):
     logits = self.model(pixel_values)  # [B, num_classes]
     return ModelOutput(logits)

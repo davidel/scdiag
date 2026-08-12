@@ -28,6 +28,7 @@ from scdiag.datasets.hf_proxy import HFDatasetProxy
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.grad_monitor import GradMonitor
 from scdiag.logging_utils import fatal, setup_logging
+from scdiag.model_utils import freeze_model
 from scdiag.models import load_model, load_processor
 from scdiag.optim_factory import create_optimizer, create_scheduler
 from scdiag.script_utils import load_extern
@@ -418,6 +419,15 @@ def parse_args(argv=None):
       help="AMP dtype for mixed precision. Omit to disable AMP. "
       "float16 requires GradScaler; bfloat16 is recommended for "
       "Ampere+ GPUs.",
+  )
+
+  parser.add_argument(
+      "--freeze",
+      type=str,
+      default=None,
+      help="Comma-separated list of parameter name prefixes to keep "
+      "trainable. All other parameters are frozen. Example: "
+      "'head,classifier'. If omitted, all parameters are trainable.",
   )
 
   parser.add_argument(
@@ -1075,6 +1085,10 @@ def main():
 
   logging.info(create_model_report(model))
 
+  # -- Freeze / unfreeze parameters -----------------------------------------
+  if args.freeze:
+    freeze_model(model, tuple(args.freeze.split(",")))
+
   if args.focal_gamma > 0 and args.label_smoothing > 0:
     logging.warning(
         "Both --focal_gamma (%.1f) and --label_smoothing (%.2f) are > 0. "
@@ -1090,8 +1104,9 @@ def main():
       label_smoothing=args.label_smoothing,
   )
 
+  trainable_params = [p for p in model.parameters() if p.requires_grad]
   optimizer = create_optimizer(
-      model.parameters(),
+      trainable_params,
       name=args.optimizer,
       lr=args.lr,
       weight_decay=args.weight_decay,

@@ -50,6 +50,30 @@ def _find_head_module(model):
   return None
 
 
+def freeze_model(model, trainable_prefixes):
+  """Freeze all parameters except those matching *trainable_prefixes*.
+
+  Args:
+      model: A ``torch.nn.Module``.
+      trainable_prefixes: Tuple of parameter name prefixes that should
+          remain trainable (e.g. ``("head", "classifier")``).
+
+  Returns:
+      Tuple ``(total_params, trainable_params)`` with counts.
+  """
+  for p in model.parameters():
+    p.requires_grad = False
+  thawed = 0
+  for name, p in model.named_parameters():
+    if name.startswith(trainable_prefixes):
+      p.requires_grad = True
+      thawed += 1
+  total = sum(1 for _ in model.parameters())
+  logging.info(f"Froze {total - thawed}/{total} parameters "
+               f"(thawed prefixes: {', '.join(trainable_prefixes)})")
+  return total, thawed
+
+
 def build_val_transform(processor, image_size):
   """Build validation transform: Resize → CenterCrop → Processor."""
   return v2.Compose([
