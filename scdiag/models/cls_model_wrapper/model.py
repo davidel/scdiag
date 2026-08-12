@@ -3,7 +3,7 @@
 import logging
 
 import torch.nn as nn
-from transformers import AutoModelForImageClassification
+from transformers import AutoModel
 
 from scdiag.classifiers import build_classifier
 
@@ -27,11 +27,7 @@ class ClsModelWrapper(nn.Module):
     super().__init__()
     classifier_args = classifier_args or {}
 
-    base = AutoModelForImageClassification.from_pretrained(
-        backbone_name,
-        num_labels=0,
-        ignore_mismatched_sizes=True,
-    )
+    base = AutoModel.from_pretrained(backbone_name)
     logging.info(
         "ClsModelWrapper: loaded backbone '%s' (%.1fM params)",
         backbone_name,
