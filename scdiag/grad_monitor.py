@@ -99,6 +99,8 @@ class GradMonitor:
     anomalies = []
 
     for name, p in self._model.named_parameters():
+      if not p.requires_grad:
+        continue
       entry = {}
       entry["param_norm"] = float(p.data.norm())
 
