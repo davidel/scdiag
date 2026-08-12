@@ -422,6 +422,22 @@ def parse_args(argv=None):
   )
 
   parser.add_argument(
+      "--classifier",
+      type=str,
+      default=None,
+      help="Classifier head spec: a registered name (e.g. 'mlp') or a "
+      "path to a .py file defining a Classifier class. Only used with "
+      "--model cls_model_wrapper:<hf_name>.",
+  )
+  parser.add_argument(
+      "--classifier_args",
+      action=KVPairAction,
+      default={},
+      help="Comma-separated key=value pairs forwarded to the classifier "
+      "constructor (e.g. 'hidden=512,dropout=0.3').",
+  )
+
+  parser.add_argument(
       "--freeze",
       type=str,
       default=None,
@@ -1066,6 +1082,8 @@ def main():
       device=device,
       checkpoint_path=args.checkpoint,
       cache_dir=args.cache_dir,
+      classifier=args.classifier,
+      classifier_args=args.classifier_args,
       **args.model_arg,
   )
 

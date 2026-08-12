@@ -106,8 +106,15 @@ def load_model(
   # the Transformers dependency.
   from transformers import AutoModelForImageClassification
 
+  # Parse "model_name:extra_arg" syntax (e.g. "cls_model_wrapper:google/vit-base-patch16-224").
+  base_model = None
+  if ":" in model_name:
+    model_name, base_model = model_name.split(":", 1)
+
   if model_name in _MODEL_REGISTRY:
     logging.info("Loading custom model '%s' from registry.", model_name)
+    if base_model is not None:
+      kwargs["backbone"] = base_model
     return _MODEL_REGISTRY[model_name](
         num_labels=num_labels,
         id2label=id2label,

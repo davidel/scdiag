@@ -17,10 +17,11 @@ from scdiag.models.registry import (
 )
 
 # Import built-in models after the registry API is available so their
-# module-level decorators can register ConvViT in the central registries.
-# The import is intentionally unused as a name; importing the module performs
-# the registration side effect required by model loading.
-import scdiag.models.convvit
+# module-level decorators can register in the central registries.
+# The imports are intentionally unused as names; importing the modules
+# performs the registration side effects required by model loading.
+import scdiag.models.cls_model_wrapper  # noqa: F401
+import scdiag.models.convvit  # noqa: F401
 
 __all__ = [
     "ModelOutput",
