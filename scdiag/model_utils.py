@@ -53,6 +53,10 @@ def _find_head_module(model):
 def freeze_model(model, trainable_prefixes):
   """Freeze all parameters except those matching *trainable_prefixes*.
 
+  Each parameter is thawed when *any* dotted segment of its name
+  starts with one of the given prefixes.  For example, ``"head"``
+  will match ``classifier.head.0.weight``.
+
   Args:
       model: A ``torch.nn.Module``.
       trainable_prefixes: Tuple of parameter name prefixes that should
@@ -65,7 +69,8 @@ def freeze_model(model, trainable_prefixes):
     p.requires_grad = False
   thawed = 0
   for name, p in model.named_parameters():
-    if name.startswith(trainable_prefixes):
+    segments = name.split(".")
+    if any(seg.startswith(trainable_prefixes) for seg in segments):
       p.requires_grad = True
       thawed += 1
   total = sum(1 for _ in model.parameters())
