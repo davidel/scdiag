@@ -1,0 +1,43 @@
+"""ClsModelWrapper loader — called by the model registry.
+
+Registered as ``cls_model_wrapper`` in the model registry.  Invoked via::
+
+    --model cls_model_wrapper:google/vit-base-patch16-224
+    --classifier mlp
+    --classifier_args "hidden=512,dropout=0.3"
+
+The text after the ``:`` is the HF model name/path (``backbone``).
+"""
+
+import logging
+
+from scdiag.models.cls_model_wrapper.model import ClsModelWrapper
+from scdiag.models.registry import register_model
+
+
+@register_model("cls_model_wrapper")
+def load_cls_model_wrapper(*,
+                           backbone,
+                           num_labels,
+                           id2label=None,
+                           label2id=None,
+                           classifier=None,
+                           classifier_args=None,
+                           image_size=224,
+                           device="cpu",
+                           **kwargs):
+  """Instantiate :class:`ClsModelWrapper` and move to *device*."""
+  model = ClsModelWrapper(
+      backbone_name=backbone,
+      num_labels=num_labels,
+      classifier=classifier,
+      classifier_args=classifier_args,
+  )
+  model.to(device)
+
+  logging.info(
+      "ClsModelWrapper ready — classifier=%s, params=%.1fM",
+      classifier,
+      sum(p.numel() for p in model.parameters()) / 1e6,
+  )
+  return model

@@ -9,25 +9,29 @@ common protocol expected by ``train.py`` and ``infer.py``.
 
 from scdiag.models.registry import (
     ModelOutput,
+    ParsedModelName,
     is_custom_model,
     load_model,
     load_processor,
+    parse_model_name,
     register_model,
     register_processor,
 )
 
-# Import built-in models after the registry API is available so their
-# module-level decorators can register in the central registries.
-# The imports are intentionally unused as names; importing the modules
-# performs the registration side effects required by model loading.
+# Import bundled custom models so their @register_model /
+# @register_processor decorators run.  The imports are intentionally
+# unused as names; importing the modules performs the registration side
+# effects required by model loading.
 import scdiag.models.cls_model_wrapper  # noqa: F401
 import scdiag.models.convvit  # noqa: F401
 
 __all__ = [
     "ModelOutput",
+    "ParsedModelName",
     "is_custom_model",
     "load_model",
     "load_processor",
+    "parse_model_name",
     "register_model",
     "register_processor",
 ]

@@ -11,11 +11,62 @@ Both functions transparently dispatch to the appropriate backend
 """
 
 import logging
+from collections import namedtuple
 
 from scdiag.logging_utils import fatal
 
 _MODEL_REGISTRY = {}
 _PROCESSOR_REGISTRY = {}
+
+# ---------------------------------------------------------------------------
+# Name parsing
+# ---------------------------------------------------------------------------
+
+ParsedModelName = namedtuple(
+    "ParsedModelName",
+    ["model", "backbone", "processor"],
+)
+
+
+def parse_model_name(name):
+  """Parse a fully-qualified model name string.
+
+  The colon syntax ``"model_name:hf_name"`` (used for custom models
+  that wrap a HuggingFace backbone) is split into its components.
+
+  Parameters
+  ----------
+  name : str
+      Fully-qualified model name, e.g.
+      ``"cls_model_wrapper:google/vit-base-patch16-224"`` or
+      ``"convvit"``.
+
+  Returns
+  -------
+  ParsedModelName
+      A namedtuple with fields:
+
+      - **model** – The registered custom model name, or the full
+        *name* when there is no colon.
+      - **backbone** – The HuggingFace backbone identifier (the part
+        after the colon), or ``None``.
+      - **processor** – The HuggingFace model identifier used to
+        load the processor.  Equals *backbone* when a colon is
+        present, otherwise equals *name*.
+  """
+  if ":" in name:
+    model, backbone = name.split(":", 1)
+    return ParsedModelName(
+        model=model,
+        backbone=backbone,
+        processor=backbone,
+    )
+  return ParsedModelName(model=name, backbone=None, processor=name)
+
+
+# ---------------------------------------------------------------------------
+# Model output container
+# ---------------------------------------------------------------------------
 
 
 class ModelOutput:
@@ -30,6 +81,11 @@ class ModelOutput:
 
   def __init__(self, logits):
     self.logits = logits
+
+
+# ---------------------------------------------------------------------------
+# Registration decorators
+# ---------------------------------------------------------------------------
 
 
 def register_model(name):
@@ -57,6 +113,7 @@ def register_processor(name):
   """Decorator to register a custom processor loader under *name*.
 
     The loader must return an object with ``image_mean`` and ``image_std``
+
     attributes (list of floats).
 
     Usage::
@@ -74,6 +131,11 @@ def register_processor(name):
     return fn
 
   return wrapper
+
+
+# ---------------------------------------------------------------------------
+# Public helpers
+# ---------------------------------------------------------------------------
 
 
 def is_custom_model(model_name):
@@ -106,16 +168,13 @@ def load_model(
   # the Transformers dependency.
   from transformers import AutoModelForImageClassification
 
-  # Parse "model_name:extra_arg" syntax (e.g. "cls_model_wrapper:google/vit-base-patch16-224").
-  base_model = None
-  if ":" in model_name:
-    model_name, base_model = model_name.split(":", 1)
+  parsed = parse_model_name(model_name)
 
-  if model_name in _MODEL_REGISTRY:
-    logging.info("Loading custom model '%s' from registry.", model_name)
-    if base_model is not None:
-      kwargs["backbone"] = base_model
-    return _MODEL_REGISTRY[model_name](
+  if parsed.model in _MODEL_REGISTRY:
+    logging.info("Loading custom model '%s' from registry.", parsed.model)
+    if parsed.backbone is not None:
+      kwargs["backbone"] = parsed.backbone
+    return _MODEL_REGISTRY[parsed.model](
         num_labels=num_labels,
         id2label=id2label,
         label2id=label2id,
@@ -125,9 +184,9 @@ def load_model(
         **kwargs,
     )
 
-  logging.info("Loading HuggingFace model '%s'.", model_name)
+  logging.info("Loading HuggingFace model '%s'.", parsed.model)
   model = AutoModelForImageClassification.from_pretrained(
-      model_name,
+      parsed.model,
       num_labels=num_labels,
       id2label=id2label,
       label2id=label2id,
@@ -151,6 +210,12 @@ def load_processor(
     ``@register_processor``.  HuggingFace processors are loaded via
     ``AutoImageProcessor``.
 
+    Supports the ``"model_name:hf_name"`` colon syntax used by custom
+    models (e.g. ``"cls_model_wrapper:google/vit-base-patch16-224"``).
+    The part before the colon is checked against the custom registry
+    first; the part after the colon is always used as the HuggingFace
+    model identifier for the processor.
+
     The returned object must expose ``image_mean`` and ``image_std``
     (list of floats) so that ``build_transforms`` can use them.
 
@@ -159,12 +224,17 @@ def load_processor(
     """
   from transformers import AutoImageProcessor  # local to avoid top-level import
 
-  if model_name in _PROCESSOR_REGISTRY:
-    logging.info("Loading custom processor '%s' from registry.", model_name)
-    return _PROCESSOR_REGISTRY[model_name](
-        image_size=image_size,
-        **kwargs,
-    )
+  parsed = parse_model_name(model_name)
 
-  logging.info("Loading HuggingFace processor '%s'.", model_name)
-  return AutoImageProcessor.from_pretrained(model_name, cache_dir=cache_dir)
+  # Check if a custom processor is registered under the model name
+  # (e.g. "convvit") or under the backbone/processor name.
+  for name in dict.fromkeys([parsed.model, parsed.processor]):
+    if name in _PROCESSOR_REGISTRY:
+      logging.info("Loading custom processor '%s' from registry.", name)
+      return _PROCESSOR_REGISTRY[name](
+          image_size=image_size,
+          **kwargs,
+      )
+
+  logging.info("Loading HuggingFace processor '%s'.", parsed.processor)
+  return AutoImageProcessor.from_pretrained(parsed.processor, cache_dir=cache_dir)
