@@ -79,6 +79,17 @@ def freeze_model(model, trainable_prefixes):
   return total, thawed
 
 
+def trainable_state_dict(model):
+  """Return a state dict containing only parameters with ``requires_grad=True``.
+
+  Useful when saving checkpoints for fine-tuning with a frozen backbone:
+  frozen weights can be reloaded from the original source, so only the
+  trainable parameters need to be persisted.
+  """
+  trainable = {name for name, p in model.named_parameters() if p.requires_grad}
+  return {k: v for k, v in model.state_dict().items() if k in trainable}
+
+
 def build_val_transform(processor, image_size):
   """Build validation transform: Resize → CenterCrop → Processor."""
   return v2.Compose([

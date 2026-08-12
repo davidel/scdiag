@@ -203,15 +203,24 @@ def checkpoint_dict(model,
                     epoch,
                     states_to_save=None,
                     scaler=None,
+                    save_frozen=True,
                     **extra):
   """Build a standard checkpoint dict.
 
     ``states_to_save`` is a set like ``{"opt", "sched", "amp"}``.
     If ``None``, everything is saved (backward compat).
     Any additional keyword arguments are merged into the dict as-is.
+
+    When *save_frozen* is ``False``, only trainable parameters are
+    included in the model state dict (via :func:`trainable_state_dict`).
+    This drastically reduces checkpoint size for fine-tuning runs with
+    a frozen backbone.
     """
+  from scdiag.model_utils import trainable_state_dict
+
   d = {
-      "model_state_dict": model.state_dict(),
+      "model_state_dict":
+          (model.state_dict() if save_frozen else trainable_state_dict(model)),
       "epoch": epoch,
   }
   # Persist num_labels so downstream loaders never need to guess.

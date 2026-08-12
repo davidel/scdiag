@@ -506,6 +506,14 @@ def parse_args(argv=None):
       help="Comma-separated list of states to restore from checkpoint "
       "on resume. One or more of: opt, sched, amp, none.",
   )
+  parser.add_argument(
+      "--save_frozen",
+      action=argparse.BooleanOptionalAction,
+      default=False,
+      help="Include frozen (non-trainable) parameters in checkpoints. "
+      "When disabled (default), only trainable parameters are saved, "
+      "greatly reducing checkpoint size for fine-tuning runs.",
+  )
 
   parser.add_argument(
       "--mixup_alpha",
@@ -1230,6 +1238,7 @@ def main():
                 scaler=scaler,
                 best_top1=best_top1,
                 global_step=optimizer_global_step,
+                save_frozen=args.save_frozen,
             ),
             args.checkpoint + "_best.pt",
             remote_uri=args.remote_checkpoint,
@@ -1250,6 +1259,7 @@ def main():
             scaler=scaler,
             best_top1=best_top1,
             global_step=optimizer_global_step,
+            save_frozen=args.save_frozen,
         ),
         args.checkpoint + "_latest.pt",
         remote_uri=args.remote_checkpoint,
