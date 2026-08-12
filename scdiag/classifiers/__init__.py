@@ -67,4 +67,6 @@ def build_classifier(spec, backbone, num_labels, **kwargs):
 
 
 # Import built-in classifiers so @register_classifier fires.
-from scdiag.classifiers import mlp  # noqa: F401
+from scdiag.classifiers import (  # noqa: F401
+    cls_attention, mlp,
+)
