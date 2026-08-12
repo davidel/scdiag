@@ -375,7 +375,7 @@ def load_checkpoint_weights(path,
         "Ensure the checkpoint exists before calling load_checkpoint_weights().",
         FileNotFoundError)
 
-  ckpt = torch.load(path, map_location=device, weights_only=True)
+  ckpt = torch.load(path, map_location=device, weights_only=False)
 
   if "model_state_dict" in ckpt:
     state = ckpt["model_state_dict"]

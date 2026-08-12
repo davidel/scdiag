@@ -8,9 +8,9 @@ import logging
 import os
 from types import SimpleNamespace
 
-import torch
 import torch.nn as nn
 
+from scdiag.checkpointing import load_checkpoint_weights
 from scdiag.models.convvit.model import CustomPatchTransformer
 from scdiag.models.convvit.processor import ConvViTProcessor
 from scdiag.models.registry import ModelOutput, register_model, register_processor
@@ -125,32 +125,13 @@ def load_convvit(
 
   # Load checkpoint (if provided)
   if checkpoint_path and os.path.isfile(checkpoint_path):
-    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    state = ckpt.get("model_state_dict", ckpt)
-
-    # The checkpoint may come from the wrapper (keys prefixed with
-    # ``model.``) or from the raw model.  Strip the prefix if present.
-    raw_keys = set(model.state_dict().keys())
-    if state and not raw_keys.intersection(state):
-      # None of the checkpoint keys match — try stripping "model."
-      stripped = {k.removeprefix("model."): v for k, v in state.items()}
-      if raw_keys.intersection(stripped):
-        logging.info("ConvViT checkpoint: stripping 'model.' prefix from keys")
-        state = stripped
-
-    missing, unexpected = model.load_state_dict(state, strict=False)
-    if missing:
-      logging.warning(
-          "ConvViT checkpoint: %d missing keys (new/untrained): %s",
-          len(missing),
-          missing[:5],
-      )
-    if unexpected:
-      logging.warning(
-          "ConvViT checkpoint: %d unexpected keys (skipped): %s",
-          len(unexpected),
-          unexpected[:5],
-      )
+    load_checkpoint_weights(
+        path=checkpoint_path,
+        model=model,
+        device="cpu",
+        strict=False,
+        param_rename=["model\\.(.*);\\g<1>"],
+    )
     logging.info("Loaded ConvViT checkpoint: %s", checkpoint_path)
   else:
     logging.info("ConvViT: training from random init (no checkpoint)")
