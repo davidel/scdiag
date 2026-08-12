@@ -99,36 +99,35 @@ class GradMonitor:
     anomalies = []
 
     for name, p in self._model.named_parameters():
-      if not p.requires_grad:
-        continue
-      entry = {}
-      entry["param_norm"] = float(p.data.norm())
+      if p.requires_grad:
+        entry = {}
+        entry["param_norm"] = float(p.data.norm())
 
-      if p.grad is None:
-        entry["grad_norm"] = 0.0
-        entry["grad_mean"] = 0.0
-        entry["grad_max"] = 0.0
-        entry["grad_sparsity"] = 1.0
-        entry["grad_param_ratio"] = 0.0
-      else:
-        g = p.grad.data
-        g_norm = float(g.norm())
-        entry["grad_norm"] = g_norm
-        entry["grad_mean"] = float(g.float().mean())
-        entry["grad_max"] = float(g.abs().max())
-        entry["grad_sparsity"] = float((g.abs() < 1e-7).float().mean())
-        entry["grad_param_ratio"] = g_norm / (entry["param_norm"] + 1e-12)
+        if p.grad is None:
+          entry["grad_norm"] = 0.0
+          entry["grad_mean"] = 0.0
+          entry["grad_max"] = 0.0
+          entry["grad_sparsity"] = 1.0
+          entry["grad_param_ratio"] = 0.0
+        else:
+          g = p.grad.data
+          g_norm = float(g.norm())
+          entry["grad_norm"] = g_norm
+          entry["grad_mean"] = float(g.float().mean())
+          entry["grad_max"] = float(g.abs().max())
+          entry["grad_sparsity"] = float((g.abs() < 1e-7).float().mean())
+          entry["grad_param_ratio"] = g_norm / (entry["param_norm"] + 1e-12)
 
-      is_low = entry["grad_norm"] < self._norm_floor
-      prev = self._consecutive_low.get(name, 0)
-      self._consecutive_low[name] = prev + 1 if is_low else 0
-      if self._consecutive_low[name] >= self._stall_window:
-        anomalies.append(f"STALLED({name}, {self._consecutive_low[name]} steps)")
+        is_low = entry["grad_norm"] < self._norm_floor
+        prev = self._consecutive_low.get(name, 0)
+        self._consecutive_low[name] = prev + 1 if is_low else 0
+        if self._consecutive_low[name] >= self._stall_window:
+          anomalies.append(f"STALLED({name}, {self._consecutive_low[name]} steps)")
 
-      if entry["grad_norm"] > self._norm_ceiling:
-        anomalies.append(f"EXPLODING({name}, norm={entry['grad_norm']:.2e})")
+        if entry["grad_norm"] > self._norm_ceiling:
+          anomalies.append(f"EXPLODING({name}, norm={entry['grad_norm']:.2e})")
 
-      stats[name] = entry
+        stats[name] = entry
 
     norms = [v["grad_norm"] for v in stats.values() if v["grad_norm"] > 0]
     if norms:
@@ -146,14 +145,12 @@ class GradMonitor:
         v["grad_param_ratio"] for v in stats.values() if v["grad_param_ratio"] > 0
     ]
 
-    lines = [
-        (f"[Step {global_step}] Gradient Report:"
-         f" {len(stats)} params"
-         f" | grad_norm: mean={sum(norms)/len(norms) if norms else 0:.2e}"
-         f" max={max(norms) if norms else 0:.2e}"
-         f" min={min(norms) if norms else 0:.2e}"
-         f" | grad/param: mean={sum(ratios)/len(ratios) if ratios else 0:.2e}")
-    ]
+    lines = [(f"[Step {global_step}] Gradient Report:"
+              f" {len(stats)} params"
+              f" | grad_norm: mean={sum(norms)/len(norms) if norms else 0:.2e}"
+              f" max={max(norms) if norms else 0:.2e}"
+              f" min={min(norms) if norms else 0:.2e}"
+              f" | grad/param: mean={sum(ratios)/len(ratios) if ratios else 0:.2e}")]
 
     name_status = {}
     for a in anomalies:
