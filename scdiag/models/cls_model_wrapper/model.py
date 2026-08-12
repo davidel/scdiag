@@ -6,6 +6,7 @@ import torch.nn as nn
 from transformers import AutoModel
 
 from scdiag.classifiers import build_classifier
+from scdiag.models.registry import ModelOutput
 
 
 class ClsModelWrapper(nn.Module):
@@ -43,4 +44,4 @@ class ClsModelWrapper(nn.Module):
     self.config = base.config
 
   def forward(self, pixel_values):
-    return self.classifier(pixel_values)
+    return ModelOutput(logits=self.classifier(pixel_values))
