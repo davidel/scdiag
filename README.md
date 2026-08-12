@@ -33,6 +33,11 @@ datasets.
   model, or register custom architectures via the `scdiag.models` registry.
   First custom model: **ConvViT** (multi-block conv stem + ViT encoder with
   CLS-guided attention pooling). Use `--model convvit` to select it.
+- **ClsModelWrapper** — wrap any HuggingFace backbone with a custom
+  classifier head. Use `--model cls_model_wrapper:<hf_name>` with
+  `--classifier` to select a registered classifier or a `.py` script.
+- **Parameter freezing** — freeze all backbone parameters except the
+  classifier head with `--freeze head,classifier`.
 - **Hook-based feature extraction** — XGBoost backbone features are extracted
   via a forward hook on the classifier head, making feature extraction
   architecture-agnostic (works for ViT, ResNet, Swin, etc.).
@@ -99,6 +104,19 @@ scdiag-train --model google/vit-base-patch16-224 \
              --batch_size 32 \
              --lr 3e-5 \
              --image_size 448
+
+# Fine-tune with a custom MLP classifier on top of a ViT backbone
+scdiag-train --model cls_model_wrapper:google/vit-base-patch16-224 \
+             --dataset marmal88/skin_cancer \
+             --classifier mlp \
+             --classifier_args "hidden=512,dropout=0.3" \
+             --freeze classifier
+
+# Fine-tune with a custom classifier from a .py file
+scdiag-train --model cls_model_wrapper:google/vit-base-patch16-224 \
+             --dataset marmal88/skin_cancer \
+             --classifier /path/to/my_classifier.py \
+             --freeze head
 ```
 
 ## CLI Arguments
@@ -137,6 +155,9 @@ scdiag-train --model google/vit-base-patch16-224 \
 | `--xgb_n_estimators` | `200` | XGBoost number of trees |
 | `--source_checkpoint` | `None` | Path to a source checkpoint to absorb parameters from. Keys are aligned by shape and name before loading. |
 | `--param_rename` | `None` | Regex-based key rename patterns for `--source_checkpoint`. Each pattern is `SEARCH;REPLACE` where SEARCH is a Python regex and REPLACE may use `$1`, `$2`, etc. Applied before shape-based alignment. |
+| `--classifier` | `None` | Classifier head spec: a registered name (e.g. `mlp`) or a path to a `.py` file. Only used with `--model cls_model_wrapper:<hf_name>`. |
+| `--classifier_args` | `{}` | Comma-separated `key=value` pairs forwarded to the classifier constructor (e.g. `hidden=512,dropout=0.3`). |
+| `--freeze` | `None` | Comma-separated list of parameter name prefixes to keep trainable. All other parameters are frozen. Example: `head,classifier`. If omitted, all parameters are trainable. |
 | `--xgb_learning_rate` | `0.1` | XGBoost learning rate |
 | `--xgb_subsample` | `0.8` | XGBoost row sampling ratio |
 | `--xgb_colsample_bytree` | `0.8` | XGBoost column sampling ratio |
@@ -359,6 +380,40 @@ scdiag-train --model convvit --model_arg depth=6 num_heads=8 dropout=0.2
 | Name | Description | `--model` value |
 |---|---|---|
 | ConvViT | Multi-block conv stem (4 blocks → patch_size 16) + 12-layer ViT encoder with CLS-guided attention pooling | `convvit` |
+| ClsModelWrapper | HuggingFace backbone + custom classifier head | `cls_model_wrapper:<hf_name>` |
+
+### Custom Classifiers
+
+`ClsModelWrapper` lets you replace the default HF classification head with a
+custom classifier. Use `--model cls_model_wrapper:<hf_name>` with `--classifier`:
+
+```bash
+# Use the built-in MLP classifier
+scdiag-train --model cls_model_wrapper:google/vit-base-patch16-224 \
+             --classifier mlp \
+             --classifier_args "hidden=512,dropout=0.3" \
+             --freeze classifier
+
+# Use a custom classifier from a .py file
+scdiag-train --model cls_model_wrapper:google/vit-base-patch16-224 \
+             --classifier /path/to/my_classifier.py \
+             --freeze head
+```
+
+A custom classifier `.py` file must define a `Classifier` class:
+
+```python
+class Classifier(nn.Module):
+    def __init__(self, backbone, num_labels, **kwargs):
+        super().__init__()
+        self.backbone = backbone
+        self.head = nn.Linear(backbone.config.hidden_size, num_labels)
+
+    def forward(self, pixel_values):
+        out = self.backbone(pixel_values)
+        features = out.last_hidden_state[:, 0]  # CLS token
+        return self.head(features)
+```
 
 ConvViT supports SimMIM self-supervised pre-training via `scdiag-pretrain`.
 Pre-trained encoder weights can be loaded into the supervised training pipeline
