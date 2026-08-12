@@ -5,6 +5,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from scdiag.datasets.retry import getitem_retry
 from scdiag.logging_utils import fatal
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
@@ -43,6 +44,9 @@ class ImageFolderDataset:
   def __getitem__(self, idx):
     if idx >= len(self._paths):
       fatal(f"Index {idx} out of range for '{self.name}'", IndexError)
-    path = self._paths[idx]
-    image = Image.open(path).convert("RGB")
-    return image
+
+    def load(i):
+      path = self._paths[i]
+      return Image.open(path).convert("RGB")
+
+    return getitem_retry(idx, load, len(self._paths))

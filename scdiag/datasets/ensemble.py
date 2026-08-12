@@ -12,6 +12,7 @@ from PIL import Image
 
 from scdiag.datasets.hf_proxy import HFDatasetProxy
 from scdiag.datasets.image_folder import ImageFolderDataset
+from scdiag.datasets.retry import getitem_retry
 from scdiag.logging_utils import fatal
 
 
@@ -28,10 +29,7 @@ class _HFDataset:
     self._image_column = image_column
     from datasets import load_dataset
     logging.info(f"Loading HF dataset '{self.name}' (split={split}) …")
-    ds = load_dataset(self.name,
-                      split=split,
-                      cache_dir=cache_dir,
-                      token=hf_token)
+    ds = load_dataset(self.name, split=split, cache_dir=cache_dir, token=hf_token)
     if self._image_column is None:
       col = HFDatasetProxy.detect_image_column(ds)
       if col is None:
@@ -45,12 +43,15 @@ class _HFDataset:
     return len(self._ds)
 
   def __getitem__(self, idx):
-    row = self._ds[idx]
-    image = row[self._image_column]
-    if not isinstance(image, Image.Image):
-      image = Image.open(image)
-    image = image.convert("RGB")
-    return image
+
+    def load(i):
+      row = self._ds[i]
+      image = row[self._image_column]
+      if not isinstance(image, Image.Image):
+        image = Image.open(image)
+      return image.convert("RGB")
+
+    return getitem_retry(idx, load, len(self._ds))
 
 
 class DatasetEnsemble:
