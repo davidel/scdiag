@@ -431,10 +431,12 @@ def parse_args(argv=None):
   )
   parser.add_argument(
       "--classifier_args",
+      nargs="+",
       action=KVPairAction,
       default={},
-      help="Comma-separated key=value pairs forwarded to the classifier "
-      "constructor (e.g. 'hidden=512,dropout=0.3').",
+      metavar="KEY=VALUE",
+      help="Extra classifier kwargs (repeatable). "
+      "Example: --classifier_args hidden=512 dropout=0.3",
   )
 
   parser.add_argument(

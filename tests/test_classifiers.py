@@ -89,6 +89,65 @@ class TestBuildClassifier:
     assert out.shape == (2, 3)
 
 
+class TestClsAttention:
+  """Tests for the cls_attention classifier slicing."""
+
+  def _make_backbone(self, hidden_size=32, num_tokens=6):
+    """Create a dummy backbone returning multi-token output."""
+
+    class _Backbone(nn.Module):
+
+      class _Config:
+        pass
+
+      def __init__(self):
+        super().__init__()
+        self.config = self._Config()
+        self.config.hidden_size = hidden_size
+        self.linear = nn.Linear(hidden_size, hidden_size)
+
+      def forward(self, x):
+        B = x.shape[0]
+        out = self.linear(x[:, :1, :])  # (B, 1, D)
+        # Repeat to create multiple tokens (simulates CLS + spatial)
+        out = out.expand(B, num_tokens, -1).clone()
+
+        class _Out:
+          pass
+
+        ret = _Out()
+        ret.last_hidden_state = out
+        return ret
+
+    return _Backbone()
+
+  def test_default_slices(self):
+    """Default cls_slice=(0,1) and spc_slice=(1,) match old hardcoded behavior."""
+    backbone = self._make_backbone(hidden_size=16, num_tokens=5)
+    model = build_classifier("cls_attention", backbone, num_labels=3)
+    assert model.cls_slice == slice(0, 1)
+    assert model.spc_slice == slice(1, None)  # (1, None) default
+    x = torch.randn(2, 3, 16)
+    out = model(x)
+    assert out.shape == (2, 3)
+
+  def test_custom_slices(self):
+    """Custom slices are stored and used correctly."""
+    backbone = self._make_backbone(hidden_size=16, num_tokens=6)
+    model = build_classifier(
+        "cls_attention",
+        backbone,
+        num_labels=3,
+        cls_slice=(0, 1),
+        spc_slice=(1, 4),
+    )
+    assert model.cls_slice == slice(0, 1)
+    assert model.spc_slice == slice(1, 4)
+    x = torch.randn(2, 3, 16)
+    out = model(x)
+    assert out.shape == (2, 3)
+
+
 class TestColonParsingInLoadModel:
 
   def test_colon_splits_backbone(self):

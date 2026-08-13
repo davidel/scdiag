@@ -27,6 +27,12 @@ class TestParseValue:
   def test_bool_case_insensitive(self, input_val, expected):
     assert parse_value(input_val) is expected
 
+  none_cases = ["none", "None", "NONE"]
+
+  @pytest.mark.parametrize("input_val", none_cases)
+  def test_none_case_insensitive(self, input_val):
+    assert parse_value(input_val) is None
+
   def test_positive_int(self):
     assert parse_value("42") == 42
     assert isinstance(parse_value("42"), int)

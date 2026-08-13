@@ -109,7 +109,7 @@ scdiag-train --model google/vit-base-patch16-224 \
 scdiag-train --model cls_model_wrapper:google/vit-base-patch16-224 \
              --dataset marmal88/skin_cancer \
              --classifier mlp \
-             --classifier_args "hidden=512,dropout=0.3" \
+             --classifier_args hidden=512 dropout=0.3 \
              --freeze ".*\\.(head|pool)"
 
 # Fine-tune with a custom classifier from a .py file
@@ -156,7 +156,7 @@ scdiag-train --model cls_model_wrapper:google/vit-base-patch16-224 \
 | `--source_checkpoint` | `None` | Path to a source checkpoint to absorb parameters from. Keys are aligned by shape and name before loading. |
 | `--param_rename` | `None` | Regex-based key rename patterns for `--source_checkpoint`. Each pattern is `SEARCH;REPLACE` where SEARCH is a Python regex and REPLACE may use `$1`, `$2`, etc. Applied before shape-based alignment. |
 | `--classifier` | `None` | Classifier head spec: a registered name (e.g. `mlp`) or a path to a `.py` file. Only used with `--model cls_model_wrapper:<hf_name>`. |
-| `--classifier_args` | `{}` | Comma-separated `key=value` pairs forwarded to the classifier constructor (e.g. `hidden=512,dropout=0.3`). |
+| `--classifier_args` | `{}` | Extra classifier kwargs (repeatable). Example: `--classifier_args hidden=512 dropout=0.3`. For `cls_attention`: `cls_slice=(0,1) spc_slice=(1,None)`. |
 | `--freeze` | `None` | Comma-separated list of regex patterns (`re.match`) for parameter names to keep trainable. All other parameters are frozen. Each pattern is anchored at the start of the name. Example: `".*\\.(head|pool)"`. If omitted, all parameters are trainable. |
 | `--xgb_learning_rate` | `0.1` | XGBoost learning rate |
 | `--xgb_subsample` | `0.8` | XGBoost row sampling ratio |
@@ -391,7 +391,7 @@ custom classifier. Use `--model cls_model_wrapper:<hf_name>` with `--classifier`
 # Use the built-in MLP classifier
 scdiag-train --model cls_model_wrapper:google/vit-base-patch16-224 \
              --classifier mlp \
-             --classifier_args "hidden=512,dropout=0.3" \
+             --classifier_args hidden=512 dropout=0.3 \
              --freeze ".*\\.(head|pool)"
 
 # Use a custom classifier from a .py file

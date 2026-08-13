@@ -20,15 +20,20 @@ def parse_value(s):
     Conversion rules (applied in order):
 
     1. ``"true"`` / ``"false"`` (case-insensitive) → ``bool``
-    2. Bare integers (e.g. ``"3"``, ``"-7"``) → ``int``
-    3. Bare floats (e.g. ``"0.1"``, ``"1e-3"``) → ``float``
-    4. List literal ``"[1, 2, 3]"`` or ``"(1, 2, 3)"`` → ``list`` with each
+    2. ``"none"`` (case-insensitive) → ``None``
+    3. Bare integers (e.g. ``"3"``, ``"-7"``) → ``int``
+    4. Bare floats (e.g. ``"0.1"``, ``"1e-3"``) → ``float``
+    5. List literal ``"[1, 2, 3]"`` or ``"(1, 2, 3)"`` → ``list`` with each
        element recursively converted via ``parse_value``
-    5. Everything else is returned as a ``str``.
+    6. Everything else is returned as a ``str``.
     """
   # Bool check
   if s.lower() in ("true", "false"):
     return s.lower() == "true"
+
+  # None check
+  if s.lower() == "none":
+    return None
 
   # Int check
   try:
