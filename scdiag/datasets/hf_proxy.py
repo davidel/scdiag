@@ -123,8 +123,6 @@ class HFDatasetProxy:
         if isinstance(feat, datasets.Value) and feat.dtype == "string":
           return name
 
-    return None
-
   @staticmethod
   def normalize_image_column(dataset, image_column=None):
     """Cast the selected image column to ``datasets.Image`` when needed.
@@ -203,5 +201,3 @@ class HFDatasetProxy:
       feat = features[name]
       if isinstance(feat, datasets.Value) and feat.dtype in ("string", "int64"):
         return name
-
-    return None

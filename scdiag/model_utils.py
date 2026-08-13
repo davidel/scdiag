@@ -47,7 +47,6 @@ def _find_head_module(model):
     mod = getattr(model, attr, None)
     if mod is not None and isinstance(mod, torch.nn.Module):
       return attr, mod
-  return None
 
 
 def freeze_model(model, trainable_prefixes):

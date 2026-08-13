@@ -77,7 +77,6 @@ def select_available_checkpoint(root_path):
     return latest
   logging.error(f"No checkpoint found at {root_path} "
                 f"(tried {best}, {latest}).")
-  return None
 
 
 _VALID_STATE_FLAGS = {"opt", "sched", "amp", "none"}
