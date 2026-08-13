@@ -441,9 +441,13 @@ def parse_args(argv=None):
       "--freeze",
       type=str,
       default=None,
-      help="Comma-separated list of parameter name prefixes to keep "
-      "trainable. All other parameters are frozen. Example: "
-      "'head,classifier'. If omitted, all parameters are trainable.",
+      help="Comma-separated list of regex patterns (re.match) for "
+      "parameter names to keep trainable. All other parameters are "
+      "frozen. Each pattern is anchored at the start of the name. "
+      "Examples: 'head' (matches names starting with 'head'), "
+      "'.*pool.*' (matches any name containing 'pool'), "
+      "'classifier\\.(head|pool)' (matches classifier.head or "
+      "classifier.pool). If omitted, all parameters are trainable.",
   )
 
   parser.add_argument(

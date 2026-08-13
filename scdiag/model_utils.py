@@ -1,6 +1,7 @@
 """Shared model loading and preprocessing utilities."""
 
 import logging
+import re
 from contextlib import contextmanager
 
 import numpy as np
@@ -52,29 +53,37 @@ def _find_head_module(model):
 def freeze_model(model, trainable_prefixes):
   """Freeze all parameters except those matching *trainable_prefixes*.
 
-  Each parameter is thawed when *any* dotted segment of its name
-  starts with one of the given prefixes.  For example, ``"head"``
-  will match ``classifier.head.0.weight``.
+  Each element in *trainable_prefixes* is a regex tested with
+  ``re.match(pattern, name)`` (anchored at the start of the parameter
+  name).  A parameter is thawed when **any** pattern matches.
+
+  Examples::
+
+      # Thaw anything whose name contains "head" or "pool"
+      freeze_model(m, (r".*\\bhead\\b.*", r".*\\bpool\\b.*"))
+
+      # Thaw only the classifier head and attention pool
+      freeze_model(m, (r"classifier\\.head", r"classifier\\.pool"))
 
   Args:
       model: A ``torch.nn.Module``.
-      trainable_prefixes: Tuple of parameter name prefixes that should
-          remain trainable (e.g. ``("head", "classifier")``).
+      trainable_prefixes: Tuple of regex patterns for parameter names
+          that should remain trainable.
 
   Returns:
       Tuple ``(total_params, trainable_params)`` with counts.
   """
+  compiled = [re.compile(p) for p in trainable_prefixes]
   for p in model.parameters():
     p.requires_grad = False
   thawed = 0
   for name, p in model.named_parameters():
-    segments = name.split(".")
-    if any(seg.startswith(trainable_prefixes) for seg in segments):
+    if any(pat.match(name) for pat in compiled):
       p.requires_grad = True
       thawed += 1
   total = sum(1 for _ in model.parameters())
   logging.info(f"Froze {total - thawed}/{total} parameters "
-               f"(thawed prefixes: {', '.join(trainable_prefixes)})")
+               f"(thawed patterns: {', '.join(trainable_prefixes)})")
   return total, thawed
 
 
