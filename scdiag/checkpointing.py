@@ -309,7 +309,7 @@ def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scale
       logging.warning(f"  Skipped key '{k}': {reason}")
 
   result = model.load_state_dict(filtered, strict=False)
-  matched = len(filtered) - len(result.missing_keys)
+  matched = len(filtered) - len(result.unexpected_keys)
   logging.info(f"  Restored model weights ({matched}/{len(filtered)} keys)")
   if result.missing_keys:
     logging.warning(f"  Missing keys (not loaded from checkpoint): "
@@ -411,7 +411,7 @@ def load_checkpoint_weights(path,
     aligned[new_key] = state[old_key]
 
   result = model.load_state_dict(aligned, strict=strict)
-  matched = len(aligned) - len(result.missing_keys)
+  matched = len(aligned) - len(result.unexpected_keys)
   logging.info(f"  Loaded weights from {path} ({matched}/{len(aligned)} keys)")
   if result.missing_keys:
     logging.warning(f"  Missing keys: {result.missing_keys}")
