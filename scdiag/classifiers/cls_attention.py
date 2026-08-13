@@ -16,6 +16,11 @@ class Classifier(BaseClassifier):
   spatial tokens from the backbone, producing a single pooled
   representation that feeds a linear classifier.
 
+  An optional ``nn.TransformerEncoder`` can be applied to the spatial
+  tokens before the pooling step.  This is useful when the backbone is
+  fully frozen and you want additional task-specific capacity without
+  modifying the backbone weights.
+
   Parameters
   ----------
   num_labels : int
@@ -32,6 +37,11 @@ class Classifier(BaseClassifier):
       Number of attention heads in the pooling layer.
   dropout : float
       Dropout rate inside the pooling layer.
+  num_encoder_layers : int
+      Number of ``TransformerEncoderLayer`` blocks applied to the
+      spatial tokens before pooling.  ``0`` disables the encoder.
+  encoder_dropout : float
+      Dropout rate inside the optional encoder layers.
   """
 
   def __init__(
@@ -42,10 +52,27 @@ class Classifier(BaseClassifier):
       spc_slice=(1, None),
       num_heads=8,
       dropout=0.1,
+      num_encoder_layers=0,
+      encoder_dropout=0.1,
   ):
     super().__init__()
     self.cls_slice = slice(*cls_slice)
     self.spc_slice = slice(*spc_slice)
+
+    self.encoder = None
+    if num_encoder_layers > 0:
+      encoder_layer = nn.TransformerEncoderLayer(
+          d_model=hidden_size,
+          nhead=num_heads,
+          dim_feedforward=hidden_size * 4,
+          dropout=encoder_dropout,
+          batch_first=True,
+      )
+      self.encoder = nn.TransformerEncoder(
+          encoder_layer,
+          num_layers=num_encoder_layers,
+      )
+
     self.pool = CLSGuidedAttentionPooling(
         embed_dim=hidden_size,
         num_heads=num_heads,
@@ -59,4 +86,6 @@ class Classifier(BaseClassifier):
   def extract_features(self, hidden_states: torch.Tensor) -> torch.Tensor:
     cls_out = hidden_states[:, self.cls_slice, :]
     spatial_out = hidden_states[:, self.spc_slice, :]
+    if self.encoder is not None:
+      spatial_out = self.encoder(spatial_out)
     return self.pool(cls_out, spatial_out)  # (B, D)
