@@ -369,8 +369,8 @@ scdiag-train --model convvit --model_arg depth=6 num_heads=8 dropout=0.2
 3. The model must satisfy the protocol:
    - `forward(pixel_values=images)` → object with `.logits`
    - `config.id2label` / `config.label2id` accessible
-   - `extract_backbone_features(pixel_values)` for XGBoost (optional —
-     hook-based fallback works for HF models automatically)
+   - `extract_backbone_features(pixel_values)` for XGBoost feature
+     extraction (ClsModelWrapper implements this natively)
 4. CLI overrides via `--model_arg KEY=VALUE` are forwarded as `**kwargs`
    to the registered loader.  The loader is responsible for applying them
    (e.g. by merging into a default config via `setattr`).
@@ -385,35 +385,44 @@ scdiag-train --model convvit --model_arg depth=6 num_heads=8 dropout=0.2
 ### Custom Classifiers
 
 `ClsModelWrapper` lets you replace the default HF classification head with a
-custom classifier. Use `--model cls_model_wrapper:<hf_name>` with `--classifier`:
+custom classifier. The backbone lives on the wrapper; the classifier receives
+plain `(B, N, D)` hidden-state tensors and does **not** own the backbone.
+
+Use `--model cls_model_wrapper:<hf_name>` with `--classifier`:
 
 ```bash
-# Use the built-in MLP classifier
+# Use the built-in MLP classifier (freeze backbone, train head only)
 scdiag-train --model cls_model_wrapper:google/vit-base-patch16-224 \
              --classifier mlp \
              --classifier_args hidden=512 dropout=0.3 \
-             --freeze ".*\\.(head|pool)"
+             --freeze "classifier\.(head|pool)"
 
-# Use a custom classifier from a .py file
-scdiag-train --model cls_model_wrapper:google/vit-base-patch16-224 \
-             --classifier /path/to/my_classifier.py \
-             --freeze ".*\\.(head|pool)"
+# Use the CLS-guided attention pooling classifier
+scdiag-train --model cls_model_wrapper:facebook/dinov2-with-registers-large \
+             --classifier cls_attention \
+             --classifier_args cls_slice=0,1 spc_slice=5,None \
+             --freeze "classifier\.(head|pool)"
 ```
 
-A custom classifier `.py` file must define a `Classifier` class:
+A custom classifier `.py` file must define a `Classifier` class that receives
+`num_labels`, `hidden_size`, and any `**kwargs` from `--classifier_args`:
 
 ```python
 class Classifier(nn.Module):
-    def __init__(self, backbone, num_labels, **kwargs):
+    def __init__(self, num_labels, hidden_size, **kwargs):
         super().__init__()
-        self.backbone = backbone
-        self.head = nn.Linear(backbone.config.hidden_size, num_labels)
+        self.head = nn.Linear(hidden_size, num_labels)
 
-    def forward(self, pixel_values):
-        out = self.backbone(pixel_values)
-        features = out.last_hidden_state[:, 0]  # CLS token
+    def forward(self, hidden_states):          # (B, N, D) tensor
+        features = hidden_states[:, 0]         # CLS token
         return self.head(features)
+
+    def extract_features(self, hidden_states): # (B, N, D) → (B, D)
+        return hidden_states[:, 0]
 ```
+
+The classifier's `extract_features` method returns the feature vector fed to
+the head — used by `--xgboost_model` for XGBoost training on backbone features.
 
 ConvViT supports SimMIM self-supervised pre-training via `scdiag-pretrain`.
 Pre-trained encoder weights can be loaded into the supervised training pipeline

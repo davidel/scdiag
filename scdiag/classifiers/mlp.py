@@ -1,26 +1,31 @@
 """Two-layer MLP classifier head."""
 
+import torch
 import torch.nn as nn
 
 from scdiag.classifiers import register_classifier
+from scdiag.classifiers.base import BaseClassifier
 
 
 @register_classifier("mlp")
-class Classifier(nn.Module):
-  """Two-layer MLP classification head on top of a HF backbone."""
+class Classifier(BaseClassifier):
+  """Two-layer MLP classification head.
 
-  def __init__(self, backbone, num_labels, hidden=512, dropout=0.3):
+  Receives backbone hidden states ``(B, N, D)`` and classifies the
+  CLS token (``[:, 0]``).
+  """
+
+  def __init__(self, num_labels, hidden_size, hidden=512, dropout=0.3):
     super().__init__()
-    self.backbone = backbone
-    dim = getattr(backbone.config, "hidden_size", 768)
     self.head = nn.Sequential(
-        nn.Linear(dim, hidden),
+        nn.Linear(hidden_size, hidden),
         nn.GELU(),
         nn.Dropout(dropout),
         nn.Linear(hidden, num_labels),
     )
 
-  def forward(self, pixel_values):
-    out = self.backbone(pixel_values)
-    features = out.last_hidden_state[:, 0]  # CLS token
-    return self.head(features)
+  def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+    return self.head(self.extract_features(hidden_states))
+
+  def extract_features(self, hidden_states: torch.Tensor) -> torch.Tensor:
+    return hidden_states[:, 0]  # CLS token, (B, D)

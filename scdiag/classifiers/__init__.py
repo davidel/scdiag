@@ -4,7 +4,7 @@ Usage::
 
     from scdiag.classifiers import build_classifier
 
-    model = build_classifier("mlp", backbone, num_labels=3, hidden=256)
+    model = build_classifier("mlp", num_labels=3, hidden_size=1024, hidden=256)
 
 A classifier spec can be:
 
@@ -21,41 +21,46 @@ _CLASSIFIERS = {}
 
 
 def register_classifier(name):
-  """Decorator to register a classifier class under *name*."""
+  """Decorator that registers a classifier class under *name*."""
 
-  def decorator(cls):
+  def wrapper(cls):
     if name in _CLASSIFIERS:
-      fatal(
-          f"Classifier {name!r} already registered "
-          f"(was {_CLASSIFIERS[name].__name__}).",
-          ValueError,
-      )
+      raise ValueError(f"Classifier {name!r} already registered")
     _CLASSIFIERS[name] = cls
     return cls
 
-  return decorator
+  return wrapper
 
 
-def build_classifier(spec, backbone, num_labels, **kwargs):
-  """Resolve *spec* and return an instantiated classifier ``nn.Module``.
+def build_classifier(spec, num_labels, hidden_size, **kwargs):
+  """Instantiate a classifier head.
 
   Parameters
   ----------
   spec : str
-      Either a registered classifier name or a path/URL to a ``.py`` file.
-  backbone : nn.Module
-      The backbone model (e.g. a HF model with its head stripped).
+      Registered classifier name or path to a ``.py`` file.
   num_labels : int
       Number of output classes.
+  hidden_size : int
+      Dimensionality of backbone hidden states (``D``).  Passed to the
+      classifier so it can dimension its layers without holding a
+      reference to the backbone.
   **kwargs
-      Forwarded to the classifier constructor (from ``--classifier_args``).
+      Extra keyword arguments forwarded to the classifier constructor
+      (e.g. ``hidden=512``, ``cls_slice=(0, 1)``).
+
+  Returns
+  -------
+  torch.nn.Module
+      A classifier with a ``forward(hidden_states)`` interface.
   """
-  if spec.endswith(".py"):
-    logging.info("Loading custom classifier from %s", spec)
-    cls = load_extern(spec, "Classifier")
-  elif spec in _CLASSIFIERS:
+  cls = None
+  if spec in _CLASSIFIERS:
     cls = _CLASSIFIERS[spec]
     logging.info("Using registered classifier %r (%s)", spec, cls.__name__)
+  elif spec.endswith(".py"):
+    cls = load_extern(spec, interface="classifier")
+    logging.info("Loaded external classifier from %s (%s)", spec, cls.__name__)
   else:
     available = sorted(_CLASSIFIERS.keys())
     fatal(
@@ -64,7 +69,7 @@ def build_classifier(spec, backbone, num_labels, **kwargs):
         ValueError,
     )
   logging.info("Classifier kwargs: %s", kwargs)
-  return cls(backbone, num_labels, **kwargs)
+  return cls(num_labels=num_labels, hidden_size=hidden_size, **kwargs)
 
 
 # Import built-in classifiers so @register_classifier fires.

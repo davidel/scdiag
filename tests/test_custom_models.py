@@ -9,10 +9,10 @@ from PIL import Image
 
 from scdiag.model_utils import extract_backbone_features
 from scdiag.models import (
-  ModelOutput,
-  is_custom_model,
-  load_model,
-  register_model,
+    ModelOutput,
+    is_custom_model,
+    load_model,
+    register_model,
 )
 from scdiag.models.convvit.model import CustomPatchTransformer
 from scdiag.models.convvit.processor import ConvViTProcessor
@@ -290,6 +290,97 @@ class TestConvViTForClassification:
     features = wrapped_model.extract_backbone_features(x)
     assert isinstance(features, list)
     assert len(features) == 4
+
+
+class TestClsModelWrapper:
+  """Tests for ClsModelWrapper backbone ownership and feature extraction."""
+
+  def _make_wrapper(
+      self,
+      num_labels=5,
+      classifier="mlp",
+      classifier_args=None,
+  ):
+    """Build a ClsModelWrapper with a tiny ViT backbone (no download)."""
+    from unittest.mock import patch
+
+    from transformers import ViTConfig, ViTModel
+
+    from scdiag.models.cls_model_wrapper.model import ClsModelWrapper
+
+    config = ViTConfig(
+        image_size=224,
+        hidden_size=64,
+        num_hidden_layers=2,
+        num_attention_heads=4,
+        intermediate_size=128,
+    )
+    tiny_backbone = ViTModel(config)
+
+    with patch(
+        "scdiag.models.cls_model_wrapper.model.AutoModel.from_pretrained",
+        return_value=tiny_backbone,
+    ):
+      return ClsModelWrapper(
+          backbone_name="fake-backbone",
+          num_labels=num_labels,
+          classifier=classifier,
+          classifier_args=classifier_args or {},
+      )
+
+  def test_forward_returns_model_output(self):
+    model = self._make_wrapper()
+    x = torch.randn(2, 3, 224, 224)
+    out = model(x)
+    assert isinstance(out, ModelOutput)
+    assert out.logits.shape == (2, 5)
+
+  def test_backbone_is_sibling_not_nested(self):
+    model = self._make_wrapper()
+    # Backbone lives on the wrapper, not inside the classifier
+    assert hasattr(model, "backbone")
+    assert not hasattr(model.classifier, "backbone")
+
+  def test_extract_backbone_features_mlp(self):
+    model = self._make_wrapper(classifier="mlp")
+    x = torch.randn(2, 3, 224, 224)
+    features = model.extract_backbone_features(x)
+    assert isinstance(features, torch.Tensor)
+    assert features.shape[0] == 2
+    assert features.ndim == 2  # (B, F)
+
+  def test_extract_backbone_features_cls_attention(self):
+    model = self._make_wrapper(
+        classifier="cls_attention",
+        classifier_args={
+            "cls_slice": (0, 1),
+            "spc_slice": (1, None),
+            "num_heads": 4
+        },
+    )
+    x = torch.randn(2, 3, 224, 224)
+    features = model.extract_backbone_features(x)
+    assert isinstance(features, torch.Tensor)
+    assert features.shape[0] == 2
+    assert features.ndim == 2
+
+  def test_extract_features_matches_forward_path(self):
+    """extract_features should produce the same result as forward's
+    intermediate representation (before the head)."""
+    model = self._make_wrapper(classifier="mlp")
+    model.eval()
+    x = torch.randn(2, 3, 224, 224)
+    feats = model.extract_backbone_features(x)
+    # Manually run the same path
+    with torch.no_grad():
+      raw = model.backbone(x)
+      hidden = model._extract_hidden_states(raw)
+      feats_manual = model.classifier.extract_features(hidden)
+    torch.testing.assert_close(feats, feats_manual)
+
+  def test_config_accessible(self):
+    model = self._make_wrapper()
+    assert hasattr(model.config, "hidden_size")
 
 
 class TestLoadCustomModel:
