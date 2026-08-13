@@ -801,7 +801,6 @@ def train_one_epoch(
     device,
     amp_dtype,
     epoch,
-    best_top1,
     args,
     writer=None,
     monitor=None,
@@ -1159,7 +1158,7 @@ def main():
   ckpt_latest = args.checkpoint + "_latest.pt"
   ckpt_best = args.checkpoint + "_best.pt"
 
-  start_epoch, best_top1, ckpt_extra = resume_checkpoint(
+  start_epoch, best_macro_f1, ckpt_extra = resume_checkpoint(
       ckpt_latest,
       ckpt_best,
       model,
@@ -1201,7 +1200,6 @@ def main():
           device,
           args.amp_dtype,
           epoch,
-          best_top1,
           args,
           writer=writer,
           monitor=grad_monitor,
@@ -1232,8 +1230,8 @@ def main():
           writer.add_scalar(f"Epoch/F1_Val/{cls_name}", f1_val, epoch)
           logging.info(f"  {cls_name}: F1={f1_val:.2f}%")
 
-      if v_t1 > best_top1:
-        best_top1 = v_t1
+      if v_macro_f1 > best_macro_f1:
+        best_macro_f1 = v_macro_f1
         save_checkpoint(
             checkpoint_dict(
                 model,
@@ -1242,14 +1240,14 @@ def main():
                 epoch,
                 states_to_save=states_to_save,
                 scaler=scaler,
-                best_top1=best_top1,
+                best_macro_f1=best_macro_f1,
                 global_step=optimizer_global_step,
                 save_frozen=args.save_frozen,
             ),
             args.checkpoint + "_best.pt",
             remote_uri=args.remote_checkpoint,
         )
-        logging.info(f"New best Top1, checkpoint saved: {best_top1:.2f}%")
+        logging.info(f"New best macro F1, checkpoint saved: {best_macro_f1:.2f}%")
 
       completed_epoch = epoch
   except KeyboardInterrupt:
@@ -1263,7 +1261,7 @@ def main():
             completed_epoch,
             states_to_save=states_to_save,
             scaler=scaler,
-            best_top1=best_top1,
+            best_macro_f1=best_macro_f1,
             global_step=optimizer_global_step,
             save_frozen=args.save_frozen,
         ),

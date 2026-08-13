@@ -281,8 +281,7 @@ def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scale
       "scheduler_state_dict",
       "scaler_state_dict",
       "epoch",
-      "best_top1",
-      "best_metric",
+      "best_macro_f1",
   })
 
   resume_path = None
@@ -347,7 +346,7 @@ def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scale
       logging.info("  Skipped GradScaler state")
 
   start_epoch = ckpt.get("epoch", -1) + 1
-  best_metric = ckpt.get("best_top1", ckpt.get("best_metric", 0.0))
+  best_metric = ckpt.get("best_macro_f1", 0.0)
   extra = {k: v for k, v in ckpt.items() if k not in _KNOWN_CKPT_KEYS}
   logging.info(f"  Resumed at epoch {start_epoch}, best_metric={best_metric}")
   return start_epoch, best_metric, extra

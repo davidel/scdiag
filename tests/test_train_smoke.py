@@ -111,4 +111,4 @@ def test_train_smoke(tmp_path):
   assert "optimizer_state_dict" in ckpt
   assert "scheduler_state_dict" in ckpt
   assert "epoch" in ckpt
-  assert "best_top1" in ckpt
+  assert "best_macro_f1" in ckpt
