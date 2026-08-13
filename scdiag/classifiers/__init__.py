@@ -63,6 +63,7 @@ def build_classifier(spec, backbone, num_labels, **kwargs):
         f"Or provide a path to a .py file.",
         ValueError,
     )
+  logging.info("Classifier kwargs: %s", kwargs)
   return cls(backbone, num_labels, **kwargs)
 
 
