@@ -85,7 +85,65 @@ class TestApplyLora:
     assert all(p.requires_grad for p in lora_params)
 
 
+class _TinyModelWithClassifier(nn.Module):
+  """Tiny model with a LoRA-target and a separate classifier head."""
+
+  def __init__(self, in_features=16, hidden=8, num_classes=4):
+    super().__init__()
+    self.backbone = nn.Linear(in_features, hidden)
+    self.head = nn.Linear(hidden, num_classes)
+
+  def forward(self, x):
+    return self.head(self.backbone(x))
+
+
+def _make_classifier_model(in_features=16, hidden=8, num_classes=4):
+  """Return a two-layer model with LoRA on backbone, fresh head."""
+  model = _TinyModelWithClassifier(in_features, hidden, num_classes)
+  config = LoraConfig(
+      r=4,
+      lora_alpha=8,
+      target_modules=["backbone"],
+      bias="none",
+  )
+  return get_peft_model(model, config)
+
+
 class TestCheckpointDictLoraStripping:
+
+  def test_non_lora_weights_saved_when_blob_present(self):
+    """checkpoint_dict must include non-LoRA weights (e.g. classifier head)."""
+    model = _make_classifier_model()
+    optimizer = torch.optim.Adam(model.parameters())
+
+    # Write known values into the classifier head
+    head_w = torch.randn_like(model.head.weight)
+    head_b = torch.randn_like(model.head.bias)
+    model.head.weight.data.copy_(head_w)
+    model.head.bias.data.copy_(head_b)
+
+    blob = serialize_lora_state(model)
+
+    # save_frozen=False is the CLI default; must still save non-LoRA weights.
+    d = checkpoint_dict(
+        model,
+        optimizer,
+        scheduler=None,
+        epoch=0,
+        states_to_save=set(),
+        save_frozen=False,
+        lora_state_blob=blob,
+    )
+
+    sd = d["model_state_dict"]
+    assert len(sd) > 0, "model_state_dict must not be empty when LoRA blob is present"
+
+    head_w_key = "base_model.model.head.weight"
+    head_b_key = "base_model.model.head.bias"
+    assert head_w_key in sd, f"Missing classifier weight key: {head_w_key}"
+    assert head_b_key in sd, f"Missing classifier bias key: {head_b_key}"
+    assert torch.equal(sd[head_w_key], head_w)
+    assert torch.equal(sd[head_b_key], head_b)
 
   def test_lora_keys_stripped_when_blob_present(self):
     model = _make_linear_model()
@@ -98,6 +156,7 @@ class TestCheckpointDictLoraStripping:
         scheduler=None,
         epoch=0,
         states_to_save=set(),
+        save_frozen=False,
         lora_state_blob=blob,
     )
 
@@ -123,6 +182,63 @@ class TestCheckpointDictLoraStripping:
 
 class TestResumeCheckpointWithLoRA:
   """End-to-end: save checkpoint with LoRA blob, resume, verify weights."""
+
+  def test_resume_restores_non_lora_weights(self, tmp_path):
+    """Classifier weights must survive checkpoint-resume with LoRA."""
+    from scdiag.checkpointing import resume_checkpoint
+
+    model = _make_classifier_model()
+    optimizer = torch.optim.Adam(model.parameters())
+
+    # Set known values in the classifier head
+    head_w = torch.randn_like(model.head.weight)
+    head_b = torch.randn_like(model.head.bias)
+    model.head.weight.data.copy_(head_w)
+    model.head.bias.data.copy_(head_b)
+
+    blob = serialize_lora_state(model)
+    ckpt = checkpoint_dict(
+        model,
+        optimizer,
+        scheduler=None,
+        epoch=3,
+        states_to_save=set(),
+        save_frozen=False,
+        best_macro_f1=0.42,
+        lora_state_blob=blob,
+    )
+    path = str(tmp_path / "ckpt.pt")
+    torch.save(ckpt, path)
+
+    # Fresh model (random init) + fresh LoRA
+    fresh = _TinyModelWithClassifier()
+    fresh = apply_lora(fresh, r=4, alpha=8, target_modules=["backbone"])
+    fresh_opt = torch.optim.Adam(fresh.parameters())
+
+    restored, epoch, metric, _extra = resume_checkpoint(
+        path,
+        path,
+        fresh,
+        fresh_opt,
+        scheduler=None,
+        scaler=None,
+        device=torch.device("cpu"),
+        states_to_load=set(),
+    )
+
+    assert epoch == 4
+    assert metric == 0.42
+    assert isinstance(restored, PeftModel)
+
+    restored_sd = restored.state_dict()
+    head_w_key = "base_model.model.head.weight"
+    head_b_key = "base_model.model.head.bias"
+    assert head_w_key in restored_sd
+    assert head_b_key in restored_sd
+    assert torch.equal(restored_sd[head_w_key],
+                       head_w), ("Classifier head weight not restored after resume")
+    assert torch.equal(restored_sd[head_b_key],
+                       head_b), ("Classifier head bias not restored after resume")
 
   def test_resume_restores_lora_weights(self, tmp_path):
     from scdiag.checkpointing import resume_checkpoint
