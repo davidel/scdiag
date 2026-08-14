@@ -111,9 +111,9 @@ class SimMIMMethod(PretrainMethod):
 
   def load_checkpoint_state(self, model, state, args):
     # New-style: restore from method_state in checkpoint.
-    if "mask_ratio" in state:
-      model.mask_ratio = state["mask_ratio"]
-      args.mask_ratio = state["mask_ratio"]
+    if (mask_ratio := state.get("mask_ratio")) is not None:
+      model.mask_ratio = mask_ratio
+      args.mask_ratio = mask_ratio
       return
     # Backward compat: old checkpoints saved _mask_ratio on the
     # SimMIM model directly (not in method_state).

@@ -317,22 +317,24 @@ def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scale
     logging.warning(f"  Unexpected keys (ignored): "
                     f"{result.unexpected_keys}")
 
-  if "opt" in states_to_load and "optimizer_state_dict" in ckpt:
+  opt_state = ckpt.get("optimizer_state_dict")
+  if "opt" in states_to_load and opt_state is not None:
     if skipped:
       logging.warning("  Skipped optimizer restore (model architecture changed)")
     else:
-      optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+      optimizer.load_state_dict(opt_state)
       logging.info("  Restored optimizer state")
   else:
     logging.info("  Skipped optimizer state")
 
-  if "sched" in states_to_load and "scheduler_state_dict" in ckpt:
+  sched_state = ckpt.get("scheduler_state_dict")
+  if "sched" in states_to_load and sched_state is not None:
     if scheduler is None:
       logging.info("  Skipped scheduler restore (no scheduler in current run)")
     elif skipped:
       logging.warning("  Skipped scheduler restore (model architecture changed)")
     else:
-      scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+      scheduler.load_state_dict(sched_state)
       logging.info("  Restored scheduler state")
   else:
     logging.info("  Skipped scheduler state")
@@ -385,9 +387,8 @@ def load_checkpoint_weights(path,
 
   ckpt = torch.load(path, map_location=device, weights_only=False)
 
-  if "model_state_dict" in ckpt:
-    state = ckpt["model_state_dict"]
-  else:
+  state = ckpt.get("model_state_dict")
+  if state is None:
     logging.warning(
         "Loading raw state dictionary from '%s'; checkpoint metadata is "
         "unavailable.", path)
