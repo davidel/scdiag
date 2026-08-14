@@ -374,10 +374,8 @@ def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scale
   ckpt_sd = ckpt.get("model_state_dict", {})
   logging.info(f"  model_state_dict: {len(ckpt_sd)} keys")
   if ckpt_sd:
-    for k in list(ckpt_sd.keys())[:10]:
-      logging.info(f"    {k}  {list(ckpt_sd[k].shape)}")
-    if len(ckpt_sd) > 10:
-      logging.info(f"    ... and {len(ckpt_sd) - 10} more")
+    for k, v in ckpt_sd.items():
+      logging.info(f"    {k}  {tuple(v.shape)}")
   lora_blob = ckpt.get("lora_state_blob")
   if lora_blob is not None:
     logging.info(f"  lora_state_blob: {len(lora_blob)} bytes")
@@ -394,8 +392,12 @@ def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scale
   matched = len(filtered) - len(result.unexpected_keys)
   logging.info(f"  Restored model weights ({matched}/{len(filtered)} keys)")
   if result.missing_keys:
-    logging.warning(f"  Missing keys (not loaded from checkpoint): "
-                    f"{result.missing_keys}")
+    logging.warning(f"  Missing keys ({len(result.missing_keys)} not loaded from"
+                    f" checkpoint):")
+    cur_sd = model.state_dict()
+    for mk in result.missing_keys:
+      shape = tuple(cur_sd[mk].shape) if mk in cur_sd else "N/A"
+      logging.warning(f"    {mk}  {shape}")
   if result.unexpected_keys:
     logging.warning(f"  Unexpected keys (ignored): "
                     f"{result.unexpected_keys}")
