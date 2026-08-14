@@ -51,35 +51,26 @@ def _find_head_module(model):
       return attr, mod
 
 
+def extract_lora_params(model):
+  """Return the set of parameter names belonging to PEFT adapter layers."""
+  from peft import get_peft_model_state_dict
+  return set(get_peft_model_state_dict(model))
+
+
 def freeze_model(model, trainable_prefixes):
   """Freeze all parameters except those matching *trainable_prefixes*.
 
   Each element in *trainable_prefixes* is a regex tested with
-  ``re.match(pattern, name)`` (anchored at the start of the parameter
-  name).  A parameter is thawed when **any** pattern matches.
-
-  Examples::
-
-      # Thaw anything whose name contains "head" or "pool"
-      freeze_model(m, (r".*\\bhead\\b.*", r".*\\bpool\\b.*"))
-
-      # Thaw only the classifier head and attention pool
-      freeze_model(m, (r"classifier\\.head", r"classifier\\.pool"))
-
-  Args:
-      model: A ``torch.nn.Module``.
-      trainable_prefixes: Tuple of regex patterns for parameter names
-          that should remain trainable.
-
-  Returns:
-      Tuple ``(total_params, trainable_params)`` with counts.
+  ``re.search(pattern, name)`` (substring match).  Prefix with ``^``
+  to anchor at the start.  A parameter is thawed when **any** pattern
+  matches.
   """
   compiled = [re.compile(p) for p in trainable_prefixes]
   for p in model.parameters():
     p.requires_grad = False
   thawed = 0
   for name, p in model.named_parameters():
-    if any(pat.match(name) for pat in compiled):
+    if any(pat.search(name) for pat in compiled):
       p.requires_grad = True
       thawed += 1
   total = sum(1 for _ in model.parameters())

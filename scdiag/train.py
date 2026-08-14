@@ -4,6 +4,7 @@ import argparse
 import gc
 import logging
 import os
+import re
 import time
 
 import datasets
@@ -29,7 +30,7 @@ from scdiag.datasets.hf_proxy import HFDatasetProxy
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.grad_monitor import GradMonitor
 from scdiag.logging_utils import fatal, setup_logging
-from scdiag.model_utils import apply_lora, freeze_model
+from scdiag.model_utils import apply_lora, extract_lora_params, freeze_model
 from scdiag.models import load_model, load_processor
 from scdiag.optim_factory import create_optimizer, create_scheduler
 from scdiag.script_utils import load_extern
@@ -1151,10 +1152,6 @@ def main():
 
   logging.info(create_model_report(model))
 
-  # -- Freeze / unfreeze parameters -----------------------------------------
-  if args.freeze:
-    freeze_model(model, tuple(args.freeze.split(",")))
-
   if args.focal_gamma > 0 and args.label_smoothing > 0:
     logging.warning(
         "Both --focal_gamma (%.1f) and --label_smoothing (%.2f) are > 0. "
@@ -1182,6 +1179,11 @@ def main():
         dropout=args.lora_dropout,
         target_modules=target,
     )
+  if args.freeze:
+    patterns = list(args.freeze.split(","))
+    if args.lora:
+      patterns.extend(re.escape(k) for k in extract_lora_params(model))
+    freeze_model(model, tuple(patterns))
 
   trainable_params = [p for p in model.parameters() if p.requires_grad]
   optimizer = create_optimizer(
