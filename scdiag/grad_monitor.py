@@ -191,7 +191,8 @@ class GradMonitor:
     logging.info("\n".join(lines))
 
   def _format_row(self, name, s, status):
-    return (f"{name:<45}"
+    short = name if len(name) <= 45 else name[:42] + "..."
+    return (f"{short:<45}"
             f" {s['grad_norm']:>10.2e}"
             f" {s['param_norm']:>10.2e}"
             f" {s['grad_param_ratio']:>10.2e}"
