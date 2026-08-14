@@ -9,7 +9,7 @@ from scdiag.checkpointing import (
     deserialize_lora_state,
     serialize_lora_state,
 )
-from scdiag.model_utils import apply_lora
+from scdiag.model_utils import apply_lora, extract_lora_params, freeze_model
 
 
 class _TinyModel(nn.Module):
@@ -171,3 +171,100 @@ class TestResumeCheckpointWithLoRA:
         assert key in restored_sd, f"Missing adapter key: {key}"
         assert torch.equal(orig_sd[key],
                            restored_sd[key]), (f"Adapter mismatch for {key}")
+
+
+class TestExtractLoraParams:
+  """Tests for extract_lora_params()."""
+
+  def test_returns_correct_keys(self):
+    model = _TinyModel()
+    wrapped = apply_lora(model, r=4, alpha=8, target_modules=["fc"])
+    params = extract_lora_params(wrapped)
+    expected = {
+        "base_model.model.fc.lora_A.default.weight",
+        "base_model.model.fc.lora_B.default.weight",
+    }
+    assert params == expected
+
+  def test_excludes_base_layer(self):
+    model = _TinyModel()
+    wrapped = apply_lora(model, r=4, alpha=8, target_modules=["fc"])
+    params = extract_lora_params(wrapped)
+    for p in params:
+      assert "base_layer" not in p
+
+  def test_excludes_non_adapter_params(self):
+    model = _TinyModel()
+    wrapped = apply_lora(model, r=4, alpha=8, target_modules=["fc"])
+    params = extract_lora_params(wrapped)
+    all_names = {n for n, _ in wrapped.named_parameters()}
+    assert params.issubset(all_names)
+    non_lora = {n for n in all_names if n not in params}
+    assert non_lora.isdisjoint(params)
+
+  def test_multiple_target_modules(self):
+
+    class TwoLayer(nn.Module):
+
+      def __init__(self):
+        super().__init__()
+        self.fc1 = nn.Linear(16, 16)
+        self.fc2 = nn.Linear(16, 4)
+
+      def forward(self, x):
+        return self.fc2(self.fc1(x))
+
+    wrapped = apply_lora(TwoLayer(), r=4, alpha=8, target_modules=["fc1", "fc2"])
+    params = extract_lora_params(wrapped)
+    assert len(params) == 4  # lora_A + lora_B for each of fc1, fc2
+    for p in params:
+      assert "fc1" in p or "fc2" in p
+
+
+class TestFreezeWithLoRA:
+  """Tests for the full freeze_model + extract_lora_params flow."""
+
+  def test_lora_params_thawed_after_freeze(self):
+    model = _TinyModel()
+    wrapped = apply_lora(model, r=4, alpha=8, target_modules=["fc"])
+    lora_names = extract_lora_params(wrapped)
+    import re
+    patterns = [re.escape(k) for k in lora_names]
+    freeze_model(wrapped, tuple(patterns))
+
+    for name, p in wrapped.named_parameters():
+      if name in lora_names:
+        assert p.requires_grad, f"LoRA param {name} should be trainable"
+      else:
+        assert not p.requires_grad, (f"Non-LoRA param {name} should be frozen")
+
+  def test_freeze_with_user_pattern_and_lora(self):
+    model = _TinyModel()
+    wrapped = apply_lora(model, r=4, alpha=8, target_modules=["fc"])
+    lora_names = extract_lora_params(wrapped)
+    import re
+    patterns = [re.escape(k) for k in lora_names]
+    # User pattern to also thaw the classifier head.
+    patterns.append("fc")
+    freeze_model(wrapped, tuple(patterns))
+
+    for name, p in wrapped.named_parameters():
+      if name in lora_names or "fc" in name:
+        assert p.requires_grad, (f"Expected {name} to be trainable")
+      else:
+        assert not p.requires_grad, (f"Expected {name} to be frozen")
+
+  def test_only_lora_thawed_without_user_pattern(self):
+    """When --lora is set but --freeze is not, only LoRA params are thawed."""
+    model = _TinyModel()
+    wrapped = apply_lora(model, r=4, alpha=8, target_modules=["fc"])
+    lora_names = extract_lora_params(wrapped)
+    import re
+    patterns = [re.escape(k) for k in lora_names]
+    freeze_model(wrapped, tuple(patterns))
+
+    for name, p in wrapped.named_parameters():
+      if "lora_" in name:
+        assert p.requires_grad, f"LoRA param {name} should be trainable"
+      else:
+        assert not p.requires_grad, (f"Param {name} should be frozen")

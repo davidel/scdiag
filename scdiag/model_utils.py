@@ -52,9 +52,19 @@ def _find_head_module(model):
 
 
 def extract_lora_params(model):
-  """Return the set of parameter names belonging to PEFT adapter layers."""
+  """Return the set of parameter names belonging to PEFT adapter layers.
+
+  Uses ``get_peft_model_state_dict`` to identify adapter modules, then
+  resolves the full parameter names from ``model.named_parameters()``
+  (the state dict strips the adapter name, e.g. ``.default.``).
+  """
   from peft import get_peft_model_state_dict
-  return set(get_peft_model_state_dict(model))
+  sd = get_peft_model_state_dict(model)
+  prefixes = {key.rsplit(".", 1)[0] for key in sd}
+  return {
+      n for n, _ in model.named_parameters() if any(
+          n.startswith(p + ".") for p in prefixes)
+  }
 
 
 def freeze_model(model, trainable_prefixes):
