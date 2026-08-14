@@ -366,6 +366,17 @@ def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scale
   ckpt = torch.load(resume_path, map_location=device, weights_only=False)
   logging.info(f"  Checkpoint keys: {list(ckpt.keys())}")
 
+  ckpt_sd = ckpt.get("model_state_dict", {})
+  logging.info(f"  model_state_dict: {len(ckpt_sd)} keys")
+  if ckpt_sd:
+    for k in list(ckpt_sd.keys())[:10]:
+      logging.info(f"    {k}  {list(ckpt_sd[k].shape)}")
+    if len(ckpt_sd) > 10:
+      logging.info(f"    ... and {len(ckpt_sd) - 10} more")
+  lora_blob = ckpt.get("lora_state_blob")
+  if lora_blob is not None:
+    logging.info(f"  lora_state_blob: {len(lora_blob)} bytes")
+
   filtered, skipped = filter_state_dict(
       ckpt["model_state_dict"],
       model.state_dict(),
