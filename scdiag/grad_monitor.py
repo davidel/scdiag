@@ -24,6 +24,40 @@ immediately if any are found.
 import logging
 
 
+def _find_common_root(strings):
+  """Return the longest dotted prefix shared by all *strings*.
+
+  Splits each string on ``'.'`` and compares component-by-component,
+  so the result is always a clean dotted path (never cuts mid-component).
+
+  Returns ``""`` when no common root exists.
+  """
+  if not strings:
+    return ""
+  split = [s.split(".") for s in strings]
+  common = []
+  for components in zip(*split):
+    if len(set(components)) == 1:
+      common.append(components[0])
+    else:
+      break
+  return ".".join(common)
+
+
+def _strip_common_prefix(rows):
+  """Strip the common dotted prefix from parameter names.
+
+  Returns ``(prefix, stripped_rows)``.  Each row is a
+  ``(name, stats_dict, status)`` tuple.  When no meaningful prefix
+  exists the original rows are returned unchanged.
+  """
+  prefix = _find_common_root([r[0] for r in rows])
+  if not prefix:
+    return "", rows
+  pfx = prefix + "."
+  return pfx, [(name[len(pfx):], s, st) for name, s, st in rows]
+
+
 class GradMonitor:
   """Architecture-agnostic gradient inspector.
 
@@ -179,20 +213,27 @@ class GradMonitor:
       if len(rows) >= self._top_k + len(name_status):
         break
       if s["grad_norm"] > 0 or name in name_status:
-        rows.append(self._format_row(name, s, name_status.get(name, "OK")))
+        rows.append((name, s, name_status.get(name, "OK")))
 
     if rows:
-      lines.append(f"  {'Name':<45} {'g_norm':>10} {'p_norm':>10}"
-                   f" {'g/p':>10} {'g_max':>10} {'sparse':>7} {'status':<12}")
-      lines.append("  " + "-" * 115)
-      for r in rows:
-        lines.append("  " + r)
+      prefix, rows = _strip_common_prefix(rows)
+      if prefix:
+        lines.append(f"  Prefix (stripped): {prefix}")
+
+      nw = max(len(name) for name, _, _ in rows)
+      nw = max(nw, len("Name"))
+      hdr = (f"  {'Name':<{nw}} {'g_norm':>10} {'p_norm':>10}"
+             f" {'g/p':>10} {'g_max':>10} {'sparse':>7} {'status':<12}")
+      sep = "  " + "-" * len(hdr)
+      lines.append(hdr)
+      lines.append(sep)
+      for name, s, status in rows:
+        lines.append("  " + self._format_row(name, s, status, nw))
 
     logging.info("\n".join(lines))
 
-  def _format_row(self, name, s, status):
-    short = name if len(name) <= 45 else name[:42] + "..."
-    return (f"{short:<45}"
+  def _format_row(self, name, s, status, name_width):
+    return (f"{name:<{name_width}}"
             f" {s['grad_norm']:>10.2e}"
             f" {s['param_norm']:>10.2e}"
             f" {s['grad_param_ratio']:>10.2e}"

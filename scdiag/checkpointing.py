@@ -89,6 +89,10 @@ def deserialize_lora_state(model, blob):
 
   *blob* must have been produced by :func:`serialize_lora_state`.
   Works whether *model* is already a ``PeftModel`` or a plain model.
+
+  Returns:
+      Tuple of ``(model, loaded_keys)`` where *loaded_keys* is the set of
+      state-dict keys that were restored from the blob.
   """
   from peft import PeftModel
 
@@ -102,10 +106,15 @@ def deserialize_lora_state(model, blob):
     # Instead, swap the existing adapter weights in place.
     if isinstance(model, PeftModel):
       model.delete_adapter("default")
+      before = set(model.state_dict().keys())
       model.load_adapter(tmpdir, adapter_name="default")
       model.set_adapter("default")
-      return model
-    return PeftModel.from_pretrained(model, tmpdir)
+    else:
+      before = set(model.state_dict().keys())
+      model = PeftModel.from_pretrained(model, tmpdir)
+
+  loaded = set(model.state_dict().keys()) - before
+  return model, loaded
 
 
 def select_available_checkpoint(root_path):
@@ -376,9 +385,16 @@ def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scale
   if ckpt_sd:
     for k, v in ckpt_sd.items():
       logging.info(f"    {k}  {tuple(v.shape)}")
+
+  # Restore LoRA adapters first so their keys are present before we load
+  # the non-LoRA model weights (this lets us cleanly separate truly
+  # missing keys from expected LoRA keys in the load_state_dict report).
   lora_blob = ckpt.get("lora_state_blob")
+  lora_keys = set()
   if lora_blob is not None:
     logging.info(f"  lora_state_blob: {len(lora_blob)} bytes")
+    model, lora_keys = deserialize_lora_state(model, lora_blob)
+    logging.info(f"  Restored {len(lora_keys)} LoRA keys from blob")
 
   filtered, skipped = filter_state_dict(
       ckpt["model_state_dict"],
@@ -391,11 +407,13 @@ def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scale
   result = model.load_state_dict(filtered, strict=False)
   matched = len(filtered) - len(result.unexpected_keys)
   logging.info(f"  Restored model weights ({matched}/{len(filtered)} keys)")
-  if result.missing_keys:
-    logging.warning(f"  Missing keys ({len(result.missing_keys)} not loaded from"
-                    f" checkpoint):")
+
+  truly_missing = set(result.missing_keys) - lora_keys
+  if truly_missing:
+    logging.warning(f"  Missing keys ({len(truly_missing)} not loaded"
+                    f" from checkpoint):")
     cur_sd = model.state_dict()
-    for mk in result.missing_keys:
+    for mk in sorted(truly_missing):
       shape = tuple(cur_sd[mk].shape) if mk in cur_sd else "N/A"
       logging.warning(f"    {mk}  {shape}")
   if result.unexpected_keys:
@@ -434,12 +452,8 @@ def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scale
 
   start_epoch = ckpt.get("epoch", -1) + 1
   best_metric = ckpt.get("best_macro_f1", 0.0)
-  lora_blob = ckpt.pop("lora_state_blob", None)
   extra = {k: v for k, v in ckpt.items() if k not in _KNOWN_CKPT_KEYS}
   del ckpt
-
-  if lora_blob is not None:
-    model = deserialize_lora_state(model, lora_blob)
 
   logging.info(f"  Resumed at epoch {start_epoch}, best_metric={best_metric:.4f}")
   return model, start_epoch, best_metric, extra

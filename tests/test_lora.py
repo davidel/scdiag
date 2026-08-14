@@ -43,8 +43,9 @@ class TestSerializeDeserialize:
     assert len(blob) > 0
 
     new_model = _TinyModel()
-    restored = deserialize_lora_state(new_model, blob)
+    restored, loaded_keys = deserialize_lora_state(new_model, blob)
     assert isinstance(restored, PeftModel)
+    assert len(loaded_keys) > 0
 
     orig_sd = model.state_dict()
     restored_sd = restored.state_dict()
