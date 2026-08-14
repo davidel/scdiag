@@ -607,7 +607,7 @@ def main(argv=None):
   if args.resume:
     ckpt_latest = args.checkpoint + "_latest.pt"
     ckpt_best = args.checkpoint + "_best.pt"
-    start_epoch, _, ckpt_extra = resume_checkpoint(
+    model, start_epoch, _, ckpt_extra = resume_checkpoint(
         ckpt_latest,
         ckpt_best,
         model,
@@ -629,6 +629,7 @@ def main(argv=None):
       "global_step",
       start_epoch * (len(loader) // args.grad_accum_steps),
   )
+  del ckpt_extra
   grad_monitor = None
   if args.grad_monitor >= 0:
     grad_monitor = GradMonitor(model, log_every=args.grad_monitor)

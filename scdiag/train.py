@@ -22,13 +22,14 @@ from scdiag.checkpointing import (
     create_model_report,
     parse_state_flags,
     resume_checkpoint,
+    serialize_lora_state,
 )
 from scdiag.cli_utils import KVPairAction
 from scdiag.datasets.hf_proxy import HFDatasetProxy
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.grad_monitor import GradMonitor
 from scdiag.logging_utils import fatal, setup_logging
-from scdiag.model_utils import freeze_model
+from scdiag.model_utils import apply_lora, freeze_model
 from scdiag.models import load_model, load_processor
 from scdiag.optim_factory import create_optimizer, create_scheduler
 from scdiag.script_utils import load_extern
@@ -519,6 +520,40 @@ def parse_args(argv=None):
       help="Include frozen (non-trainable) parameters in checkpoints. "
       "When disabled (default), only trainable parameters are saved, "
       "greatly reducing checkpoint size for fine-tuning runs.",
+  )
+
+  lora_group = parser.add_argument_group("lora")
+  lora_group.add_argument(
+      "--lora",
+      action=argparse.BooleanOptionalAction,
+      default=False,
+      help="Enable LoRA (Low-Rank Adaptation) via PEFT. "
+      "Requires: pip install scdiag[lora].",
+  )
+  lora_group.add_argument(
+      "--lora_r",
+      type=int,
+      default=8,
+      help="LoRA rank.",
+  )
+  lora_group.add_argument(
+      "--lora_alpha",
+      type=int,
+      default=16,
+      help="LoRA alpha (scaling factor = alpha / r).",
+  )
+  lora_group.add_argument(
+      "--lora_dropout",
+      type=float,
+      default=0.0,
+      help="Dropout probability for LoRA layers.",
+  )
+  lora_group.add_argument(
+      "--lora_target_modules",
+      type=str,
+      default=None,
+      help="Comma-separated module names to apply LoRA to "
+      "(e.g. 'query,key,value'). Auto-detect if omitted.",
   )
 
   parser.add_argument(
@@ -1135,6 +1170,19 @@ def main():
       label_smoothing=args.label_smoothing,
   )
 
+  scaler = (torch.amp.GradScaler("cuda")
+            if args.amp_dtype == torch.float16 and device.type == "cuda" else None)
+
+  if args.lora:
+    target = (args.lora_target_modules.split(",") if args.lora_target_modules else None)
+    model = apply_lora(
+        model,
+        r=args.lora_r,
+        alpha=args.lora_alpha,
+        dropout=args.lora_dropout,
+        target_modules=target,
+    )
+
   trainable_params = [p for p in model.parameters() if p.requires_grad]
   optimizer = create_optimizer(
       trainable_params,
@@ -1143,9 +1191,6 @@ def main():
       weight_decay=args.weight_decay,
       **args.opt_arg,
   )
-
-  scaler = (torch.amp.GradScaler("cuda")
-            if args.amp_dtype == torch.float16 and device.type == "cuda" else None)
 
   scheduler = create_scheduler(
       optimizer,
@@ -1158,7 +1203,7 @@ def main():
   ckpt_latest = args.checkpoint + "_latest.pt"
   ckpt_best = args.checkpoint + "_best.pt"
 
-  start_epoch, best_macro_f1, ckpt_extra = resume_checkpoint(
+  model, start_epoch, best_macro_f1, ckpt_extra = resume_checkpoint(
       ckpt_latest,
       ckpt_best,
       model,
@@ -1183,6 +1228,7 @@ def main():
       "global_step",
       start_epoch * (len(train_loader) // args.grad_accum_steps),
   )
+  del ckpt_extra
 
   try:
     for epoch in range(start_epoch, args.epochs):
@@ -1243,6 +1289,7 @@ def main():
                 best_macro_f1=best_macro_f1,
                 global_step=optimizer_global_step,
                 save_frozen=args.save_frozen,
+                lora_state_blob=serialize_lora_state(model) if args.lora else None,
             ),
             args.checkpoint + "_best.pt",
             remote_uri=args.remote_checkpoint,
@@ -1264,6 +1311,7 @@ def main():
             best_macro_f1=best_macro_f1,
             global_step=optimizer_global_step,
             save_frozen=args.save_frozen,
+            lora_state_blob=serialize_lora_state(model) if args.lora else None,
         ),
         args.checkpoint + "_latest.pt",
         remote_uri=args.remote_checkpoint,

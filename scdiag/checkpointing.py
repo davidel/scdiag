@@ -4,9 +4,12 @@ Extracted from ``train.py`` to avoid code duplication with ``pretrain.py``.
 Both scripts import these functions rather than maintaining separate copies.
 """
 
+import io
 import logging
 import os
 import re
+import tarfile
+import tempfile
 
 import torch
 
@@ -51,6 +54,58 @@ def rename_keys(state_dict, patterns):
       new_key = regex.sub(replacement, new_key)
     new_state[new_key] = value
   return new_state
+
+
+def serialize_lora_state(model):
+  """Serialize PEFT adapter state to bytes.
+
+  The adapter files are saved via ``save_pretrained``, packed into a
+  tar archive (contents only, no top-level directory), and returned
+  as ``bytes``.
+
+  Requires ``peft`` to be installed.  *model* must be a ``PeftModel``.
+  """
+  from peft import PeftModel
+
+  if not isinstance(model, PeftModel):
+    fatal(
+        f"Expected a PeftModel instance, got {type(model).__name__}",
+        TypeError,
+    )
+
+  with tempfile.TemporaryDirectory() as tmpdir:
+    model.save_pretrained(tmpdir)
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+      for entry in os.listdir(tmpdir):
+        tar.add(os.path.join(tmpdir, entry), arcname=entry)
+    blob = buf.getvalue()
+    logging.info("  LoRA adapter blob: %d bytes", len(blob))
+    return blob
+
+
+def deserialize_lora_state(model, blob):
+  """Restore PEFT adapter state from a tar blob.
+
+  *blob* must have been produced by :func:`serialize_lora_state`.
+  Works whether *model* is already a ``PeftModel`` or a plain model.
+  """
+  from peft import PeftModel
+
+  with tempfile.TemporaryDirectory() as tmpdir:
+    buf = io.BytesIO(blob)
+    with tarfile.open(fileobj=buf, mode="r") as tar:
+      tar.extractall(tmpdir, filter="data")
+    # When the model is already a PeftModel (e.g. resume_checkpoint called
+    # after apply_lora), PeftModel.from_pretrained would double-wrap it,
+    # producing mangled keys like "base_model.model.base_model.model.*".
+    # Instead, swap the existing adapter weights in place.
+    if isinstance(model, PeftModel):
+      model.delete_adapter("default")
+      model.load_adapter(tmpdir, adapter_name="default")
+      model.set_adapter("default")
+      return model
+    return PeftModel.from_pretrained(model, tmpdir)
 
 
 def select_available_checkpoint(root_path):
@@ -217,9 +272,14 @@ def checkpoint_dict(model,
     """
   from scdiag.model_utils import trainable_state_dict
 
+  sd = (model.state_dict() if save_frozen else trainable_state_dict(model))
+  # When a LoRA blob is present the adapter weights live there;
+  # strip them from model_state_dict so filter_state_dict sees
+  # only base-model keys and does not block optimizer/scheduler restore.
+  if extra.get("lora_state_blob") is not None:
+    sd = {k: v for k, v in sd.items() if "lora_" not in k}
   d = {
-      "model_state_dict":
-          (model.state_dict() if save_frozen else trainable_state_dict(model)),
+      "model_state_dict": sd,
       "epoch": epoch,
   }
   # Persist num_labels so downstream loaders never need to guess.
@@ -282,6 +342,7 @@ def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scale
       "scaler_state_dict",
       "epoch",
       "best_macro_f1",
+      "lora_state_blob",
   })
 
   resume_path = None
@@ -291,14 +352,12 @@ def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scale
     resume_path = ckpt_best
 
   if not resume_path:
-    return 0, 0.0, {}
+    return model, 0, 0.0, {}
 
   logging.info(f"Resuming from checkpoint: {resume_path}")
   ckpt = torch.load(resume_path, map_location=device, weights_only=False)
   logging.info(f"  Checkpoint keys: {list(ckpt.keys())}")
 
-  # Filter checkpoint to skip keys with shape mismatches
-  # (e.g. classifier head when resuming with different num_classes).
   filtered, skipped = filter_state_dict(
       ckpt["model_state_dict"],
       model.state_dict(),
@@ -349,9 +408,15 @@ def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scale
 
   start_epoch = ckpt.get("epoch", -1) + 1
   best_metric = ckpt.get("best_macro_f1", 0.0)
+  lora_blob = ckpt.pop("lora_state_blob", None)
   extra = {k: v for k, v in ckpt.items() if k not in _KNOWN_CKPT_KEYS}
+  del ckpt
+
+  if lora_blob is not None:
+    model = deserialize_lora_state(model, lora_blob)
+
   logging.info(f"  Resumed at epoch {start_epoch}, best_metric={best_metric:.4f}")
-  return start_epoch, best_metric, extra
+  return model, start_epoch, best_metric, extra
 
 
 def load_checkpoint_weights(path,

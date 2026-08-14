@@ -21,6 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 gcs = ["google-cloud-storage"]
+lora = ["peft>=0.7.0"]
 dev = ["pytest", "ruff"]
 
 [project.scripts]

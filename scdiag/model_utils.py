@@ -98,6 +98,26 @@ def trainable_state_dict(model):
   return {k: v for k, v in model.state_dict().items() if k in trainable}
 
 
+def apply_lora(model, *, r=8, alpha=16, dropout=0.0, target_modules=None):
+  """Wrap *model* with LoRA adapters via the PEFT library.
+
+  Returns the wrapped ``PeftModel``.  Requires the ``peft`` package
+  (``pip install scdiag[lora]``).
+  """
+  from peft import LoraConfig, get_peft_model
+
+  lora_config = LoraConfig(
+      r=r,
+      lora_alpha=alpha,
+      lora_dropout=dropout,
+      target_modules=target_modules,
+      bias="none",
+  )
+  model = get_peft_model(model, lora_config)
+  model.print_trainable_parameters()
+  return model
+
+
 def build_val_transform(processor, image_size):
   """Build validation transform: Resize → CenterCrop → Processor."""
   return v2.Compose([
