@@ -1150,8 +1150,6 @@ def main():
         param_rename=args.param_rename,
     )
 
-  logging.info(create_model_report(model))
-
   if args.focal_gamma > 0 and args.label_smoothing > 0:
     logging.warning(
         "Both --focal_gamma (%.1f) and --label_smoothing (%.2f) are > 0. "
@@ -1179,11 +1177,13 @@ def main():
         dropout=args.lora_dropout,
         target_modules=target,
     )
-  if args.freeze:
-    patterns = list(args.freeze.split(","))
+  if args.freeze or args.lora:
+    patterns = list(args.freeze.split(",")) if args.freeze else []
     if args.lora:
       patterns.extend(re.escape(k) for k in extract_lora_params(model))
     freeze_model(model, tuple(patterns))
+
+  logging.info(create_model_report(model))
 
   trainable_params = [p for p in model.parameters() if p.requires_grad]
   optimizer = create_optimizer(

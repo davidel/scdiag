@@ -197,17 +197,21 @@ def _format_model_param_table(model):
     numel = param.numel()
     param_bytes = numel * param.element_size()
     shape_str = str(tuple(param.shape))
-    rows.append((name, shape_str, numel, param_bytes))
+    trainable = "yes" if param.requires_grad else "no"
+    rows.append((name, shape_str, numel, param_bytes, trainable))
 
   # Column widths (header labels are included in the min width).
   name_w = max(len(r[0]) for r in rows)
   shape_w = max(len(r[1]) for r in rows)
   params_w = max(len(_format_count(r[2])) for r in rows)
   size_w = max(len(_format_bytes(r[3])) for r in rows)
+  trainable_w = max(len(r[4]) for r in rows)
+  trainable_w = max(trainable_w, len("Trainable"))
 
   # Header.
   header = (f"  {'Parameter':<{name_w}}  {'Shape':>{shape_w}}  "
-            f"{'Params':>{params_w}}  {'Size':>{size_w}}")
+            f"{'Params':>{params_w}}  {'Size':>{size_w}}  "
+            f"{'Trainable':>{trainable_w}}")
   sep = "  " + "-" * (len(header) - 2)
 
   lines = []
@@ -217,18 +221,22 @@ def _format_model_param_table(model):
 
   total_params = 0
   total_bytes = 0
-  for name, shape_str, numel, param_bytes in rows:
+  trainable_params = 0
+  for name, shape_str, numel, param_bytes, trainable in rows:
     total_params += numel
     total_bytes += param_bytes
+    if trainable == "yes":
+      trainable_params += numel
     lines.append(
         f"  {name:<{name_w}}  {shape_str:>{shape_w}}  "
-        f"{_format_count(numel):>{params_w}}  {_format_bytes(param_bytes):>{size_w}}")
+        f"{_format_count(numel):>{params_w}}  {_format_bytes(param_bytes):>{size_w}}  "
+        f"{trainable:>{trainable_w}}")
 
   lines.append(sep)
   lines.append(
       f"  {'TOTAL':<{name_w}}  {'':>{shape_w}}  "
-      f"{_format_count(total_params):>{params_w}}  {_format_bytes(total_bytes):>{size_w}}"
-  )
+      f"{_format_count(total_params):>{params_w}}  {_format_bytes(total_bytes):>{size_w}}  "
+      f"{_format_count(trainable_params):>{trainable_w}}")
   return "\n".join(lines)
 
 
