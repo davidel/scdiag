@@ -8,7 +8,55 @@ from PIL import Image
 from scdiag.datasets.retry import getitem_retry
 from scdiag.logging_utils import fatal
 
-_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
+_IMAGE_EXTS = {
+    # JPEG family
+    ".jpg",
+    ".jpeg",
+    ".jpe",
+    ".jfif",
+    # PNG family
+    ".png",
+    ".apng",
+    # GIF
+    ".gif",
+    # BMP / DIB
+    ".bmp",
+    ".dib",
+    # TIFF
+    ".tiff",
+    ".tif",
+    # WebP
+    ".webp",
+    # AVIF
+    ".avif",
+    ".avifs",
+    # JPEG 2000
+    ".jp2",
+    ".j2k",
+    # Multi-Picture Object (stereo / 3D)
+    ".mpo",
+    # PPM family (common in CV research)
+    ".pbm",
+    ".pgm",
+    ".ppm",
+    ".pnm",
+    # TGA / Targa
+    ".tga",
+    ".icb",
+    ".vda",
+    ".vst",
+    # DDS (DirectDraw Surface)
+    ".dds",
+    # PCX
+    ".pcx",
+    # ICO / Windows icons
+    ".ico",
+    # X11 bitmaps
+    ".xbm",
+    ".xpm",
+    # Photoshop (flattened layers on load)
+    ".psd",
+}
 
 
 class ImageFolderDataset:
