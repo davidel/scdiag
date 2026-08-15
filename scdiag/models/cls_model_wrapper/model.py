@@ -94,8 +94,7 @@ class ClsModelWrapper(nn.Module):
     """
     from scdiag.model_utils import model_mode
 
-    with model_mode(self, "eval"):
-      with torch.no_grad():
-        raw = self.backbone(pixel_values)
-        hidden_states = self._extract_hidden_states(raw)
-        return self.classifier.extract_features(hidden_states)
+    with model_mode(self, "eval"), torch.no_grad():
+      raw = self.backbone(pixel_values)
+      hidden_states = self._extract_hidden_states(raw)
+      return self.classifier.extract_features(hidden_states)
