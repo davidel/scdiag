@@ -281,3 +281,40 @@ def test_log_every_skips_steps(caplog):
   r_second = caplog.text
   assert "Gradient Report" in r_second
   assert r_first != r_second
+
+
+def test_gpr_detection(caplog):
+  model = TinyModel()
+  mon = GradMonitor(model, log_every=1, gpr_ceiling=0.5)
+  x = torch.randn(4, 10)
+  target = torch.randn(4, 5)
+  opt = torch.optim.SGD(model.parameters(), lr=0.01)
+
+  _train_step(model, x, target, opt)
+
+  # Make the gradient large relative to the parameter norm.
+  for p in model.parameters():
+    if p.grad is not None and p is not model.fc2.weight:
+      p.grad.data.fill_(0.0)
+  model.fc2.weight.grad.data.fill_(100.0)
+
+  with caplog.at_level(logging.INFO):
+    mon.step(0)
+
+  assert "GPR" in caplog.text
+  assert "fc2.weight" in caplog.text
+
+
+def test_gpr_no_flag_when_below_ceiling(caplog):
+  model = TinyModel()
+  mon = GradMonitor(model, log_every=1, gpr_ceiling=1000.0)
+  x = torch.randn(4, 10)
+  target = torch.randn(4, 5)
+  opt = torch.optim.SGD(model.parameters(), lr=0.01)
+
+  _train_step(model, x, target, opt)
+
+  with caplog.at_level(logging.INFO):
+    mon.step(0)
+
+  assert "GPR" not in caplog.text

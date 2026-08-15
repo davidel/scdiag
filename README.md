@@ -225,10 +225,11 @@ Each row reports one trainable parameter (or parameter tensor). Columns:
 | `STL` | Stalled | g_norm has been below `norm_floor` (1e-8) for `stall_window` consecutive log steps (default: 50) — the parameter has stopped learning. |
 | `OVF` | Exploding | g_norm exceeds `norm_ceiling` (100) — the gradient is dangerously large. |
 | `IMB` | Imbalanced | g_norm exceeds 100× the median gradient norm across all params — this parameter is being updated much more aggressively than others. |
+| `GPR` | G/P Ratio | g/p (gradient-to-parameter ratio) exceeds `gpr_ceiling` (default: 1.0) — the update step is larger than the weight itself, meaning the parameter is being pushed further than its current scale in a single step. |
 
-The thresholds (`norm_floor`, `norm_ceiling`, `stall_window`, `imbalance_factor`)
-are configurable on the `GradMonitor` constructor but not exposed via CLI
-flags.
+The thresholds (`norm_floor`, `norm_ceiling`, `stall_window`, `imbalance_factor`,
+`gpr_ceiling`) are configurable on the `GradMonitor` constructor but not
+exposed via CLI flags.
 
 #### Reading the report
 

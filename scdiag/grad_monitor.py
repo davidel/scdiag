@@ -85,6 +85,11 @@ class GradMonitor:
     imbalance_factor : float
         A parameter whose gradient norm exceeds this factor times the
         median gradient norm is flagged as IMBALANCED.  Defaults to 100.
+    gpr_ceiling : float
+        Gradient-to-parameter ratio threshold above which a parameter
+        is flagged as GPR (G/P Ratio).  A value > 1.0 means the
+        gradient update is larger than the weight itself.  Defaults to
+        1.0.
     """
 
   def __init__(
@@ -97,6 +102,7 @@ class GradMonitor:
       norm_ceiling=100.0,
       top_k=5,
       imbalance_factor=100.0,
+      gpr_ceiling=1.0,
   ):
     self._model = model
     self._log_every = log_every
@@ -106,6 +112,7 @@ class GradMonitor:
     self._norm_ceiling = norm_ceiling
     self._top_k = top_k
     self._imbalance_factor = imbalance_factor
+    self._gpr_ceiling = gpr_ceiling
 
     self._consecutive_low = {}
 
@@ -161,6 +168,10 @@ class GradMonitor:
         if entry["grad_norm"] > self._norm_ceiling:
           anomalies.append(f"EXPLODING({name}, norm={entry['grad_norm']:.2e})")
 
+        if entry["grad_param_ratio"] > self._gpr_ceiling:
+          anomalies.append(
+              f"GPR({name}, ratio={entry['grad_param_ratio']:.2e})")
+
         stats[name] = entry
 
     norms = [v["grad_norm"] for v in stats.values() if v["grad_norm"] > 0]
@@ -192,6 +203,7 @@ class GradMonitor:
           ("STALLED(", "STL"),
           ("EXPLODING(", "OVF"),
           ("IMBALANCED(", "IMB"),
+          ("GPR(", "GPR"),
       ]:
         if tag in a:
           start = a.index(tag) + len(tag)
@@ -200,7 +212,7 @@ class GradMonitor:
           prev = name_status.get(pname)
           name_status[pname] = f"{prev}|{short}" if prev else short
 
-    SEVERITY = {"STL": 0, "OVF": 1, "IMB": 2}
+    SEVERITY = {"STL": 0, "OVF": 1, "IMB": 2, "GPR": 3}
 
     def sort_key(kv):
       name, s = kv
