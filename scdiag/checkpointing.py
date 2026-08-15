@@ -117,7 +117,7 @@ def deserialize_lora_state(model, blob):
   return model, loaded
 
 
-def select_available_checkpoint(root_path):
+def select_best_checkpoint(root_path):
   """Return the best checkpoint path, falling back to latest.
 
     Checkpoint files are assumed to follow the ``<root>_best.pt`` /
@@ -453,7 +453,6 @@ def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scale
   start_epoch = ckpt.get("epoch", -1) + 1
   best_metric = ckpt.get("best_macro_f1", 0.0)
   extra = {k: v for k, v in ckpt.items() if k not in _KNOWN_CKPT_KEYS}
-  del ckpt
 
   logging.info(f"  Resumed at epoch {start_epoch}, best_metric={best_metric:.4f}")
   return model, start_epoch, best_metric, extra

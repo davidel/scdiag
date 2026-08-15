@@ -739,9 +739,9 @@ def train_xgboost_on_backbone(args,
   logging.info("=" * 60)
 
   # 1. Load the best checkpoint into a fresh model
-  from scdiag.checkpointing import select_available_checkpoint
+  from scdiag.checkpointing import select_best_checkpoint
 
-  ckpt_path = select_available_checkpoint(args.checkpoint)
+  ckpt_path = select_best_checkpoint(args.checkpoint)
   if ckpt_path is not None:
     logging.info(f"Loading checkpoint: {ckpt_path}")
     model_best, xgb_processor = load_model_for_inference(args.model,
