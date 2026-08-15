@@ -22,6 +22,7 @@ from scdiag.checkpointing import (
     checkpoint_dict,
     create_model_report,
     parse_state_flags,
+    restore_training_state,
     resume_checkpoint,
     serialize_lora_state,
 )
@@ -1177,6 +1178,15 @@ def main():
         dropout=args.lora_dropout,
         target_modules=target,
     )
+  ckpt_latest = args.checkpoint + "_latest.pt"
+  ckpt_best = args.checkpoint + "_best.pt"
+  model, start_epoch, best_macro_f1, ckpt_extra = resume_checkpoint(
+      ckpt_latest,
+      ckpt_best,
+      model,
+      device,
+  )
+
   if args.freeze or args.lora:
     patterns = list(args.freeze.split(",")) if args.freeze else []
     if args.lora:
@@ -1200,35 +1210,25 @@ def main():
       **args.sched_arg,
   )
 
-  ckpt_latest = args.checkpoint + "_latest.pt"
-  ckpt_best = args.checkpoint + "_best.pt"
-
-  model, start_epoch, best_macro_f1, ckpt_extra = resume_checkpoint(
-      ckpt_latest,
-      ckpt_best,
-      model,
+  restore_training_state(
+      ckpt_extra,
       optimizer,
       scheduler,
       scaler,
-      device,
       states_to_load,
   )
+
+  optimizer_global_step = ckpt_extra.get(
+      "global_step",
+      start_epoch * (len(train_loader) // args.grad_accum_steps),
+  )
+  del ckpt_extra
 
   completed_epoch = start_epoch - 1  # last fully completed (-1 = none yet)
   grad_monitor = None
   if args.grad_monitor >= 0:
     grad_monitor = GradMonitor(model, log_every=args.grad_monitor)
     logging.info(f"Gradient monitoring enabled (every {args.grad_monitor} steps).")
-
-  # Running count of actual optimizer steps (across epochs) for the
-  # gradient monitor so it receives contiguous step numbers.
-  # Prefer the exact value saved in the checkpoint; fall back to the
-  # formula-based estimate for checkpoints saved before this field existed.
-  optimizer_global_step = ckpt_extra.get(
-      "global_step",
-      start_epoch * (len(train_loader) // args.grad_accum_steps),
-  )
-  del ckpt_extra
 
   # Report the final model state after LoRA, freezing, optimizer setup, and
   # checkpoint restoration, immediately before training begins.

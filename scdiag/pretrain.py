@@ -33,6 +33,7 @@ from scdiag.checkpointing import (
     checkpoint_dict,
     create_model_report,
     parse_state_flags,
+    restore_training_state,
     resume_checkpoint,
 )
 from scdiag.cli_utils import KVPairAction
@@ -574,6 +575,21 @@ def main(argv=None):
   logging.info(f"Effective batch size: {args.batch_size} x {args.grad_accum_steps}"
                f" = {args.batch_size * args.grad_accum_steps}")
 
+  start_epoch = 0
+  ckpt_extra = {}
+  if args.resume:
+    ckpt_latest = args.checkpoint + "_latest.pt"
+    ckpt_best = args.checkpoint + "_best.pt"
+    model, start_epoch, _, ckpt_extra = resume_checkpoint(
+        ckpt_latest,
+        ckpt_best,
+        model,
+        device,
+    )
+    # Restore method-specific state from checkpoint.
+    method_state = ckpt_extra.get("method_state", {})
+    method.load_checkpoint_state(model, method_state, args)
+
   optimizer = create_optimizer(
       model.parameters(),
       name=args.optimizer,
@@ -600,24 +616,13 @@ def main(argv=None):
   states_to_save = parse_state_flags(args.state_save)
   states_to_load = parse_state_flags(args.state_load)
 
-  start_epoch = 0
-  ckpt_extra = {}
-  if args.resume:
-    ckpt_latest = args.checkpoint + "_latest.pt"
-    ckpt_best = args.checkpoint + "_best.pt"
-    model, start_epoch, _, ckpt_extra = resume_checkpoint(
-        ckpt_latest,
-        ckpt_best,
-        model,
-        optimizer,
-        scheduler,
-        scaler=scaler,
-        device=device,
-        states_to_load=states_to_load,
-    )
-    # Restore method-specific state from checkpoint.
-    method_state = ckpt_extra.get("method_state", {})
-    method.load_checkpoint_state(model, method_state, args)
+  restore_training_state(
+      ckpt_extra,
+      optimizer,
+      scheduler,
+      scaler,
+      states_to_load,
+  )
 
   os.makedirs(args.log_dir, exist_ok=True)
   writer = SummaryWriter(log_dir=args.log_dir)

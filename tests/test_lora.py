@@ -1,5 +1,7 @@
 """Tests for LoRA / PEFT support."""
 
+import re
+
 import torch
 import torch.nn as nn
 from peft import LoraConfig, PeftModel, get_peft_model
@@ -7,6 +9,8 @@ from peft import LoraConfig, PeftModel, get_peft_model
 from scdiag.checkpointing import (
     checkpoint_dict,
     deserialize_lora_state,
+    restore_training_state,
+    resume_checkpoint,
     serialize_lora_state,
 )
 from scdiag.model_utils import apply_lora, extract_lora_params, freeze_model
@@ -271,17 +275,12 @@ class TestResumeCheckpointWithLoRA:
     # Fresh model (random init) + fresh LoRA
     fresh = _TinyModelWithClassifier()
     fresh = apply_lora(fresh, r=4, alpha=8, target_modules=["backbone"])
-    fresh_opt = torch.optim.Adam(fresh.parameters())
 
     restored, epoch, metric, _extra = resume_checkpoint(
         path,
         path,
         fresh,
-        fresh_opt,
-        scheduler=None,
-        scaler=None,
         device=torch.device("cpu"),
-        states_to_load=set(),
     )
 
     assert epoch == 4
@@ -299,8 +298,6 @@ class TestResumeCheckpointWithLoRA:
                        head_b), ("Classifier head bias not restored after resume")
 
   def test_resume_restores_lora_weights(self, tmp_path):
-    from scdiag.checkpointing import resume_checkpoint
-
     model = _make_linear_model()
     optimizer = torch.optim.Adam(model.parameters())
     blob = serialize_lora_state(model)
@@ -320,17 +317,12 @@ class TestResumeCheckpointWithLoRA:
     # Fresh model + fresh LoRA
     fresh = _TinyModel()
     fresh = apply_lora(fresh, r=4, alpha=8, target_modules=["fc"])
-    fresh_opt = torch.optim.Adam(fresh.parameters())
 
     restored, epoch, metric, _extra = resume_checkpoint(
         path,
         path,
         fresh,
-        fresh_opt,
-        scheduler=None,
-        scaler=None,
         device=torch.device("cpu"),
-        states_to_load=set(),
     )
 
     assert epoch == 6
@@ -345,6 +337,128 @@ class TestResumeCheckpointWithLoRA:
         assert key in restored_sd, f"Missing adapter key: {key}"
         assert torch.equal(orig_sd[key],
                            restored_sd[key]), (f"Adapter mismatch for {key}")
+
+  def test_trainability_and_optimizer_follow_lora_resume(self, tmp_path):
+    """The production ordering keeps classifier and LoRA params trainable."""
+    source = _make_classifier_model()
+    source_optimizer = torch.optim.Adam(source.parameters())
+    checkpoint = checkpoint_dict(
+        source,
+        source_optimizer,
+        scheduler=None,
+        epoch=0,
+        states_to_save=set(),
+        lora_state_blob=serialize_lora_state(source),
+    )
+    path = str(tmp_path / "ckpt.pt")
+    torch.save(checkpoint, path)
+
+    model = apply_lora(_TinyModelWithClassifier(),
+                       r=4,
+                       alpha=8,
+                       target_modules=["backbone"])
+    model, _, _, extra = resume_checkpoint(path,
+                                           path,
+                                           model,
+                                           device=torch.device("cpu"))
+
+    lora_names = extract_lora_params(model)
+    freeze_model(model, (r"head",) + tuple(re.escape(name) for name in lora_names))
+    classifier_params = [p for n, p in model.named_parameters() if "head" in n]
+    lora_params = [p for n, p in model.named_parameters() if "lora_" in n]
+    backbone_params = [
+        p for n, p in model.named_parameters() if "backbone" in n and "lora_" not in n
+    ]
+
+    assert classifier_params and all(p.requires_grad for p in classifier_params)
+    assert lora_params and all(p.requires_grad for p in lora_params)
+    assert backbone_params and all(not p.requires_grad for p in backbone_params)
+
+    optimizer = torch.optim.Adam([p for p in model.parameters() if p.requires_grad])
+    optimizer_ids = {id(p) for group in optimizer.param_groups for p in group["params"]}
+    assert optimizer_ids == {id(p) for p in model.parameters() if p.requires_grad}
+    del extra
+
+  def test_classifier_and_lora_update_in_one_step(self):
+    """A resumed-style trainable model updates both parameter groups."""
+    model = apply_lora(_TinyModelWithClassifier(),
+                       r=4,
+                       alpha=8,
+                       target_modules=["backbone"])
+    lora_names = extract_lora_params(model)
+    freeze_model(model, (r"head",) + tuple(re.escape(name) for name in lora_names))
+    optimizer = torch.optim.SGD([p for p in model.parameters() if p.requires_grad],
+                                lr=0.1)
+    classifier = next(p for n, p in model.named_parameters() if "head.weight" in n)
+    lora = next(p for n, p in model.named_parameters() if "lora_B" in n)
+    classifier_before = classifier.detach().clone()
+    lora_before = lora.detach().clone()
+
+    loss = model(torch.randn(8, 16)).pow(2).mean()
+    loss.backward()
+    assert classifier.grad is not None
+    assert lora.grad is not None
+    assert torch.isfinite(classifier.grad).all()
+    assert torch.isfinite(lora.grad).all()
+    optimizer.step()
+
+    assert not torch.equal(classifier, classifier_before)
+    assert not torch.equal(lora, lora_before)
+
+  def test_restore_training_state_restores_optimizer_and_scheduler(self):
+    """Auxiliary states load after the new optimizer is created."""
+    model = _TinyModel()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1)
+    loss = model(torch.randn(4, 16)).pow(2).mean()
+    loss.backward()
+    optimizer.step()
+    scheduler.step()
+    checkpoint = checkpoint_dict(
+        model,
+        optimizer,
+        scheduler=scheduler,
+        epoch=0,
+        states_to_save={"opt", "sched"},
+    )
+
+    restored_optimizer = torch.optim.Adam(model.parameters(), lr=0.5)
+    restored_scheduler = torch.optim.lr_scheduler.StepLR(restored_optimizer,
+                                                         step_size=1)
+    restore_training_state(checkpoint,
+                           restored_optimizer,
+                           restored_scheduler,
+                           scaler=None,
+                           states_to_load={"opt", "sched"})
+
+    assert restored_optimizer.state
+    assert restored_scheduler.state_dict() == scheduler.state_dict()
+    assert restored_optimizer.param_groups[0]["lr"] == optimizer.param_groups[0]["lr"]
+
+  def test_restore_training_state_skips_incompatible_model(self):
+    """Partial model loads must not restore incompatible optimizer state."""
+    model = _TinyModel()
+    optimizer = torch.optim.Adam(model.parameters())
+    loss = model(torch.randn(4, 16)).pow(2).mean()
+    loss.backward()
+    optimizer.step()
+    checkpoint = checkpoint_dict(
+        model,
+        optimizer,
+        scheduler=None,
+        epoch=0,
+        states_to_save={"opt"},
+    )
+    checkpoint["_model_state_skipped"] = True
+    restored_optimizer = torch.optim.Adam(model.parameters())
+
+    restore_training_state(checkpoint,
+                           restored_optimizer,
+                           scheduler=None,
+                           scaler=None,
+                           states_to_load={"opt"})
+
+    assert not restored_optimizer.state
 
 
 class TestExtractLoraParams:

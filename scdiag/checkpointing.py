@@ -343,28 +343,17 @@ def filter_state_dict(ckpt_state, model_state):
   return filtered, skipped
 
 
-def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scaler,
-                      device, states_to_load):
-  """Resume training state from an existing checkpoint.
+def resume_checkpoint(ckpt_latest, ckpt_best, model, device):
+  """Resume model state from an existing checkpoint.
 
     Looks for *ckpt_latest* first, then *ckpt_best*.  Restores model weights
-    (filtering out shape-mismatched keys), and conditionally restores
-    optimizer, scheduler, and GradScaler states depending on
-    *states_to_load*.
+    (filtering out shape-mismatched keys) and LoRA adapter state. Training
+    states are restored separately by :func:`restore_training_state` after
+    the final trainable parameter set has been established.
 
-    Returns ``(start_epoch, best_metric, extra)`` where *extra* is a dict
-    of any non-state-dict keys stored in the checkpoint (e.g.
-    ``global_step``).
+    Returns ``(start_epoch, best_metric, extra)`` where *extra* contains
+    auxiliary checkpoint state and other non-model metadata.
     """
-  _KNOWN_CKPT_KEYS = frozenset({
-      "model_state_dict",
-      "optimizer_state_dict",
-      "scheduler_state_dict",
-      "scaler_state_dict",
-      "epoch",
-      "best_macro_f1",
-      "lora_state_blob",
-  })
 
   resume_path = None
   if os.path.exists(ckpt_latest):
@@ -419,7 +408,28 @@ def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scale
     logging.warning(f"  Unexpected keys (ignored): "
                     f"{result.unexpected_keys}")
 
-  opt_state = ckpt.get("optimizer_state_dict")
+  start_epoch = ckpt.get("epoch", -1) + 1
+  best_metric = ckpt.get("best_macro_f1", 0.0)
+  extra = {
+      k: v
+      for k, v in ckpt.items()
+      if k not in {"model_state_dict", "lora_state_blob", "epoch", "best_macro_f1"}
+  }
+  extra["_model_state_skipped"] = bool(skipped)
+
+  logging.info(f"  Resumed at epoch {start_epoch}, best_metric={best_metric:.4f}")
+  return model, start_epoch, best_metric, extra
+
+
+def restore_training_state(extra, optimizer, scheduler, scaler, states_to_load):
+  """Restore optimizer, scheduler, and AMP state from checkpoint extras.
+
+  This must be called after the final model trainability policy is applied and
+  the optimizer has been created from the resulting trainable parameters.
+  """
+  skipped = extra.get("_model_state_skipped", False)
+
+  opt_state = extra.get("optimizer_state_dict")
   if "opt" in states_to_load and opt_state is not None:
     if skipped:
       logging.warning("  Skipped optimizer restore (model architecture changed)")
@@ -429,7 +439,7 @@ def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scale
   else:
     logging.info("  Skipped optimizer state")
 
-  sched_state = ckpt.get("scheduler_state_dict")
+  sched_state = extra.get("scheduler_state_dict")
   if "sched" in states_to_load and sched_state is not None:
     if scheduler is None:
       logging.info("  Skipped scheduler restore (no scheduler in current run)")
@@ -442,19 +452,12 @@ def resume_checkpoint(ckpt_latest, ckpt_best, model, optimizer, scheduler, scale
     logging.info("  Skipped scheduler state")
 
   if "amp" in states_to_load:
-    scaler_dict = ckpt.get("scaler_state_dict")
+    scaler_dict = extra.get("scaler_state_dict")
     if scaler_dict is not None and scaler is not None:
       scaler.load_state_dict(scaler_dict)
       logging.info("  Restored GradScaler state")
     else:
       logging.info("  Skipped GradScaler state")
-
-  start_epoch = ckpt.get("epoch", -1) + 1
-  best_metric = ckpt.get("best_macro_f1", 0.0)
-  extra = {k: v for k, v in ckpt.items() if k not in _KNOWN_CKPT_KEYS}
-
-  logging.info(f"  Resumed at epoch {start_epoch}, best_metric={best_metric:.4f}")
-  return model, start_epoch, best_metric, extra
 
 
 def load_checkpoint_weights(path,
