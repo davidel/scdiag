@@ -140,7 +140,7 @@ scdiag-train --model cls_model_wrapper:google/vit-base-patch16-224 \
 | `--amp_dtype` | `None` | Mixed precision: `float16` or `bfloat16` |
 | `--checkpoint` | `scdiag` | Checkpoint base path (`_latest.pt` / `_best.pt` appended) |
 | `--log_every` | `20` | Log every N steps |
-| `--grad_monitor` | `-1` | Log gradient statistics every N steps; `-1` disables gradient monitoring |
+| `--grad_monitor` | `-1` | Log gradient statistics every N steps; `-1` disables. See [Gradient Monitor](#gradient-monitor) for column meanings. |
 | `--save_every` | `500` | Save checkpoint every N steps |
 | `--num_workers` | `2` | DataLoader worker processes |
 | `--log_level` | `INFO` | Logging level |
@@ -174,6 +174,79 @@ scdiag-train --model cls_model_wrapper:google/vit-base-patch16-224 \
 
 Training automatically resumes from an existing `_latest.pt` or `_best.pt`
 checkpoint if one exists at the `--checkpoint` path.
+
+### Gradient Monitor
+
+`--grad_monitor N` logs a per-parameter gradient report every *N* training
+steps.  The report helps diagnose training instability (exploding / vanishing
+gradients, imbalanced parameter updates) before it shows up in the loss.
+
+#### Summary line
+
+```
+[Step 29400] Gradient Report: 202 params | grad_norm: mean=5.68e-01 max=3.41e+00 min=1.66e-05 | grad/param: mean=2.94e-01
+```
+
+| Field | Meaning |
+|---|---|
+| `params` | Total number of trainable parameters (those with `requires_grad=True`). |
+| `grad_norm: mean/max/min` | L2 norm of the gradient tensor for each parameter, then aggregated across all trainable params. `max` is the single most aggressive gradient — the one most likely to cause instability. |
+| `grad/param: mean` | Average of the gradient-to-parameter ratio (see *g/p* below). Healthy models typically show mean g/p < 0.1. Values > 1.0 mean updates are larger than the weights themselves. |
+
+#### Per-parameter columns
+
+Each row reports one trainable parameter (or parameter tensor). Columns:
+
+| Column | Symbol | How it's computed | What to look for |
+|---|---|---|---|
+| **g_norm** | `‖∇L‖` | `torch.norm(grad)` — L2 norm of the full gradient tensor for this parameter. | Compare across params. One param with g_norm 100× higher than others is a problem. |
+| **p_norm** | `‖W‖` | `torch.norm(param)` — L2 norm of the parameter tensor itself. | Gives scale context. A freshly initialized `nn.Linear(1024, 1024)` typically has p_norm ~18–55 depending on init. |
+| **g/p** | `‖∇L‖ / (‖W‖ + ε)` | g_norm divided by p_norm (with ε = 10⁻¹² to avoid division by zero). | The single most useful column. Tells you the **relative size of the update**. Healthy: < 0.1. Concerning: > 1.0 (update overshoots the parameter). Dangerous: > 5.0 (parameter is being thrown around randomly). |
+| **g_max** | `max|∇L|` | `grad.abs().max()` — largest absolute gradient value anywhere in the tensor. | Highlights individual neurons that are getting extreme gradients even when the overall norm looks reasonable. |
+| **sparse** | `% zero` | Fraction of gradient elements with `|grad| < 1e-7`. | High sparsity (> 50%) means most neurons in this layer aren't receiving gradient signal. Can indicate dead neurons or a learning rate that's too low. |
+| **status** | | Anomaly detection flag (see below). | `OK` = healthy. Anything else deserves investigation. |
+
+#### Status flags
+
+| Flag | Full name | Condition |
+|---|---|---|
+| `OK` | Normal | No anomaly detected. |
+| `STL` | Stalled | g_norm has been below `norm_floor` (1e-8) for `stall_window` consecutive log steps (default: 50) — the parameter has stopped learning. |
+| `OVF` | Exploding | g_norm exceeds `norm_ceiling` (100) — the gradient is dangerously large. |
+| `IMB` | Imbalanced | g_norm exceeds 100× the median gradient norm across all params — this parameter is being updated much more aggressively than others. |
+
+The thresholds (`norm_floor`, `norm_ceiling`, `stall_window`, `imbalance_factor`)
+are configurable on the `GradMonitor` constructor but not exposed via CLI
+flags.
+
+#### Reading the report
+
+**Healthy training** looks like:
+- g/p ratios well below 1.0 for all params
+- `grad/param: mean` in the 0.01–0.1 range
+- g_norm values within ~10× of each other across layers
+- No `OVF` or `IMB` flags
+
+**Overfitting** (high train accuracy, low val accuracy):
+- g/p may still look healthy — the model is learning, just not generalising.
+- Look at the loss curves instead; grad monitor won't directly show overfitting.
+
+**Exploding gradients** (loss spikes, NaN):
+- One or more params with `OVF` status
+- g/p > 5.0 on some layers
+- `grad_norm: max` orders of magnitude larger than `mean`
+- Fix: lower LR, add gradient clipping (`--grad_clip 1.0`), or use a warmup schedule.
+
+**Vanishing gradients** (loss flat, no learning):
+- Many params with `STL` status
+- g_norm values near 1e-8 or below
+- High sparsity (> 50%)
+- Fix: increase LR, check for dead neurons, verify the loss is connected to the parameters being monitored.
+
+**Imbalanced updates** (oscillating validation metrics):
+- Some params flagged `IMB` while others are `OK`
+- Large disparity in g/p between classifier and backbone layers
+- Fix: use `--lr_group` to assign different learning rates to different param groups, or freeze the dominant component.
 
 ### Cross-Dataset Resume
 
@@ -248,7 +321,7 @@ scdiag-train --model convvit \
 | `--state_load` | `opt,sched` | Comma-separated states to restore on resume: `opt`, `sched`, `amp`, `none`. |
 | `--checkpoint` | (required) | Checkpoint path prefix (saves `_latest.pt` and `_best.pt`). |
 | `--log_level` | `INFO` | Minimum logging level. |
-| `--grad_monitor` | `-1` | Log gradient statistics every N steps; `-1` disables gradient monitoring. |
+| `--grad_monitor` | `-1` | Log gradient statistics every N steps; `-1` disables. See [Gradient Monitor](#gradient-monitor) for column meanings. |
 | `--grad_clip` | `1.0` | Maximum gradient norm for clipping. |
 | `--vis_every` | `0` | Log reconstruction visualisation to TensorBoard every N steps. `0` disables visualisation logging. |
 | `--model_arg` | `{}` | Override model configuration (repeatable). Example: `--model_arg depth=6 num_heads=8` |
