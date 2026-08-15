@@ -38,6 +38,10 @@ datasets.
   `--classifier` to select a registered classifier or a `.py` script.
 - **Parameter freezing** — freeze all backbone parameters except the
   classifier head with `--freeze ".*\\.(head|pool)"`.
+- **LoRA fine-tuning** — parameter-efficient fine-tuning via Low-Rank
+  Adaptation (PEFT). Freezes the backbone and trains low-rank adapter
+  matrices instead, reducing trainable parameters by ~97%. Enable with
+  `--lora`. Requires `pip install scdiag[lora]`.
 - **Hook-based feature extraction** — XGBoost backbone features are extracted
   via a forward hook on the classifier head, making feature extraction
   architecture-agnostic (works for ViT, ResNet, Swin, etc.).
@@ -160,6 +164,11 @@ scdiag-train --model cls_model_wrapper:google/vit-base-patch16-224 \
 | `--classifier` | `None` | Classifier head spec: a registered name (e.g. `mlp`) or a path to a `.py` file. Only used with `--model cls_model_wrapper:<hf_name>`. |
 | `--classifier_args` | `{}` | Extra classifier kwargs (repeatable). Example: `--classifier_args hidden=512 dropout=0.3`. For `cls_attention`: `cls_slice=(0,1) spc_slice=(1,None)`. |
 | `--freeze` | `None` | Comma-separated list of regex patterns (`re.match`) for parameter names to keep trainable. All other parameters are frozen. Each pattern is anchored at the start of the name. Example: `".*\\.(head|pool)"`. If omitted, all parameters are trainable. |
+| `--lora` | `False` | Enable LoRA (Low-Rank Adaptation) via PEFT. Freezes the backbone and trains low-rank adapter matrices. Requires `pip install scdiag[lora]`. |
+| `--lora_r` | `8` | LoRA rank (dimensionality of the low-rank decomposition). |
+| `--lora_alpha` | `16` | LoRA alpha (scaling factor = `alpha / r`). Higher values increase the magnitude of the LoRA update. |
+| `--lora_dropout` | `0.0` | Dropout probability applied to LoRA layers during training. |
+| `--lora_target_modules` | `None` | Comma-separated module names to apply LoRA to (e.g. `"query,key,value"`). Auto-detects attention layers if omitted. |
 | `--xgb_learning_rate` | `0.1` | XGBoost learning rate |
 | `--xgb_subsample` | `0.8` | XGBoost row sampling ratio |
 | `--xgb_colsample_bytree` | `0.8` | XGBoost column sampling ratio |
@@ -249,6 +258,69 @@ flags.
 - Some params flagged `IMB` while others are `OK`
 - Large disparity in g/p between classifier and backbone layers
 - Fix: use `--lr_group` to assign different learning rates to different param groups, or freeze the dominant component.
+
+### LoRA Fine-Tuning
+
+Low-Rank Adaptation (LoRA) freezes the pre-trained backbone and injects
+small trainable low-rank matrices into the attention layers.  This reduces
+trainable parameters by ~97 % while often matching full fine-tuning
+accuracy.
+
+```bash
+scdiag-train \
+    --model cls_model_wrapper:facebook/dinov2-with-registers-large \
+    --lora \
+    --lora_r 16 \
+    --lora_alpha 32 \
+    --lora_target_modules "query,key,value" \
+    --freeze "classifier\.(head|pool|encoder)" \
+    --lr 3e-5 \
+    ...
+```
+
+#### Key parameters
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--lora` | off | Enables LoRA. Requires `pip install scdiag[lora]`. |
+| `--lora_r` | `8` | Rank of the low-rank decomposition. Higher = more capacity, more VRAM. |
+| `--lora_alpha` | `16` | Controls update magnitude via the scaling factor `alpha / r`. |
+| `--lora_dropout` | `0.0` | Dropout on LoRA layers (useful for small datasets). |
+| `--lora_target_modules` | auto | Comma-separated names. Auto-detects attention Q/K/V if omitted. |
+
+#### Scaling factor (`alpha / r`)
+
+The LoRA output is `ΔW = (alpha/r) × B @ A`, where `A` and `B` are the
+low-rank matrices.  The ratio `alpha/r` scales the update relative to the
+base weights.  Common settings:
+
+| r | alpha | alpha/r | Use case |
+|---|---|---|---|
+| 8 | 16 | 2.0 | Conservative, very few params |
+| 16 | 32 | 2.0 | Good default for medium datasets |
+| 16 | 64 | 4.0 | Larger updates (helpful under bfloat16) |
+| 32 | 64 | 2.0 | More capacity, same scaling |
+
+If your LoRA params barely appear in the gradient monitor, try increasing
+`--lora_alpha` before changing `--lora_r`.
+
+#### Combining LoRA with a custom classifier
+
+Use `--lora` together with `--model cls_model_wrapper:<hf_name>` and
+`--classifier` to pair LoRA backbone adaptation with a custom classifier
+head.  Use `--freeze` to keep the classifier encoder trainable while LoRA
+handles the backbone:
+
+```bash
+scdiag-train \
+    --model cls_model_wrapper:facebook/dinov2-with-registers-large \
+    --classifier cls_attention \
+    --classifier_args 'num_encoder_layers=2' \
+    --lora --lora_r 16 --lora_alpha 32 \
+    --freeze 'classifier\.(head|pool|encoder)' \
+    --lr_group 'backbone.*=1e-5' 'classifier.*=3e-4' \
+    ...
+```
 
 ### Cross-Dataset Resume
 
