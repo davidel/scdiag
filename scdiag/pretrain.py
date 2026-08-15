@@ -571,8 +571,6 @@ def main(argv=None):
         param_rename=args.param_rename,
     )
 
-  logging.info(create_model_report(model))
-
   logging.info(f"Effective batch size: {args.batch_size} x {args.grad_accum_steps}"
                f" = {args.batch_size * args.grad_accum_steps}")
 
@@ -634,6 +632,11 @@ def main(argv=None):
   if args.grad_monitor >= 0:
     grad_monitor = GradMonitor(model, log_every=args.grad_monitor)
     logging.info(f"Gradient monitoring enabled (every {args.grad_monitor} steps).")
+
+  # Report the final model state after checkpoint restoration and all training
+  # initialization, immediately before pre-training begins.
+  logging.info(create_model_report(model))
+
   try:
     for epoch in range(start_epoch, args.epochs):
       avg_loss, global_step = train_one_epoch(

@@ -1183,8 +1183,6 @@ def main():
       patterns.extend(re.escape(k) for k in extract_lora_params(model))
     freeze_model(model, tuple(patterns))
 
-  logging.info(create_model_report(model))
-
   trainable_params = [p for p in model.parameters() if p.requires_grad]
   optimizer = create_optimizer(
       trainable_params,
@@ -1231,6 +1229,10 @@ def main():
       start_epoch * (len(train_loader) // args.grad_accum_steps),
   )
   del ckpt_extra
+
+  # Report the final model state after LoRA, freezing, optimizer setup, and
+  # checkpoint restoration, immediately before training begins.
+  logging.info(create_model_report(model))
 
   try:
     for epoch in range(start_epoch, args.epochs):
