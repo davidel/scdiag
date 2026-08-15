@@ -33,7 +33,12 @@ from scdiag.grad_monitor import GradMonitor
 from scdiag.logging_utils import fatal, setup_logging
 from scdiag.model_utils import apply_lora, extract_lora_params, freeze_model
 from scdiag.models import load_model, load_processor
-from scdiag.optim_factory import create_optimizer, create_scheduler
+from scdiag.optim_factory import (
+    build_param_groups,
+    create_optimizer,
+    create_scheduler,
+    report_lr,
+)
 from scdiag.script_utils import load_extern
 from scdiag.storage_utils import save_checkpoint
 
@@ -384,6 +389,16 @@ def parse_args(argv=None):
       type=float,
       default=0.01,
       help="Weight decay.",
+  )
+  parser.add_argument(
+      "--lr_group",
+      nargs="+",
+      default=None,
+      metavar="REGEX=LR",
+      help="Per-parameter-group learning rates. "
+      "E.g. --lr_group 'backbone.*=1e-5' 'classifier.*=1e-3'. "
+      "Regexes matched against named_parameters(); first match wins. "
+      "Unmatched trainable params use --lr.",
   )
 
   parser.add_argument(
@@ -928,7 +943,6 @@ def train_one_epoch(
     if (batch_idx + 1) % args.log_every == 0 or (batch_idx + 1) == total_batches:
       elapsed = time.time() - last_log_time
       throughput = window_samples / elapsed if elapsed > 0 else 0
-      lr_now = optimizer.param_groups[0]["lr"]
       w_loss = window_loss / window_samples if window_samples > 0 else 0.0
       w_top1 = ((window_correct / window_samples) *
                 100.0 if window_samples > 0 else 0.0)
@@ -942,11 +956,13 @@ def train_one_epoch(
       avg_loss = total_loss / total_samples
       top1 = (correct_top1 / total_samples) * 100.0
       gpu = gpu_stats_str(device)
+      lr_str = report_lr(optimizer, writer=writer, step=global_step)
       msg = (f"  [Step {batch_idx + 1}/{total_batches}]"
              f" loss={w_loss:.4f} ({avg_loss:.4f})"
              f" top1={w_top1:.2f}% ({top1:.2f}%)"
              f" macro_f1={w_macro_f1:.2f}%"
-             f" lr={lr_now:.2e} img/s={throughput:.0f}")
+             f" {lr_str}"
+             f" img/s={throughput:.0f}")
       logging.info(msg)
       if gpu:
         logging.info(f"  [Step {batch_idx + 1}/{total_batches}] {gpu}")
@@ -956,7 +972,6 @@ def train_one_epoch(
         writer.add_scalar("Train/macro_f1", w_macro_f1, global_step)
         writer.add_scalar("Train/loss_avg", avg_loss, global_step)
         writer.add_scalar("Train/top1_avg", top1, global_step)
-        writer.add_scalar("Train/lr", lr_now, global_step)
         writer.add_scalar("Train/throughput", throughput, global_step)
         if device.type == "cuda":
           writer.add_scalar(
@@ -1193,12 +1208,15 @@ def main():
       patterns.extend(re.escape(k) for k in extract_lora_params(model))
     freeze_model(model, tuple(patterns))
 
-  trainable_params = [p for p in model.parameters() if p.requires_grad]
-  optimizer = create_optimizer(
-      trainable_params,
-      name=args.optimizer,
+  param_groups = build_param_groups(
+      dict(model.named_parameters()),
       lr=args.lr,
       weight_decay=args.weight_decay,
+      lr_groups=args.lr_group,
+  )
+  optimizer = create_optimizer(
+      param_groups,
+      name=args.optimizer,
       **args.opt_arg,
   )
 

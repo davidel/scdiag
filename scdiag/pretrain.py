@@ -42,7 +42,12 @@ from scdiag.gpu_utils import gpu_stats_str
 from scdiag.grad_monitor import GradMonitor
 from scdiag.logging_utils import fatal, setup_logging
 from scdiag.models.registry import load_model
-from scdiag.optim_factory import create_optimizer, create_scheduler
+from scdiag.optim_factory import (
+    build_param_groups,
+    create_optimizer,
+    create_scheduler,
+    report_lr,
+)
 from scdiag.pretrain_methods import get_method, list_methods
 from scdiag.storage_utils import save_checkpoint
 
@@ -214,20 +219,20 @@ def train_one_epoch(
     elapsed = time.time() - last_log_time
     if global_step > 0 and global_step % log_every == 0:
       throughput = window_samples / elapsed if elapsed > 0 else 0
-      lr_now = optimizer.param_groups[0]["lr"]
       w_loss = window_loss / window_samples if window_samples > 0 else 0.0
       avg_loss_so_far = total_loss / total_samples
       gpu = gpu_stats_str(device)
+      lr_str = report_lr(optimizer, writer=writer, step=global_step)
       msg = (f"  [Step {step + 1}/{total_batches}]"
              f" loss={w_loss:.4f} ({avg_loss_so_far:.4f})"
-             f" lr={lr_now:.2e} img/s={throughput:.0f}")
+             f" {lr_str}"
+             f" img/s={throughput:.0f}")
       logging.info(msg)
       if gpu:
         logging.info(f"  [Step {step + 1}/{total_batches}] {gpu}")
       if writer is not None:
         writer.add_scalar("Train/loss_step", w_loss, global_step)
         writer.add_scalar("Train/loss_avg", avg_loss_so_far, global_step)
-        writer.add_scalar("Train/lr", lr_now, global_step)
         writer.add_scalar("Train/throughput", throughput, global_step)
         if device.type == "cuda":
           writer.add_scalar(
@@ -340,6 +345,16 @@ def parse_args(argv=None):
                       type=float,
                       default=0.05,
                       help="AdamW weight decay.")
+  parser.add_argument(
+      "--lr_group",
+      nargs="+",
+      default=None,
+      metavar="REGEX=LR",
+      help="Per-parameter-group learning rates. "
+      "E.g. --lr_group 'backbone.*=1e-5' 'classifier.*=1e-3'. "
+      "Regexes matched against named_parameters(); first match wins. "
+      "Unmatched trainable params use --lr.",
+  )
   parser.add_argument("--grad_clip",
                       type=float,
                       default=1.0,
@@ -590,11 +605,15 @@ def main(argv=None):
     method_state = ckpt_extra.get("method_state", {})
     method.load_checkpoint_state(model, method_state, args)
 
-  optimizer = create_optimizer(
-      model.parameters(),
-      name=args.optimizer,
+  param_groups = build_param_groups(
+      dict(model.named_parameters()),
       lr=args.lr,
       weight_decay=args.weight_decay,
+      lr_groups=args.lr_group,
+  )
+  optimizer = create_optimizer(
+      param_groups,
+      name=args.optimizer,
       **args.opt_arg,
   )
 

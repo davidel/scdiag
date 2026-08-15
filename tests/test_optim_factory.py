@@ -4,7 +4,134 @@ import pytest
 import torch.nn as nn
 import torch.optim as optim
 
-from scdiag.optim_factory import create_optimizer, create_scheduler
+from scdiag.optim_factory import (
+    build_param_groups,
+    create_optimizer,
+    create_scheduler,
+    report_lr,
+)
+
+
+class TestBuildParamGroups:
+  """Tests for build_param_groups."""
+
+  def _make_model(self):
+    """Create a small model with named params for testing."""
+
+    class Toy(nn.Module):
+
+      def __init__(self):
+        super().__init__()
+        self.backbone = nn.Linear(10, 8)
+        self.classifier = nn.Linear(8, 2)
+
+      def forward(self, x):
+        return self.classifier(self.backbone(x))
+
+    return Toy()
+
+  def test_no_groups_returns_single_group(self):
+    model = self._make_model()
+    named_params = dict(model.named_parameters())
+    groups = build_param_groups(named_params, lr=1e-3, weight_decay=0.01)
+    assert len(groups) == 1
+    assert groups[0]["lr"] == 1e-3
+    assert groups[0]["weight_decay"] == 0.01
+    assert len(groups[0]["params"]) == 4  # 2 weight + 2 bias
+
+  def test_regex_matching(self):
+    model = self._make_model()
+    named_params = dict(model.named_parameters())
+    groups = build_param_groups(named_params,
+                                lr=1e-3,
+                                weight_decay=0.01,
+                                lr_groups=["backbone.*=1e-5"])
+    assert len(groups) == 2
+    backbone_params = [n for n in named_params if "backbone" in n]
+    classifier_params = [n for n in named_params if "classifier" in n]
+    # First group should be backbone
+    assert groups[0]["lr"] == 1e-5
+    assert len(groups[0]["params"]) == len(backbone_params)
+    # Second group should be classifier (fallback)
+    assert groups[1]["lr"] == 1e-3
+    assert len(groups[1]["params"]) == len(classifier_params)
+
+  def test_fallback_to_default_lr(self):
+    model = self._make_model()
+    named_params = dict(model.named_parameters())
+    groups = build_param_groups(named_params,
+                                lr=1e-3,
+                                weight_decay=0.01,
+                                lr_groups=["backbone.*=1e-5"])
+    # Classifier params should fall back to default lr
+    assert groups[1]["lr"] == 1e-3
+
+  def test_first_match_wins(self):
+    model = self._make_model()
+    named_params = dict(model.named_parameters())
+    # Overlapping regexes: backbone.*weight matches only backbone.weight,
+    # backbone.* matches both backbone.weight and backbone.bias.
+    # backbone.weight goes to the first regex (first match wins).
+    groups = build_param_groups(named_params,
+                                lr=1e-3,
+                                weight_decay=0.01,
+                                lr_groups=["backbone.*weight=1e-5", "backbone.*=1e-6"])
+    # Group 0: backbone.weight (matched first regex)
+    assert groups[0]["lr"] == 1e-5
+    assert len(groups[0]["params"]) == 1
+    # Group 1: backbone.bias (second regex, backbone.*)
+    assert groups[1]["lr"] == 1e-6
+    assert len(groups[1]["params"]) == 1
+
+  def test_frozen_params_excluded(self):
+    model = self._make_model()
+    # Freeze classifier
+    for p in model.classifier.parameters():
+      p.requires_grad = False
+    named_params = dict(model.named_parameters())
+    groups = build_param_groups(named_params, lr=1e-3, weight_decay=0.01)
+    # Only backbone params should be in the group
+    assert len(groups[0]["params"]) == 2  # weight + bias
+
+  def test_unmatched_regex_raises(self):
+    model = self._make_model()
+    named_params = dict(model.named_parameters())
+    with pytest.raises(ValueError, match="matched no parameters"):
+      build_param_groups(named_params,
+                         lr=1e-3,
+                         weight_decay=0.01,
+                         lr_groups=["nonexistent.*=1e-3"])
+
+  def test_weight_decay_applied_to_all_groups(self):
+    model = self._make_model()
+    named_params = dict(model.named_parameters())
+    groups = build_param_groups(named_params,
+                                lr=1e-3,
+                                weight_decay=0.05,
+                                lr_groups=["backbone.*=1e-5", "classifier.*=1e-3"])
+    for g in groups:
+      assert g["weight_decay"] == 0.05
+
+  def test_empty_params_returns_empty_list(self):
+    model = self._make_model()
+    # Freeze all params
+    for p in model.parameters():
+      p.requires_grad = False
+    named_params = dict(model.named_parameters())
+    groups = build_param_groups(named_params, lr=1e-3, weight_decay=0.01)
+    assert groups == []
+
+  def test_multiple_groups_with_fallback(self):
+    model = self._make_model()
+    named_params = dict(model.named_parameters())
+    groups = build_param_groups(named_params,
+                                lr=1e-3,
+                                weight_decay=0.01,
+                                lr_groups=["backbone.*=1e-5"])
+    # Should have 2 groups: backbone (regex) and classifier (fallback)
+    assert len(groups) == 2
+    assert groups[0]["lr"] == 1e-5
+    assert groups[1]["lr"] == 1e-3
 
 
 class TestCreateOptimizer:
@@ -54,6 +181,32 @@ class TestCreateOptimizer:
     with pytest.raises(ValueError, match="Unknown optimizer"):
       create_optimizer(params, name="nonexistent")
 
+  def test_param_groups_input(self):
+    """Test with param groups dict from build_param_groups."""
+    model = nn.Sequential(nn.Linear(10, 8), nn.Linear(8, 2))
+    named_params = dict(model.named_parameters())
+    groups = build_param_groups(named_params,
+                                lr=1e-3,
+                                weight_decay=0.01,
+                                lr_groups=["0.*=1e-5", "1.*=1e-3"])
+    opt = create_optimizer(groups, name="AdamW")
+    assert isinstance(opt, optim.AdamW)
+    assert len(opt.param_groups) == 2
+    assert opt.param_groups[0]["lr"] == 1e-5
+    assert opt.param_groups[1]["lr"] == 1e-3
+
+  def test_initial_lr_seeded(self):
+    """Test that initial_lr is set for each param group."""
+    model = nn.Sequential(nn.Linear(10, 8), nn.Linear(8, 2))
+    named_params = dict(model.named_parameters())
+    groups = build_param_groups(named_params,
+                                lr=1e-3,
+                                weight_decay=0.01,
+                                lr_groups=["0.*=1e-5", "1.*=1e-3"])
+    opt = create_optimizer(groups, name="AdamW")
+    for g in opt.param_groups:
+      assert g["initial_lr"] == g["lr"]
+
 
 class TestCreateScheduler:
   """Tests for the scheduler factory."""
@@ -72,7 +225,9 @@ class TestCreateScheduler:
     assert sched is None
 
   def test_cosine(self, optimizer):
-    sched = create_scheduler(optimizer, name="CosineAnnealingLR", T_max=50,
+    sched = create_scheduler(optimizer,
+                             name="CosineAnnealingLR",
+                             T_max=50,
                              eta_min=1e-5)
     assert isinstance(sched, optim.lr_scheduler.CosineAnnealingLR)
     assert sched.T_max == 50
@@ -109,3 +264,66 @@ class TestCreateScheduler:
     script.write_text("x = 42\n")
     with pytest.raises(ValueError, match="does not define"):
       create_scheduler(optimizer, name=str(script))
+
+
+class TestReportLr:
+  """Tests for report_lr."""
+
+  def test_single_group(self):
+    model = nn.Linear(10, 2)
+    opt = optim.AdamW(model.parameters(), lr=0.001)
+    result = report_lr(opt)
+    assert result == "lr=1.00e-03"
+
+  def test_multi_group(self):
+    model = nn.Sequential(nn.Linear(10, 8), nn.Linear(8, 2))
+    named_params = dict(model.named_parameters())
+    groups = build_param_groups(named_params,
+                                lr=1e-3,
+                                weight_decay=0.01,
+                                lr_groups=["0.*=1e-5", "1.*=1e-3"])
+    opt = create_optimizer(groups, name="AdamW")
+    result = report_lr(opt)
+    assert "group0:1.00e-05" in result
+    assert "group1:1.00e-03" in result
+
+  def test_tensorboard_single_group(self):
+    model = nn.Linear(10, 2)
+    opt = optim.AdamW(model.parameters(), lr=0.001)
+
+    class FakeWriter:
+
+      def __init__(self):
+        self.scalars = {}
+
+      def add_scalar(self, tag, value, step):
+        self.scalars[tag] = (value, step)
+
+    writer = FakeWriter()
+    result = report_lr(opt, writer=writer, step=42)
+    assert result == "lr=1.00e-03"
+    assert writer.scalars["Train/lr"] == (0.001, 42)
+
+  def test_tensorboard_multi_group(self):
+    model = nn.Sequential(nn.Linear(10, 8), nn.Linear(8, 2))
+    named_params = dict(model.named_parameters())
+    groups = build_param_groups(named_params,
+                                lr=1e-3,
+                                weight_decay=0.01,
+                                lr_groups=["0.*=1e-5", "1.*=1e-3"])
+    opt = create_optimizer(groups, name="AdamW")
+
+    class FakeWriter:
+
+      def __init__(self):
+        self.scalars = {}
+
+      def add_scalar(self, tag, value, step):
+        self.scalars[tag] = (value, step)
+
+    writer = FakeWriter()
+    result = report_lr(opt, writer=writer, step=42)
+    assert "group0:1.00e-05" in result
+    assert "group1:1.00e-03" in result
+    assert writer.scalars["Train/lr_group0"] == (1e-5, 42)
+    assert writer.scalars["Train/lr_group1"] == (1e-3, 42)
