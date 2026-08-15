@@ -289,15 +289,14 @@ def checkpoint_dict(model,
     """
   from scdiag.model_utils import trainable_state_dict
 
-  # When a LoRA blob is present the adapter weights live there;
-  # always use the full state dict so base-model weights (frozen
-  # backbone + trainable classifier) survive checkpoint-resume.
-  # PeftModel.state_dict() only yields adapter keys, so
-  # trainable_state_dict() would produce an empty dict after the
-  # lora_ strip.
+  # When a LoRA blob is present the adapter weights live in the blob;
+  # only persist the non-adapter part of the state dict here.
+  # trainable_state_dict() correctly respects requires_grad, yielding
+  # the unfrozen classifier weights (and nothing else).  The lora_
+  # keys are then stripped so the same blob can fully restore them.
   if extra.get("lora_state_blob") is not None:
-    sd = model.state_dict()
-    sd = {k: v for k, v in sd.items() if "lora_" not in k}
+    base = (model.state_dict() if save_frozen else trainable_state_dict(model))
+    sd = {k: v for k, v in base.items() if "lora_" not in k}
   else:
     sd = (model.state_dict() if save_frozen else trainable_state_dict(model))
   d = {

@@ -112,10 +112,16 @@ def _make_classifier_model(in_features=16, hidden=8, num_classes=4):
 
 class TestCheckpointDictLoraStripping:
 
-  def test_non_lora_weights_saved_when_blob_present(self):
-    """checkpoint_dict must include non-LoRA weights (e.g. classifier head)."""
+  def _unfreeze_all(self, model):
+    """Unfreeze all params (simulates --freeze matching everything)."""
+    for p in model.parameters():
+      p.requires_grad = True
+
+  def test_trainable_non_lora_weights_saved_when_blob_present(self):
+    """With LoRA + unfrozen head, checkpoint must include head weights."""
     model = _make_classifier_model()
-    optimizer = torch.optim.Adam(model.parameters())
+    self._unfreeze_all(model)
+    optimizer = torch.optim.Adam([p for p in model.parameters() if p.requires_grad])
 
     # Write known values into the classifier head
     head_w = torch.randn_like(model.head.weight)
@@ -125,7 +131,7 @@ class TestCheckpointDictLoraStripping:
 
     blob = serialize_lora_state(model)
 
-    # save_frozen=False is the CLI default; must still save non-LoRA weights.
+    # save_frozen=False (CLI default) must save trainable non-LoRA weights.
     d = checkpoint_dict(
         model,
         optimizer,
@@ -137,7 +143,11 @@ class TestCheckpointDictLoraStripping:
     )
 
     sd = d["model_state_dict"]
-    assert len(sd) > 0, "model_state_dict must not be empty when LoRA blob is present"
+    assert len(sd) > 0, "model_state_dict must not be empty when head is trainable"
+
+    # LoRA keys must be absent (they live in the blob).
+    lora_keys = [k for k in sd if "lora_" in k]
+    assert lora_keys == [], f"LoRA keys leaked into model_state_dict: {lora_keys}"
 
     head_w_key = "base_model.model.head.weight"
     head_b_key = "base_model.model.head.bias"
@@ -146,9 +156,53 @@ class TestCheckpointDictLoraStripping:
     assert torch.equal(sd[head_w_key], head_w)
     assert torch.equal(sd[head_b_key], head_b)
 
+  def test_frozen_non_lora_weights_excluded_when_blob_present(self):
+    """With LoRA only (all non-LoRA frozen by PEFT), save_frozen=False → empty."""
+    model = _make_classifier_model()
+    # Do NOT unfreeze — PEFT has frozen all non-LoRA params.
+    optimizer = torch.optim.Adam([p for p in model.parameters() if p.requires_grad])
+
+    blob = serialize_lora_state(model)
+    d = checkpoint_dict(
+        model,
+        optimizer,
+        scheduler=None,
+        epoch=0,
+        states_to_save=set(),
+        save_frozen=False,
+        lora_state_blob=blob,
+    )
+    sd = d["model_state_dict"]
+    non_lora = [k for k in sd if "lora_" not in k]
+    assert non_lora == [], (
+        f"Frozen non-LoRA weights leaked into checkpoint: {non_lora}")
+    assert d["lora_state_blob"] == blob
+
+  def test_frozen_non_lora_weights_saved_when_save_frozen_true(self):
+    """save_frozen=True forces ALL non-LoRA weights into the checkpoint."""
+    model = _make_classifier_model()
+    # Do NOT unfreeze — PEFT has frozen all non-LoRA params.
+    optimizer = torch.optim.Adam([p for p in model.parameters() if p.requires_grad])
+
+    blob = serialize_lora_state(model)
+    d = checkpoint_dict(
+        model,
+        optimizer,
+        scheduler=None,
+        epoch=0,
+        states_to_save=set(),
+        save_frozen=True,
+        lora_state_blob=blob,
+    )
+    sd = d["model_state_dict"]
+    full_non_lora = {k: v for k, v in model.state_dict().items() if "lora_" not in k}
+    assert len(sd) == len(full_non_lora)
+    assert d["lora_state_blob"] == blob
+
   def test_lora_keys_stripped_when_blob_present(self):
     model = _make_linear_model()
-    optimizer = torch.optim.Adam(model.parameters())
+    self._unfreeze_all(model)
+    optimizer = torch.optim.Adam([p for p in model.parameters() if p.requires_grad])
     blob = b"fake-blob"
 
     d = checkpoint_dict(
@@ -189,7 +243,10 @@ class TestResumeCheckpointWithLoRA:
     from scdiag.checkpointing import resume_checkpoint
 
     model = _make_classifier_model()
-    optimizer = torch.optim.Adam(model.parameters())
+    # Unfreeze classifier head (simulates --freeze matching the head).
+    for p in model.parameters():
+      p.requires_grad = True
+    optimizer = torch.optim.Adam([p for p in model.parameters() if p.requires_grad])
 
     # Set known values in the classifier head
     head_w = torch.randn_like(model.head.weight)
@@ -385,3 +442,233 @@ class TestFreezeWithLoRA:
         assert p.requires_grad, f"LoRA param {name} should be trainable"
       else:
         assert not p.requires_grad, (f"Param {name} should be frozen")
+
+
+class TestCheckpointDictFreezeCombinations:
+  """Verify checkpoint_dict saves the right weights for every --lora/--freeze combo.
+
+  The goal: checkpoints should never contain frozen backbone weights when
+  ``save_frozen=False`` (the default), regardless of whether LoRA is enabled.
+  """
+
+  def _count_non_lora_keys(self, sd):
+    """Return the number of keys in *sd* that are NOT LoRA adapter keys."""
+    return sum(1 for k in sd if "lora_" not in k)
+
+  def _count_trainable_non_lora_keys(self, model):
+    """Count state-dict keys that are both trainable and non-LoRA."""
+    trainable = {n for n, p in model.named_parameters() if p.requires_grad}
+    return sum(1 for k in model.state_dict() if k in trainable and "lora_" not in k)
+
+  # ------------------------------------------------------------------ #
+  #  Case 1: no --lora, no --freeze (everything trainable)
+  # ------------------------------------------------------------------ #
+  def test_no_lora_no_freeze_save_frozen_false(self):
+    """Plain model, save_frozen=False → all params saved (all are trainable)."""
+    model = _TinyModel()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+    sd = checkpoint_dict(
+        model,
+        optimizer,
+        scheduler=None,
+        epoch=0,
+        states_to_save={"opt", "sched"},
+        save_frozen=False,
+    )
+    ckpt_sd = sd["model_state_dict"]
+    assert len(ckpt_sd) == len(model.state_dict())
+    assert self._count_non_lora_keys(ckpt_sd) == len(model.state_dict())
+
+  def test_no_lora_no_freeze_save_frozen_true(self):
+    """Plain model, save_frozen=True → all params saved."""
+    model = _TinyModel()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+    sd = checkpoint_dict(
+        model,
+        optimizer,
+        scheduler=None,
+        epoch=0,
+        states_to_save={"opt", "sched"},
+        save_frozen=True,
+    )
+    assert len(sd["model_state_dict"]) == len(model.state_dict())
+
+  # ------------------------------------------------------------------ #
+  #  Case 2: no --lora, --freeze (backbone frozen, head trainable)
+  # ------------------------------------------------------------------ #
+  def test_no_lora_with_freeze_save_frozen_false(self):
+    """Freeze backbone, save_frozen=False → only head weights saved."""
+    model = _TinyModel()
+    freeze_model(model, ("fc",))
+    optimizer = torch.optim.SGD([p for p in model.parameters() if p.requires_grad],
+                                lr=0.01)
+    sd = checkpoint_dict(
+        model,
+        optimizer,
+        scheduler=None,
+        epoch=0,
+        states_to_save={"opt", "sched"},
+        save_frozen=False,
+    )
+    ckpt_sd = sd["model_state_dict"]
+    expected = self._count_trainable_non_lora_keys(model)
+    assert len(ckpt_sd) == expected
+    # Head weights should be present
+    assert "fc.weight" in ckpt_sd
+    assert "fc.bias" in ckpt_sd
+
+  def test_no_lora_with_freeze_save_frozen_true(self):
+    """Freeze backbone, save_frozen=True → ALL weights saved."""
+    model = _TinyModel()
+    freeze_model(model, ("fc",))
+    optimizer = torch.optim.SGD([p for p in model.parameters() if p.requires_grad],
+                                lr=0.01)
+    sd = checkpoint_dict(
+        model,
+        optimizer,
+        scheduler=None,
+        epoch=0,
+        states_to_save={"opt", "sched"},
+        save_frozen=True,
+    )
+    assert len(sd["model_state_dict"]) == len(model.state_dict())
+
+  # ------------------------------------------------------------------ #
+  #  Case 3: --lora, no --freeze (only LoRA adapters trainable)
+  # ------------------------------------------------------------------ #
+  def test_lora_no_freeze_save_frozen_false(self):
+    """LoRA without --freeze, save_frozen=False → no non-lora weights saved.
+
+    Base-model weights are frozen and will be reloaded from the original
+    source on resume; the LoRA blob carries the adapters.  The checkpoint
+    model_state_dict should be empty after stripping lora_ keys.
+    """
+    model = _TinyModel()
+    wrapped = apply_lora(model, r=4, alpha=8, target_modules=["fc"])
+    blob = serialize_lora_state(wrapped)
+    optimizer = torch.optim.SGD([p for p in wrapped.parameters() if p.requires_grad],
+                                lr=0.01)
+    sd = checkpoint_dict(
+        wrapped,
+        optimizer,
+        scheduler=None,
+        epoch=0,
+        states_to_save={"opt", "sched"},
+        save_frozen=False,
+        lora_state_blob=blob,
+    )
+    ckpt_sd = sd["model_state_dict"]
+    # No non-LoRA keys should remain
+    assert self._count_non_lora_keys(ckpt_sd) == 0
+    # But the blob should be present
+    assert sd["lora_state_blob"] == blob
+
+  def test_lora_no_freeze_save_frozen_true(self):
+    """LoRA without --freeze, save_frozen=True → full base weights saved."""
+    model = _TinyModel()
+    wrapped = apply_lora(model, r=4, alpha=8, target_modules=["fc"])
+    blob = serialize_lora_state(wrapped)
+    optimizer = torch.optim.SGD([p for p in wrapped.parameters() if p.requires_grad],
+                                lr=0.01)
+    sd = checkpoint_dict(
+        wrapped,
+        optimizer,
+        scheduler=None,
+        epoch=0,
+        states_to_save={"opt", "sched"},
+        save_frozen=True,
+        lora_state_blob=blob,
+    )
+    ckpt_sd = sd["model_state_dict"]
+    # All non-lora keys from the full state dict should be present
+    full_sd = wrapped.state_dict()
+    full_non_lora = {k: v for k, v in full_sd.items() if "lora_" not in k}
+    assert len(ckpt_sd) == len(full_non_lora)
+    assert sd["lora_state_blob"] == blob
+
+  # ------------------------------------------------------------------ #
+  #  Case 4: --lora + --freeze (LoRA adapters + head trainable)
+  # ------------------------------------------------------------------ #
+  def test_lora_with_freeze_save_frozen_false(self):
+    """LoRA + freeze, save_frozen=False → only head weights saved (no backbone).
+
+    This is the case that produced 1.4 GB checkpoints before the fix.
+    """
+    model = _TinyModel()
+    wrapped = apply_lora(model, r=4, alpha=8, target_modules=["fc"])
+    # Simulate --freeze: thaw lora params + head-like params
+    for p in wrapped.parameters():
+      p.requires_grad = False
+    for name, p in wrapped.named_parameters():
+      if "lora_" in name or "fc" in name:
+        p.requires_grad = True
+
+    blob = serialize_lora_state(wrapped)
+    optimizer = torch.optim.SGD([p for p in wrapped.parameters() if p.requires_grad],
+                                lr=0.01)
+    sd = checkpoint_dict(
+        wrapped,
+        optimizer,
+        scheduler=None,
+        epoch=0,
+        states_to_save={"opt", "sched"},
+        save_frozen=False,
+        lora_state_blob=blob,
+    )
+    ckpt_sd = sd["model_state_dict"]
+    expected = self._count_trainable_non_lora_keys(wrapped)
+    assert len(ckpt_sd) == expected
+    # fc weights should be present (trainable non-lora)
+    fc_keys = [k for k in ckpt_sd if "fc" in k and "lora_" not in k]
+    assert len(fc_keys) > 0, "Head weights missing from checkpoint"
+    assert sd["lora_state_blob"] == blob
+
+  def test_lora_with_freeze_save_frozen_true(self):
+    """LoRA + freeze, save_frozen=True → all non-lora weights saved."""
+    model = _TinyModel()
+    wrapped = apply_lora(model, r=4, alpha=8, target_modules=["fc"])
+    for name, p in wrapped.named_parameters():
+      if "lora_" not in name:
+        p.requires_grad = False
+
+    blob = serialize_lora_state(wrapped)
+    optimizer = torch.optim.SGD([p for p in wrapped.parameters() if p.requires_grad],
+                                lr=0.01)
+    sd = checkpoint_dict(
+        wrapped,
+        optimizer,
+        scheduler=None,
+        epoch=0,
+        states_to_save={"opt", "sched"},
+        save_frozen=True,
+        lora_state_blob=blob,
+    )
+    ckpt_sd = sd["model_state_dict"]
+    full_sd = wrapped.state_dict()
+    full_non_lora = {k: v for k, v in full_sd.items() if "lora_" not in k}
+    assert len(ckpt_sd) == len(full_non_lora)
+    assert sd["lora_state_blob"] == blob
+
+  # ------------------------------------------------------------------ #
+  #  Sanity: lora_ keys never appear in model_state_dict
+  # ------------------------------------------------------------------ #
+  def test_lora_keys_never_in_model_state_dict(self):
+    """lora_ keys must never leak into model_state_dict."""
+    model = _TinyModel()
+    wrapped = apply_lora(model, r=4, alpha=8, target_modules=["fc"])
+    blob = serialize_lora_state(wrapped)
+    optimizer = torch.optim.SGD([p for p in wrapped.parameters() if p.requires_grad],
+                                lr=0.01)
+    for save_frozen in (True, False):
+      sd = checkpoint_dict(
+          wrapped,
+          optimizer,
+          scheduler=None,
+          epoch=0,
+          states_to_save={"opt", "sched"},
+          save_frozen=save_frozen,
+          lora_state_blob=blob,
+      )
+      lora_keys = [k for k in sd["model_state_dict"] if "lora_" in k]
+      assert lora_keys == [], (
+          f"LoRA keys leaked into model_state_dict with save_frozen={save_frozen}")
