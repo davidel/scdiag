@@ -138,9 +138,11 @@ scdiag-train --model cls_model_wrapper:google/vit-base-patch16-224 \
 | `--class_multipliers` | `""` | Comma-separated `NAME=VALUE` pairs overriding per-class clinical severity multipliers. `NAME` is a label string or integer index; `VALUE` is a float. Unspecified classes default to `1.0`. Example: `"melanoma=3.0,melanocytic_Nevi=1.0"` |
 | `--grad_accum_steps` | `1` | Gradient accumulation steps |
 | `--amp_dtype` | `None` | Mixed precision: `float16` or `bfloat16` |
+| `--lr_group` | `None` | Per-parameter-group learning rates (repeatable). Format: `"REGEX=LR"`. Regexes matched against `named_parameters()`; first match wins. Unmatched trainable params use `--lr`. Example: `"backbone.*=1e-5" "classifier.*=1e-3"` |
 | `--checkpoint` | `scdiag` | Checkpoint base path (`_latest.pt` / `_best.pt` appended) |
 | `--log_every` | `20` | Log every N steps |
 | `--grad_monitor` | `-1` | Log gradient statistics every N steps; `-1` disables. See [Gradient Monitor](#gradient-monitor) for column meanings. |
+| `--grad_clip` | `1.0` | Maximum gradient norm for clipping. `0` disables clipping. |
 | `--save_every` | `500` | Save checkpoint every N steps |
 | `--num_workers` | `2` | DataLoader worker processes |
 | `--log_level` | `INFO` | Logging level |
@@ -322,7 +324,8 @@ scdiag-train --model convvit \
 | `--checkpoint` | (required) | Checkpoint path prefix (saves `_latest.pt` and `_best.pt`). |
 | `--log_level` | `INFO` | Minimum logging level. |
 | `--grad_monitor` | `-1` | Log gradient statistics every N steps; `-1` disables. See [Gradient Monitor](#gradient-monitor) for column meanings. |
-| `--grad_clip` | `1.0` | Maximum gradient norm for clipping. |
+| `--grad_clip` | `1.0` | Maximum gradient norm for clipping. `0` disables clipping. |
+| `--lr_group` | `None` | Per-parameter-group learning rates (repeatable). Format: `"REGEX=LR"`. Regexes matched against `named_parameters()`; first match wins. Unmatched trainable params use `--lr`. Example: `"backbone.*=1e-5" "classifier.*=1e-3"` |
 | `--vis_every` | `0` | Log reconstruction visualisation to TensorBoard every N steps. `0` disables visualisation logging. |
 | `--model_arg` | `{}` | Override model configuration (repeatable). Example: `--model_arg depth=6 num_heads=8` |
 | `--proc_arg` | `{}` | Override processor configuration (repeatable). |
