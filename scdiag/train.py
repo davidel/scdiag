@@ -438,6 +438,12 @@ def parse_args(argv=None):
       "float16 requires GradScaler; bfloat16 is recommended for "
       "Ampere+ GPUs.",
   )
+  parser.add_argument(
+      "--grad_clip",
+      type=float,
+      default=1.0,
+      help="Maximum gradient norm for clipping.  0 disables clipping.",
+  )
 
   parser.add_argument(
       "--classifier",
@@ -914,13 +920,17 @@ def train_one_epoch(
         # gradient magnitudes, not the scaled values.
         if monitor is not None:
           monitor.step(global_step)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        if args.grad_clip > 0:
+          torch.nn.utils.clip_grad_norm_(model.parameters(),
+                                         max_norm=args.grad_clip)
         scaler.step(optimizer)
         scaler.update()
       else:
         if monitor is not None:
           monitor.step(global_step)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        if args.grad_clip > 0:
+          torch.nn.utils.clip_grad_norm_(model.parameters(),
+                                         max_norm=args.grad_clip)
         optimizer.step()
       optimizer.zero_grad(set_to_none=True)
       global_step += 1
