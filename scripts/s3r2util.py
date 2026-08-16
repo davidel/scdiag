@@ -31,6 +31,12 @@ def fatal(msg, code=1):
   sys.exit(code)
 
 
+def log(msg, quiet=False):
+  """Print a message unless --quiet is active."""
+  if not quiet:
+    print(msg)
+
+
 def create_s3_client():
   account_id = (os.getenv("CLOUDFLARE_ACCOUNT_ID") or "").strip()
   access_key_id = (os.getenv("R2_ACCESS_KEY_ID") or "").strip()
@@ -163,10 +169,11 @@ def handle_ls(args, s3_client):
         found = True
         for obj in page["Contents"]:
           local_time = obj["LastModified"].astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
-          print(f"{local_time}  {format_size(obj['Size']):>14s}  {obj['Key']}")
+          log(f"{local_time}  {format_size(obj['Size']):>14s}  {obj['Key']}",
+              quiet=args.quiet)
 
     if not found:
-      print(f"No objects found in r2://{bucket}/{prefix}")
+      log(f"No objects found in r2://{bucket}/{prefix}", quiet=args.quiet)
 
   except (ClientError, BotoCoreError) as e:
     fatal(f"ls failed: {e}")
@@ -205,10 +212,14 @@ def handle_cp(args, s3_client):
           fatal(f"Destination directory does not exist: {local_dir}")
 
         total_size = sum(size for _, _, size in matches)
-        print(f"Wildcard downloading {len(matches)} object(s) -> {local_dir}/")
+        log(f"Wildcard downloading {len(matches)} object(s) -> {local_dir}/",
+            quiet=args.quiet)
         if args.progress:
-          with tqdm(total=total_size, unit="B", unit_scale=True,
-                    desc="Download") as pbar:
+          with tqdm(total=total_size,
+                    unit="B",
+                    unit_scale=True,
+                    desc="Download",
+                    disable=args.quiet) as pbar:
             for _, obj_key, _ in matches:
               local_path = os.path.join(local_dir, os.path.basename(obj_key))
               s3_client.download_file(src_bucket,
@@ -219,25 +230,30 @@ def handle_cp(args, s3_client):
           for _, obj_key, _ in matches:
             local_path = os.path.join(local_dir, os.path.basename(obj_key))
             s3_client.download_file(src_bucket, obj_key, local_path)
-        print(f"Downloaded {len(matches)} object(s).")
+        log(f"Downloaded {len(matches)} object(s).", quiet=args.quiet)
 
       else:
         # R2 wildcard -> R2 directory
-        print(f"Wildcard copying {len(matches)} object(s) -> "
-              f"r2://{dst_bucket}/{dst_prefix}")
+        log(
+            f"Wildcard copying {len(matches)} object(s) -> "
+            f"r2://{dst_bucket}/{dst_prefix}",
+            quiet=args.quiet)
         if args.progress:
-          with tqdm(total=len(matches), unit="file", desc="Copy") as pbar:
+          total_size = sum(size for _, _, size in matches)
+          with tqdm(total=total_size,
+                    unit="B",
+                    unit_scale=True,
+                    desc="Copy",
+                    disable=args.quiet) as pbar:
             for _, obj_key, _ in matches:
               dest_key = compute_dest_key(obj_key, src_prefix, dst_prefix)
-              s3_client.copy(
-                  {
-                      "Bucket": src_bucket,
-                      "Key": obj_key
-                  },
-                  dst_bucket,
-                  dest_key,
-              )
-              pbar.update(1)
+              s3_client.copy({
+                  "Bucket": src_bucket,
+                  "Key": obj_key
+              },
+                             dst_bucket,
+                             dest_key,
+                             Callback=pbar.update)
         else:
           for _, obj_key, _ in matches:
             dest_key = compute_dest_key(obj_key, src_prefix, dst_prefix)
@@ -249,7 +265,7 @@ def handle_cp(args, s3_client):
                 dst_bucket,
                 dest_key,
             )
-        print(f"Copied {len(matches)} object(s).")
+        log(f"Copied {len(matches)} object(s).", quiet=args.quiet)
       continue
 
     # --- Single source ------------------------------------------------
@@ -274,43 +290,56 @@ def handle_cp(args, s3_client):
 
     try:
       if not src_bucket and dst_bucket:
-        print(f"Uploading {source} -> r2://{dst_bucket}/{dst_key}")
+        log(f"Uploading {source} -> r2://{dst_bucket}/{dst_key}", quiet=args.quiet)
         if args.progress:
           file_size = os.path.getsize(source)
-          with tqdm(total=file_size, unit="B", unit_scale=True, desc="Upload") as pbar:
+          with tqdm(total=file_size,
+                    unit="B",
+                    unit_scale=True,
+                    desc="Upload",
+                    disable=args.quiet) as pbar:
             s3_client.upload_file(source, dst_bucket, dst_key, Callback=pbar.update)
         else:
           s3_client.upload_file(source, dst_bucket, dst_key)
 
       elif src_bucket and not dst_bucket:
-        print(f"Downloading r2://{src_bucket}/{src_key} -> {dest_path}")
+        log(f"Downloading r2://{src_bucket}/{src_key} -> {dest_path}", quiet=args.quiet)
         local_dir = os.path.dirname(dest_path)
         if local_dir:
           os.makedirs(local_dir, exist_ok=True)
         if args.progress:
           head = s3_client.head_object(Bucket=src_bucket, Key=src_key)
           total = head["ContentLength"]
-          with tqdm(total=total, unit="B", unit_scale=True, desc="Download") as pbar:
+          with tqdm(total=total,
+                    unit="B",
+                    unit_scale=True,
+                    desc="Download",
+                    disable=args.quiet) as pbar:
             s3_client.download_file(src_bucket,
                                     src_key,
                                     dest_path,
                                     Callback=pbar.update)
         else:
           s3_client.download_file(src_bucket, src_key, dest_path)
-        print("Download complete.")
+        log("Download complete.", quiet=args.quiet)
 
       elif src_bucket and dst_bucket:
-        print(f"Copying r2://{src_bucket}/{src_key} -> "
-              f"r2://{dst_bucket}/{dst_key}")
+        log(f"Copying r2://{src_bucket}/{src_key} -> "
+            f"r2://{dst_bucket}/{dst_key}",
+            quiet=args.quiet)
         copy_source = {"Bucket": src_bucket, "Key": src_key}
         if args.progress:
           head = s3_client.head_object(Bucket=src_bucket, Key=src_key)
           total = head["ContentLength"]
-          with tqdm(total=total, unit="B", unit_scale=True, desc="Copy") as pbar:
+          with tqdm(total=total,
+                    unit="B",
+                    unit_scale=True,
+                    desc="Copy",
+                    disable=args.quiet) as pbar:
             s3_client.copy(copy_source, dst_bucket, dst_key, Callback=pbar.update)
         else:
           s3_client.copy(copy_source, dst_bucket, dst_key)
-        print("Remote copy complete.")
+        log("Remote copy complete.", quiet=args.quiet)
 
       else:
         fatal("Both source and destination cannot be local files.")
@@ -335,7 +364,7 @@ def handle_rm(args, s3_client):
         for obj in page.get("Contents", []):
           total += 1
           if args.dry_run:
-            print(f"  would delete: {obj['Key']}")
+            log(f"  would delete: {obj['Key']}", quiet=args.quiet)
           else:
             batch.append(obj["Key"])
             if len(batch) >= 1000:
@@ -343,7 +372,7 @@ def handle_rm(args, s3_client):
               batch = []
 
       if args.dry_run:
-        print(f"Would delete {total} object(s).")
+        log(f"Would delete {total} object(s).", quiet=args.quiet)
         return
 
       # Flush remaining batch.
@@ -351,16 +380,16 @@ def handle_rm(args, s3_client):
         deleted += batch_delete(s3_client, bucket, batch)
 
       if total == 0:
-        print(f"No objects found under r2://{bucket}/{key}")
+        log(f"No objects found under r2://{bucket}/{key}", quiet=args.quiet)
       else:
-        print(f"Deleted {deleted}/{total} object(s).")
+        log(f"Deleted {deleted}/{total} object(s).", quiet=args.quiet)
     except (ClientError, BotoCoreError) as e:
       fatal(f"rm failed: {e}")
   else:
     try:
-      print(f"Deleting r2://{bucket}/{key}")
+      log(f"Deleting r2://{bucket}/{key}", quiet=args.quiet)
       s3_client.delete_object(Bucket=bucket, Key=key)
-      print("Delete complete.")
+      log("Delete complete.", quiet=args.quiet)
     except (ClientError, BotoCoreError) as e:
       fatal(f"rm failed: {e}")
 
@@ -380,7 +409,7 @@ def handle_du(args, s3_client):
   if has_wildcard(path):
     matches = expand_wildcard(s3_client, path)
     total = sum(size for _, _, size in matches)
-    print(f"{format_size(total)}\t{len(matches)} object(s)\t{path}")
+    log(f"{format_size(total)}\t{len(matches)} object(s)\t{path}", quiet=args.quiet)
   else:
     # Plain prefix listing — accumulate sizes as we paginate.
     try:
@@ -391,7 +420,8 @@ def handle_du(args, s3_client):
         for obj in page.get("Contents", []):
           total += obj["Size"]
           count += 1
-      print(f"{format_size(total)}\t{count} object(s)\tr2://{bucket}/{prefix}")
+      log(f"{format_size(total)}\t{count} object(s)\tr2://{bucket}/{prefix}",
+          quiet=args.quiet)
     except (ClientError, BotoCoreError) as e:
       fatal(f"du failed: {e}")
 
@@ -518,30 +548,43 @@ def sync_local_to_r2(s3_client, local_dir, r2_bucket, r2_prefix, args):
 
   if args.dry_run:
     for local_path, r2_key, size in to_upload:
-      print(
-          f"  upload: {local_path} -> r2://{r2_bucket}/{r2_key}  ({format_size(size)})")
+      log(f"  upload: {local_path} -> r2://{r2_bucket}/{r2_key}  ({format_size(size)})",
+          quiet=args.quiet)
     for r2_key in to_delete:
-      print(f"  delete: r2://{r2_bucket}/{r2_key}")
-    print(f"Would upload {len(to_upload)}, delete {len(to_delete)}, "
-          f"skip {len(remote) - len(to_upload) - len(to_delete)}.")
+      log(f"  delete: r2://{r2_bucket}/{r2_key}", quiet=args.quiet)
+    log(
+        f"Would upload {len(to_upload)}, delete {len(to_delete)}, "
+        f"skip {len(remote) - len(to_upload) - len(to_delete)}.",
+        quiet=args.quiet)
     return
 
   # Upload.
-  for local_path, r2_key, size in to_upload:
-    print(f"Uploading {local_path} -> r2://{r2_bucket}/{r2_key}")
-    if args.progress:
-      with tqdm(total=size, unit="B", unit_scale=True, desc="Upload") as pbar:
+  total_size = sum(size for _, _, size in to_upload)
+  log(
+      f"Syncing {len(to_upload)} file(s) ({format_size(total_size)}) -> "
+      f"r2://{r2_bucket}/{r2_prefix}",
+      quiet=args.quiet)
+  if args.progress:
+    with tqdm(total=total_size,
+              unit="B",
+              unit_scale=True,
+              desc="Upload",
+              disable=args.quiet) as pbar:
+      for local_path, r2_key, size in to_upload:
         s3_client.upload_file(local_path, r2_bucket, r2_key, Callback=pbar.update)
-    else:
+  else:
+    for local_path, r2_key, size in to_upload:
       s3_client.upload_file(local_path, r2_bucket, r2_key)
 
   # Delete.
   if to_delete:
-    print(f"Deleting {len(to_delete)} object(s) ...")
+    log(f"Deleting {len(to_delete)} object(s) ...", quiet=args.quiet)
     batch_delete(s3_client, r2_bucket, to_delete)
 
-  print(f"Sync complete: {len(to_upload)} uploaded, {len(to_delete)} deleted, "
-        f"{len(remote) - len(to_upload)} unchanged.")
+  log(
+      f"Sync complete: {len(to_upload)} uploaded, {len(to_delete)} deleted, "
+      f"{len(remote) - len(to_upload)} unchanged.",
+      quiet=args.quiet)
 
 
 def sync_r2_to_local(s3_client, r2_bucket, r2_prefix, local_dir, args):
@@ -594,39 +637,58 @@ def sync_r2_to_local(s3_client, r2_bucket, r2_prefix, local_dir, args):
 
   if args.dry_run:
     for r2_key, rel_path, size in to_download:
-      print(
-          f"  download: r2://{r2_bucket}/{r2_key} -> {os.path.join(local_dir, rel_path)}  ({format_size(size)})"
-      )
+      log(f"  download: r2://{r2_bucket}/{r2_key} -> {os.path.join(local_dir, rel_path)}  ({format_size(size)})",
+          quiet=args.quiet)
     for rel_path in to_delete:
-      print(f"  delete: {os.path.join(local_dir, rel_path)}")
-    print(f"Would download {len(to_download)}, delete {len(to_delete)}, "
-          f"skip {len(remote) - len(to_download)}.")
+      log(f"  delete: {os.path.join(local_dir, rel_path)}", quiet=args.quiet)
+    log(
+        f"Would download {len(to_download)}, delete {len(to_delete)}, "
+        f"skip {len(remote) - len(to_download)}.",
+        quiet=args.quiet)
     return
 
   # Download.
-  for r2_key, rel_path, size in to_download:
-    local_path = os.path.join(local_dir, rel_path)
-    local_dir_path = os.path.dirname(local_path)
-    if local_dir_path:
-      os.makedirs(local_dir_path, exist_ok=True)
-    print(f"Downloading r2://{r2_bucket}/{r2_key} -> {local_path}")
-    if args.progress:
-      with tqdm(total=size, unit="B", unit_scale=True, desc="Download") as pbar:
+  total_size = sum(size for _, _, size in to_download)
+  log(
+      f"Syncing {len(to_download)} file(s) ({format_size(total_size)}) <- "
+      f"r2://{r2_bucket}/{r2_prefix}",
+      quiet=args.quiet)
+  if args.progress:
+    with tqdm(total=total_size,
+              unit="B",
+              unit_scale=True,
+              desc="Download",
+              disable=args.quiet) as pbar:
+      for r2_key, rel_path, size in to_download:
+        local_path = os.path.join(local_dir, rel_path)
+        local_dir_path = os.path.dirname(local_path)
+        if local_dir_path:
+          os.makedirs(local_dir_path, exist_ok=True)
         s3_client.download_file(r2_bucket, r2_key, local_path, Callback=pbar.update)
-    else:
+        # Sync local mtime to match remote so next sync doesn't re-download.
+        remote_mtime = remote[r2_key][1]
+        os.utime(local_path, (remote_mtime, remote_mtime))
+  else:
+    for r2_key, rel_path, size in to_download:
+      local_path = os.path.join(local_dir, rel_path)
+      local_dir_path = os.path.dirname(local_path)
+      if local_dir_path:
+        os.makedirs(local_dir_path, exist_ok=True)
       s3_client.download_file(r2_bucket, r2_key, local_path)
-    # Sync local mtime to match remote so next sync doesn't re-download.
-    remote_mtime = remote[r2_key][1]
-    os.utime(local_path, (remote_mtime, remote_mtime))
+      # Sync local mtime to match remote so next sync doesn't re-download.
+      remote_mtime = remote[r2_key][1]
+      os.utime(local_path, (remote_mtime, remote_mtime))
 
   # Delete.
   for rel_path in to_delete:
     local_path = os.path.join(local_dir, rel_path)
-    print(f"Deleting {local_path}")
+    log(f"Deleting {local_path}", quiet=args.quiet)
     os.remove(local_path)
 
-  print(f"Sync complete: {len(to_download)} downloaded, {len(to_delete)} deleted, "
-        f"{len(remote) - len(to_download)} unchanged.")
+  log(
+      f"Sync complete: {len(to_download)} downloaded, {len(to_delete)} deleted, "
+      f"{len(remote) - len(to_download)} unchanged.",
+      quiet=args.quiet)
 
 
 def handle_presign(args, s3_client):
@@ -658,7 +720,7 @@ def handle_mb(args, s3_client):
         Bucket=bucket_name,
         CreateBucketConfiguration={"LocationConstraint": "auto"},
     )
-    print(f"Bucket created: r2://{bucket_name}")
+    log(f"Bucket created: r2://{bucket_name}", quiet=args.quiet)
   except (ClientError, BotoCoreError) as e:
     if hasattr(e, 'response') and e.response.get(
         "Error", {}).get("Code") == "BucketAlreadyExists":
@@ -692,10 +754,11 @@ def handle_rb(args, s3_client):
             batch = []
       if batch:
         deleted += batch_delete(s3_client, bucket_name, batch)
-      print(f"Deleted {deleted}/{total} object(s) from {bucket_name} ...")
+      log(f"Deleted {deleted}/{total} object(s) from {bucket_name} ...",
+          quiet=args.quiet)
 
     s3_client.delete_bucket(Bucket=bucket_name)
-    print(f"Bucket deleted: r2://{bucket_name}")
+    log(f"Bucket deleted: r2://{bucket_name}", quiet=args.quiet)
   except (ClientError, BotoCoreError) as e:
     if hasattr(e, 'response') and e.response.get("Error",
                                                  {}).get("Code") == "NoSuchBucket":
@@ -770,8 +833,10 @@ def handle_find(args, s3_client):
         if args.name and not fnmatch.fnmatch(os.path.basename(key), args.name):
           continue
 
-        print(f"{format_date(obj['LastModified'])}\t{format_size(size)}\t"
-              f"r2://{bucket}/{key}")
+        log(
+            f"{format_date(obj['LastModified'])}\t{format_size(size)}\t"
+            f"r2://{bucket}/{key}",
+            quiet=args.quiet)
         matches += 1
         total_size += size
   except (ClientError, BotoCoreError) as e:
@@ -806,22 +871,25 @@ def handle_mv(args, s3_client):
       matches = expand_wildcard(s3_client, source)
       _, dst_prefix = parse_r2_path(destination)
 
-      print(f"Wildcard moving {len(matches)} object(s):")
+      log(f"Wildcard moving {len(matches)} object(s):", quiet=args.quiet)
       try:
+        total_size = sum(size for _, _, size in matches)
         if args.progress:
-          with tqdm(total=len(matches), unit="file", desc="Move") as pbar:
+          with tqdm(total=total_size,
+                    unit="B",
+                    unit_scale=True,
+                    desc="Move",
+                    disable=args.quiet) as pbar:
             for _, obj_key, _ in matches:
               dest_key = compute_dest_key(obj_key, src_prefix, dst_prefix)
-              s3_client.copy(
-                  {
-                      "Bucket": src_bucket,
-                      "Key": obj_key
-                  },
-                  dst_bucket,
-                  dest_key,
-              )
+              s3_client.copy({
+                  "Bucket": src_bucket,
+                  "Key": obj_key
+              },
+                             dst_bucket,
+                             dest_key,
+                             Callback=pbar.update)
               s3_client.delete_object(Bucket=src_bucket, Key=obj_key)
-              pbar.update(1)
         else:
           for _, obj_key, _ in matches:
             dest_key = compute_dest_key(obj_key, src_prefix, dst_prefix)
@@ -834,7 +902,7 @@ def handle_mv(args, s3_client):
                 dest_key,
             )
             s3_client.delete_object(Bucket=src_bucket, Key=obj_key)
-        print(f"Moved {len(matches)} object(s).")
+        log(f"Moved {len(matches)} object(s).", quiet=args.quiet)
       except (ClientError, BotoCoreError) as e:
         fatal(f"mv failed: {e}")
       continue
@@ -848,7 +916,8 @@ def handle_mv(args, s3_client):
     else:
       dest_key = dst_prefix
 
-    print(f"Moving r2://{src_bucket}/{src_key} -> r2://{dst_bucket}/{dest_key}")
+    log(f"Moving r2://{src_bucket}/{src_key} -> r2://{dst_bucket}/{dest_key}",
+        quiet=args.quiet)
     try:
       s3_client.copy(
           {
@@ -859,7 +928,7 @@ def handle_mv(args, s3_client):
           dest_key,
       )
       s3_client.delete_object(Bucket=src_bucket, Key=src_key)
-      print("Move complete.")
+      log("Move complete.", quiet=args.quiet)
     except (ClientError, BotoCoreError) as e:
       fatal(f"mv failed: {e}")
 
@@ -867,6 +936,10 @@ def handle_mv(args, s3_client):
 def main():
   parser = argparse.ArgumentParser(
       description="Cloudflare R2 CLI tool mimicking AWS S3 commands.")
+  parser.add_argument("-q",
+                      "--quiet",
+                      action="store_true",
+                      help="Suppress all output except errors")
   subparsers = parser.add_subparsers(dest="command",
                                      required=True,
                                      help="Sub-command to run")
