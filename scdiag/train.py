@@ -52,8 +52,6 @@ def parse_class_multipliers(s, num_labels, label2id):
 
     Returns a ``torch.Tensor`` of shape ``[num_labels]``.
     """
-  import torch
-
   m = torch.ones(num_labels)
   if not s or not s.strip():
     return m
@@ -748,7 +746,6 @@ def train_xgboost_on_backbone(args,
         num_labels: Number of output classes (forwarded to model loader).
         batch_size: Feature-extraction batch size.
     """
-  from scdiag.datasets.hf_proxy import HFDatasetProxy
   from scdiag.model_utils import (
       build_val_transform,
       collect_features,
@@ -921,16 +918,14 @@ def train_one_epoch(
         if monitor is not None:
           monitor.step(global_step)
         if args.grad_clip > 0:
-          torch.nn.utils.clip_grad_norm_(model.parameters(),
-                                         max_norm=args.grad_clip)
+          torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=args.grad_clip)
         scaler.step(optimizer)
         scaler.update()
       else:
         if monitor is not None:
           monitor.step(global_step)
         if args.grad_clip > 0:
-          torch.nn.utils.clip_grad_norm_(model.parameters(),
-                                         max_norm=args.grad_clip)
+          torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=args.grad_clip)
         optimizer.step()
       optimizer.zero_grad(set_to_none=True)
       global_step += 1

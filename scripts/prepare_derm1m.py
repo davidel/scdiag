@@ -67,8 +67,6 @@ def download_file(url, dest_path, token=None):
 
   # Move to expected location if different
   if Path(downloaded_path) != dest_path:
-    import shutil
-
     shutil.move(downloaded_path, dest_path)
 
   print(f"    Done  ({dest_path.stat().st_size / 1024**3:.2f} GB)")
