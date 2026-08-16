@@ -125,8 +125,6 @@ class DatasetEnsemble:
     return self._datasets[ds_idx][local_idx]
 
   def __getitem__(self, idx):
-    if not self._datasets:
-      fatal("No datasets loaded", RuntimeError)
     if idx < 0 or idx >= len(self):
       fatal(f"Index {idx} out of range for ensemble of length {len(self)}", IndexError)
     return self._get_item(idx)
