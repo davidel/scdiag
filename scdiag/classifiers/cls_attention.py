@@ -80,10 +80,10 @@ class Classifier(BaseClassifier):
     )
     self.head = nn.Linear(hidden_size, num_labels)
 
-  def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+  def forward(self, hidden_states):
     return self.head(self.extract_features(hidden_states))
 
-  def extract_features(self, hidden_states: torch.Tensor) -> torch.Tensor:
+  def extract_features(self, hidden_states):
     cls_out = hidden_states[:, self.cls_slice, :]
     spatial_out = hidden_states[:, self.spc_slice, :]
     if self.encoder is not None:
