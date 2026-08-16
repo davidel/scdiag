@@ -47,9 +47,9 @@ class Classifier(BaseClassifier):
         nn.Linear(hidden, num_labels),
     )
 
-  def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+  def forward(self, hidden_states):
     return self.head(self.extract_features(hidden_states))
 
-  def extract_features(self, hidden_states: torch.Tensor) -> torch.Tensor:
+  def extract_features(self, hidden_states):
     cls_tokens = hidden_states[:, self.cls_slice, :]  # (B, K, D)
     return cls_tokens.flatten(start_dim=1)  # (B, K*D)
