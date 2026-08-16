@@ -213,8 +213,8 @@ Each row reports one trainable parameter (or parameter tensor). Columns:
 | **g_norm** | `‖∇L‖` | `torch.norm(grad)` — L2 norm of the full gradient tensor for this parameter. | Compare across params. One param with g_norm 100× higher than others is a problem. |
 | **p_norm** | `‖W‖` | `torch.norm(param)` — L2 norm of the parameter tensor itself. | Gives scale context. A freshly initialized `nn.Linear(1024, 1024)` typically has p_norm ~18–55 depending on init. |
 | **g/p** | `‖∇L‖ / (‖W‖ + ε)` | g_norm divided by p_norm (with ε = 10⁻¹² to avoid division by zero). | The single most useful column. Tells you the **relative size of the update**. Healthy: < 0.1. Concerning: > 1.0 (update overshoots the parameter). Dangerous: > 5.0 (parameter is being thrown around randomly). |
-| **g_max** | `max|∇L|` | `grad.abs().max()` — largest absolute gradient value anywhere in the tensor. | Highlights individual neurons that are getting extreme gradients even when the overall norm looks reasonable. |
-| **sparse** | `% zero` | Fraction of gradient elements with `|grad| < 1e-7`. | High sparsity (> 50%) means most neurons in this layer aren't receiving gradient signal. Can indicate dead neurons or a learning rate that's too low. |
+| **g_max** | `max\|∇L\|` | `grad.abs().max()` — largest absolute gradient value anywhere in the tensor. | Highlights individual neurons that are getting extreme gradients even when the overall norm looks reasonable. |
+| **sparse** | `% zero` | Fraction of gradient elements with `\|grad\| < 1e-7`. | High sparsity (> 50%) means most neurons in this layer aren't receiving gradient signal. Can indicate dead neurons or a learning rate that's too low. |
 | **status** | | Anomaly detection flag (see below). | `OK` = healthy. Anything else deserves investigation. |
 
 #### Status flags
