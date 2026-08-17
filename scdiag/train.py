@@ -1248,10 +1248,10 @@ def main():
       for line in confusion_row_strings(v_cm, id2label=train_proxy.id2label):
         logging.info(f"  {line}")
       if v_per_class_f1:
-        logging.info("  F1 Scores:")
+        logging.info("F1 Scores:")
         for cls_name, f1_val in v_per_class_f1.items():
           writer.add_scalar(f"Epoch/F1_Val/{cls_name}", f1_val, epoch)
-          logging.info(f"    {cls_name}: F1={f1_val:.2f}%")
+          logging.info(f"  {cls_name}: F1={f1_val:.2f}%")
 
       if v_macro_f1 > best_macro_f1:
         best_macro_f1 = v_macro_f1
