@@ -11,30 +11,31 @@ import numpy as np
 import torch
 import torch.nn as nn
 from datasets import load_dataset
-from sklearn.metrics import f1_score, precision_recall_fscore_support
+from sklearn.metrics import confusion_matrix, f1_score, precision_recall_fscore_support
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import v2
 from torchvision.transforms.v2 import InterpolationMode
 
 from scdiag.checkpointing import (
-    checkpoint_dict,
-    create_model_report,
-    parse_state_flags,
-    restore_training_state,
-    resume_checkpoint,
-    serialize_lora_state,
+  checkpoint_dict,
+  create_model_report,
+  parse_state_flags,
+  restore_training_state,
+  resume_checkpoint,
+  serialize_lora_state,
 )
 from scdiag.cli_utils import KVPairAction
 from scdiag.datasets.hf_proxy import HFDatasetProxy
 from scdiag.grad_monitor import GradMonitor
 from scdiag.logging_utils import fatal, setup_logging
+from scdiag.metrics import confusion_row_strings
 from scdiag.model_utils import apply_lora, extract_lora_params, freeze_model
 from scdiag.models import load_model, load_processor
 from scdiag.optim_factory import (
-    build_param_groups,
-    create_optimizer,
-    create_scheduler,
+  build_param_groups,
+  create_optimizer,
+  create_scheduler,
 )
 from scdiag.script_utils import load_extern
 from scdiag.storage_utils import save_checkpoint
@@ -955,9 +956,10 @@ def evaluate_performance(model,
                          id2label=None):
   """Evaluate on a validation/test set.
 
-    Returns ``(eval_loss, top1_acc_pct, macro_f1, per_class_f1)`` where
+    Returns ``(eval_loss, top1_acc_pct, macro_f1, per_class_f1, cm)`` where
     *per_class_f1* is a dict ``{class_name: f1_score}`` (or ``{}`` if
-    *id2label* is not supplied).
+    *id2label* is not supplied) and *cm* is the confusion-matrix as a
+    2-D ``numpy.ndarray`` (rows = true labels, cols = predicted labels).
     """
   model.eval()
   eval_loss, correct_top1, total_samples = 0.0, 0, 0
@@ -997,7 +999,9 @@ def evaluate_performance(model,
       name = id2label.get(str(idx), id2label.get(idx, str(idx)))
       per_class_f1[name] = score * 100.0
 
-  return avg_loss, top1, macro_f1, per_class_f1
+  cm = confusion_matrix(all_labels, all_preds)
+
+  return avg_loss, top1, macro_f1, per_class_f1, cm
 
 
 def main():
@@ -1226,7 +1230,7 @@ def main():
       writer.add_scalar("Epoch/Loss_Train", train_loss, epoch)
       writer.add_scalar("Epoch/Accuracy_Train_Top1", train_t1, epoch)
 
-      v_loss, v_t1, v_macro_f1, v_per_class_f1 = evaluate_performance(
+      v_loss, v_t1, v_macro_f1, v_per_class_f1, v_cm = evaluate_performance(
           model,
           val_loader,
           criterion,
@@ -1240,6 +1244,9 @@ def main():
       logging.info(f"Epoch {epoch + 1} Results -> "
                    f"Val Loss: {v_loss:.4f} | Top1: {v_t1:.2f}%"
                    f" | Macro F1: {v_macro_f1:.2f}%")
+      logging.info("Confusion matrix:")
+      for line in confusion_row_strings(v_cm, id2label=train_proxy.id2label):
+        logging.info(f"  {line}")
       if v_per_class_f1:
         for cls_name, f1_val in v_per_class_f1.items():
           writer.add_scalar(f"Epoch/F1_Val/{cls_name}", f1_val, epoch)
