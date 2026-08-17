@@ -5,7 +5,6 @@ import gc
 import logging
 import os
 import re
-import time
 
 import datasets
 import numpy as np
@@ -28,7 +27,6 @@ from scdiag.checkpointing import (
 )
 from scdiag.cli_utils import KVPairAction
 from scdiag.datasets.hf_proxy import HFDatasetProxy
-from scdiag.gpu_utils import gpu_stats_str
 from scdiag.grad_monitor import GradMonitor
 from scdiag.logging_utils import fatal, setup_logging
 from scdiag.model_utils import apply_lora, extract_lora_params, freeze_model
@@ -37,10 +35,10 @@ from scdiag.optim_factory import (
     build_param_groups,
     create_optimizer,
     create_scheduler,
-    report_lr,
 )
 from scdiag.script_utils import load_extern
 from scdiag.storage_utils import save_checkpoint
+from scdiag.train_reporting import TrainReporting
 
 
 def parse_class_multipliers(s, num_labels, label2id):
@@ -871,15 +869,14 @@ def train_one_epoch(
     numbers).  The updated value is returned.
     """
   model.train()
-  total_loss, correct_top1, total_samples = 0.0, 0, 0
   total_batches = len(dataloader)
-  start_time = time.time()
-  last_log_time = time.time()
-  window_samples = 0
-  window_correct = 0
-  window_loss = 0.0
-  window_preds = []
-  window_labels = []
+  reporter = TrainReporting(
+      total_batches=total_batches,
+      log_every=args.log_every,
+      writer=writer,
+      device=device,
+      optimizer=optimizer,
+  )
 
   for batch_idx, (images, targets) in enumerate(dataloader):
     images, targets = images.to(device), targets.to(device)
@@ -933,75 +930,20 @@ def train_one_epoch(
     with torch.no_grad():
       orig_targets = (targets if not use_mixup else
                       (targets_a if lam >= 0.5 else targets_b))
-      correct_top1 += (logits.argmax(dim=1) == orig_targets).sum().item()
 
     batch_size = orig_targets.size(0)
-    total_loss += loss.item() * batch_size * args.grad_accum_steps
-    total_samples += batch_size
-    window_samples += batch_size
-    window_loss += loss.item() * batch_size * args.grad_accum_steps
-    window_correct += (logits.argmax(dim=1) == orig_targets).sum().item()
-    window_preds.extend(logits.argmax(dim=1).cpu().tolist())
-    window_labels.extend(orig_targets.cpu().tolist())
+    report_now = (batch_idx + 1) == total_batches
+    reporter.step(
+        batch_idx=batch_idx,
+        batch_size=batch_size,
+        loss_value=loss.item() * batch_size * args.grad_accum_steps,
+        logits=logits,
+        targets=orig_targets,
+        global_step=global_step,
+        report_now=report_now,
+    )
 
-    # Periodic step-level logging.
-    if (batch_idx + 1) % args.log_every == 0 or (batch_idx + 1) == total_batches:
-      elapsed = time.time() - last_log_time
-      throughput = window_samples / elapsed if elapsed > 0 else 0
-      w_loss = window_loss / window_samples if window_samples > 0 else 0.0
-      w_top1 = ((window_correct / window_samples) *
-                100.0 if window_samples > 0 else 0.0)
-      # Compute window macro F1.
-      w_macro_f1 = 0.0
-      if window_preds:
-        w_macro_f1 = (
-            f1_score(window_labels, window_preds, average="macro", zero_division=0) *
-            100.0)
-
-      avg_loss = total_loss / total_samples
-      top1 = (correct_top1 / total_samples) * 100.0
-      gpu = gpu_stats_str(device)
-      lr_str = report_lr(optimizer, writer=writer, step=global_step)
-      msg = (f"  [Step {batch_idx + 1}/{total_batches}]"
-             f" loss={w_loss:.4f} ({avg_loss:.4f})"
-             f" top1={w_top1:.2f}% ({top1:.2f}%)"
-             f" macro_f1={w_macro_f1:.2f}%"
-             f" {lr_str}"
-             f" img/s={throughput:.0f}")
-      logging.info(msg)
-      if gpu:
-        logging.info(f"  [Step {batch_idx + 1}/{total_batches}] {gpu}")
-      if writer is not None:
-        writer.add_scalar("Train/loss", w_loss, global_step)
-        writer.add_scalar("Train/top1", w_top1, global_step)
-        writer.add_scalar("Train/macro_f1", w_macro_f1, global_step)
-        writer.add_scalar("Train/loss_avg", avg_loss, global_step)
-        writer.add_scalar("Train/top1_avg", top1, global_step)
-        writer.add_scalar("Train/throughput", throughput, global_step)
-        if device.type == "cuda":
-          writer.add_scalar(
-              "GPU/memory_MB",
-              torch.cuda.memory_allocated(device) / 1024**2,
-              global_step,
-          )
-          if hasattr(torch.cuda, "utilization"):
-            writer.add_scalar(
-                "GPU/utilization_pct",
-                torch.cuda.utilization(device),
-                global_step,
-            )
-      last_log_time = time.time()
-      window_samples = 0
-      window_correct = 0
-      window_loss = 0.0
-      window_preds = []
-      window_labels = []
-
-  avg_loss = total_loss / total_samples
-  top1 = (correct_top1 / total_samples) * 100.0
-  elapsed = time.time() - start_time
-  logging.info(f"  Train stats -> loss: {avg_loss:.4f} | top1: {top1:.2f}%"
-               f" | time: {elapsed:.1f}s")
+  avg_loss, top1 = reporter.summary()
   return avg_loss, top1, global_step
 
 
