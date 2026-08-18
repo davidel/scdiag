@@ -124,13 +124,14 @@ def download_isic2019_csvs(cache_dir):
   return paths
 
 
-def download_one_image(image_id, dest_path, retries=3):
+def download_one_image(image_id, dest_path, retries=3, request_delay=0.05):
   """Download a single image from the ISIC Archive S3 bucket.
 
   Args:
       image_id: ISIC image ID (e.g. "ISIC_0000000")
       dest_path: Destination file path
       retries: Number of retries on failure
+      request_delay: Seconds to sleep after each request (rate limiting)
 
   Returns:
       (image_id, success, error_message)
@@ -145,10 +146,11 @@ def download_one_image(image_id, dest_path, retries=3):
           if not chunk:
             break
           f.write(chunk)
+      time.sleep(request_delay)
       return (image_id, True, None)
     except (HTTPError, URLError, OSError) as e:
       if attempt < retries - 1:
-        time.sleep(1 * (attempt + 1))
+        time.sleep(2 * (attempt + 1))
       else:
         return (image_id, False, str(e))
   return (image_id, False, "max retries exceeded")
