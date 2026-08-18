@@ -518,7 +518,7 @@ Output structure:
   print("=" * 60)
 
   # Step 1: Download CSVs + images zip
-  print("\n[1/5] Downloading ISIC 2019 data...")
+  print("\n[1/6] Downloading ISIC 2019 data...")
   paths = download_isic2019_data(args.cache_dir)
 
   if args.download_only:
@@ -526,15 +526,15 @@ Output structure:
     return
 
   # Step 2: Load ground truth
-  print("\n[2/5] Loading ground truth labels...")
+  print("\n[2/6] Loading ground truth labels...")
   labels = load_ground_truth(str(paths["ground_truth"]))
 
   # Step 3: Load metadata
-  print("\n[3/5] Loading metadata...")
+  print("\n[3/6] Loading metadata...")
   metadata = load_metadata(str(paths["metadata"]))
 
   # Step 4: Extract needed images from zip
-  print("\n[4/5] Extracting images from zip...")
+  print("\n[4/6] Extracting images from zip...")
   images_dir = Path(args.cache_dir) / "ISIC_2019_Training_Input"
   image_ids = list(labels.keys())
   _extracted, missing = extract_images_from_zip(str(paths["images_zip"]), image_ids,
@@ -545,7 +545,7 @@ Output structure:
           "These will be skipped in the output.")
 
   # Step 5: Create splits
-  print("\n[5/5] Creating grouped splits...")
+  print("\n[5/6] Creating grouped splits...")
 
   # Prepare data and groups
   data = []
@@ -589,8 +589,8 @@ Output structure:
   label_names = {i: name for i, name in enumerate(CLASS_NAMES)}
   print(f"\n  Label mapping: {label_names}")
 
-  # Step 5: Save as ImageFolder
-  print("\n[5/5] Saving as ImageFolder...")
+  # Step 6: Save as ImageFolder
+  print("\n[6/6] Saving as ImageFolder...")
   save_as_imagefolder(
       splits,
       args.output_dir,
