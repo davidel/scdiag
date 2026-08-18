@@ -19,22 +19,26 @@ import argparse
 import csv
 import os
 import shutil
-import zipfile
+import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 import numpy as np
 from PIL import Image
 
-# ISIC 2019 challenge download URLs
+# Download URLs — original challenge S3 bucket is dead (403), so we use
+# the ISIC Archive S3 for images and GitHub mirrors for the CSVs.
 ISIC_2019_URLS = {
-    "images":
-        "https://s3.amazonaws.com/isic-challenge-2019/ISIC_2019_Training_Input.zip",
     "ground_truth":
-        "https://s3.amazonaws.com/isic-challenge-2019/ISIC_2019_Training_GroundTruth.csv",
+        "https://raw.githubusercontent.com/saams4u/isic-2019-challenge/master/ISIC_2019_Training_GroundTruth.csv",
     "metadata":
-        "https://s3.amazonaws.com/isic-challenge-2019/ISIC_2019_Training_Metadata.csv",
+        "https://raw.githubusercontent.com/saams4u/isic-2019-challenge/master/ISIC_2019_Training_Metadata.csv",
 }
+# Individual image URLs come from the ISIC Archive S3 bucket.
+ISIC_ARCHIVE_IMAGE_URL = "https://isic-archive.s3.amazonaws.com/images/{image_id}.jpg"
 
 # Class names from the ground truth CSV
 CLASS_NAMES = [
@@ -52,9 +56,6 @@ CLASS_NAMES = [
 
 def download_file(url, dest, description=""):
   """Download a file with progress indication."""
-  import urllib.error
-  import urllib.request
-
   if os.path.exists(dest):
     print(f"  Already exists: {os.path.basename(dest)}")
     return
@@ -73,15 +74,31 @@ def download_file(url, dest, description=""):
             flush=True)
 
   try:
-    urllib.request.urlretrieve(url, dest, reporthook=progress_hook)
-    print()  # New line after progress
-  except urllib.error.URLError as e:
+    request = Request(url, headers={"User-Agent": "ISIC2019-Preparation/1.0"})
+    with urlopen(request) as response, open(dest, "wb") as out_file:
+      total_size = int(response.headers.get("Content-Length", 0))
+      downloaded = 0
+      while True:
+        chunk = response.read(1024 * 1024)
+        if not chunk:
+          break
+        out_file.write(chunk)
+        downloaded += len(chunk)
+        if total_size > 0:
+          percent = min(100, downloaded * 100 / total_size)
+          mb_downloaded = downloaded / (1024 * 1024)
+          mb_total = total_size / (1024 * 1024)
+          print(f"\r  Progress: {percent:.1f}% ({mb_downloaded:.1f}/{mb_total:.1f} MB)",
+                end="",
+                flush=True)
+    print()
+  except (HTTPError, URLError, OSError) as e:
     print(f"\n  Error downloading: {e}")
     raise
 
 
-def download_isic2019_data(cache_dir):
-  """Download ISIC 2019 challenge data files.
+def download_isic2019_csvs(cache_dir):
+  """Download ISIC 2019 ground truth and metadata CSVs.
 
   Args:
       cache_dir: Directory to cache downloaded files
@@ -94,12 +111,6 @@ def download_isic2019_data(cache_dir):
 
   paths = {}
 
-  # Download images zip
-  images_zip = cache_dir / "ISIC_2019_Training_Input.zip"
-  download_file(ISIC_2019_URLS["images"], str(images_zip),
-                "ISIC 2019 Training Images (9.1GB)")
-  paths["images_zip"] = images_zip
-
   # Download ground truth CSV
   gt_csv = cache_dir / "ISIC_2019_Training_GroundTruth.csv"
   download_file(ISIC_2019_URLS["ground_truth"], str(gt_csv), "ISIC 2019 Ground Truth")
@@ -111,6 +122,115 @@ def download_isic2019_data(cache_dir):
   paths["metadata"] = meta_csv
 
   return paths
+
+
+def download_one_image(image_id, dest_path, retries=3):
+  """Download a single image from the ISIC Archive S3 bucket.
+
+  Args:
+      image_id: ISIC image ID (e.g. "ISIC_0000000")
+      dest_path: Destination file path
+      retries: Number of retries on failure
+
+  Returns:
+      (image_id, success, error_message)
+  """
+  url = ISIC_ARCHIVE_IMAGE_URL.format(image_id=image_id)
+  for attempt in range(retries):
+    try:
+      request = Request(url, headers={"User-Agent": "ISIC2019-Preparation/1.0"})
+      with urlopen(request, timeout=30) as response, open(dest_path, "wb") as f:
+        while True:
+          chunk = response.read(1024 * 1024)
+          if not chunk:
+            break
+          f.write(chunk)
+      return (image_id, True, None)
+    except (HTTPError, URLError, OSError) as e:
+      if attempt < retries - 1:
+        time.sleep(1 * (attempt + 1))
+      else:
+        return (image_id, False, str(e))
+  return (image_id, False, "max retries exceeded")
+
+
+def download_images_parallel(image_ids, images_dir, num_workers=8):
+  """Download images from the ISIC Archive in parallel.
+
+  Args:
+      image_ids: List of ISIC image IDs to download
+      images_dir: Directory to save images to
+      num_workers: Number of parallel download threads
+
+  Returns:
+      Tuple of (success_count, fail_count, failed_ids)
+  """
+  images_dir = Path(images_dir)
+  images_dir.mkdir(parents=True, exist_ok=True)
+
+  # Skip already downloaded images
+  to_download = []
+  already_exist = 0
+  for image_id in image_ids:
+    dest = images_dir / f"{image_id}.jpg"
+    if dest.exists():
+      already_exist += 1
+    else:
+      to_download.append(image_id)
+
+  if already_exist > 0:
+    print(f"  {already_exist} images already cached, {len(to_download)} to download")
+
+  if not to_download:
+    return (already_exist, 0, [])
+
+  failed_ids = []
+  success_count = 0
+  start_time = time.time()
+
+  print(f"  Downloading {len(to_download)} images with {num_workers} workers...")
+
+  with ThreadPoolExecutor(max_workers=num_workers) as executor:
+    futures = {}
+    for image_id in to_download:
+      dest = images_dir / f"{image_id}.jpg"
+      future = executor.submit(download_one_image, image_id, str(dest))
+      futures[future] = image_id
+
+    for i, future in enumerate(as_completed(futures)):
+      image_id, success, error = future.result()
+      if success:
+        success_count += 1
+      else:
+        failed_ids.append((image_id, error))
+
+      # Progress reporting every 100 images
+      done = i + 1
+      if done % 100 == 0 or done == len(to_download):
+        elapsed = time.time() - start_time
+        rate = done / elapsed if elapsed > 0 else 0
+        remaining = (len(to_download) - done) / rate if rate > 0 else 0
+        print(
+            f"\r  Progress: {done}/{len(to_download)} images "
+            f"({done*100//len(to_download)}%) "
+            f"- {rate:.1f} img/s - ETA {remaining:.0f}s",
+            end="",
+            flush=True,
+        )
+
+  print()
+  total_time = time.time() - start_time
+  print(f"  Download complete: {success_count} succeeded, "
+        f"{len(failed_ids)} failed in {total_time:.1f}s")
+
+  if failed_ids:
+    print("  Failed images:")
+    for image_id, error in failed_ids[:10]:
+      print(f"    {image_id}: {error}")
+    if len(failed_ids) > 10:
+      print(f"    ... and {len(failed_ids) - 10} more")
+
+  return (success_count + already_exist, len(failed_ids), failed_ids)
 
 
 def load_ground_truth(csv_path):
@@ -175,19 +295,6 @@ def load_metadata(csv_path):
       f"  Lesion ID coverage: {has_lesion_id}/{total} ({has_lesion_id/total*100:.1f}%)")
 
   return metadata
-
-
-def extract_images(zip_path, dest_dir):
-  """Extract images from zip file.
-
-  Args:
-      zip_path: Path to the zip file
-      dest_dir: Destination directory
-  """
-  print(f"  Extracting images to {dest_dir}...")
-  with zipfile.ZipFile(zip_path, "r") as zip_ref:
-    zip_ref.extractall(dest_dir)
-  print("  Extraction complete")
 
 
 def group_split_by_attribute(
@@ -444,38 +551,49 @@ Output structure:
       help="Only download files without creating splits",
   )
 
+  parser.add_argument(
+      "--num_workers",
+      type=int,
+      default=8,
+      help="Number of parallel download threads (default: %(default)s)",
+  )
+
   args = parser.parse_args()
 
   print("=" * 60)
   print("ISIC 2019 Dataset Preparation")
   print("=" * 60)
 
-  # Step 1: Download data
-  print("\n[1/5] Downloading ISIC 2019 data...")
-  paths = download_isic2019_data(args.cache_dir)
+  # Step 1: Download CSVs
+  print("\n[1/6] Downloading ISIC 2019 CSVs...")
+  paths = download_isic2019_csvs(args.cache_dir)
 
   if args.download_only:
     print("\nDownload complete. Files saved to:", args.cache_dir)
     return
 
   # Step 2: Load ground truth
-  print("\n[2/5] Loading ground truth labels...")
+  print("\n[2/6] Loading ground truth labels...")
   labels = load_ground_truth(str(paths["ground_truth"]))
 
   # Step 3: Load metadata
-  print("\n[3/5] Loading metadata...")
+  print("\n[3/6] Loading metadata...")
   metadata = load_metadata(str(paths["metadata"]))
 
-  # Step 4: Extract images
-  print("\n[4/5] Extracting images...")
+  # Step 4: Download images from ISIC Archive
+  print("\n[4/6] Downloading images from ISIC Archive...")
   images_dir = Path(args.cache_dir) / "ISIC_2019_Training_Input"
-  if not images_dir.exists():
-    extract_images(str(paths["images_zip"]), args.cache_dir)
-  else:
-    print(f"  Images already extracted: {images_dir}")
+  image_ids = list(labels.keys())
+  _success, failed, _failed_ids = download_images_parallel(image_ids,
+                                                           str(images_dir),
+                                                           num_workers=args.num_workers)
+
+  if failed > 0:
+    print(f"\n  Warning: {failed} images failed to download. "
+          "These will be skipped in the output.")
 
   # Step 5: Create splits
-  print("\n[5/5] Creating grouped splits...")
+  print("\n[5/6] Creating grouped splits...")
 
   # Prepare data and groups
   data = []
@@ -483,6 +601,10 @@ Output structure:
   skipped_no_group = 0
 
   for image_id, class_idx in labels.items():
+    # Skip images that failed to download
+    if not (images_dir / f"{image_id}.jpg").exists():
+      continue
+
     # Get group value
     group_value = ""
     if image_id in metadata:
@@ -515,7 +637,8 @@ Output structure:
   label_names = {i: name for i, name in enumerate(CLASS_NAMES)}
   print(f"\n  Label mapping: {label_names}")
 
-  # Save as ImageFolder
+  # Step 6: Save as ImageFolder
+  print("\n[6/6] Saving as ImageFolder...")
   save_as_imagefolder(
       splits,
       args.output_dir,
