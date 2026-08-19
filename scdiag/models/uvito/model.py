@@ -72,8 +72,9 @@ class UVito(nn.Module):
         enable_nested_tensor=False,
     )
 
-    # Step 7: Dropout and final head
+    # Step 7: Dropout, pre-transformer norm, and final head
     self.pos_drop = nn.Dropout(p=dropout)
+    self.norm_pre = nn.LayerNorm(transformer_dim)
     self.head_norm = nn.LayerNorm(transformer_dim)
     self.mlp_head = nn.Linear(transformer_dim * num_cls_tokens, num_classes)
 
@@ -104,6 +105,9 @@ class UVito(nn.Module):
     # Add positional embeddings & dropout
     tokens = tokens + self.pos_embedding
     tokens = self.pos_drop(tokens)
+
+    # Pre-transformer LayerNorm (standard in ViT architectures)
+    tokens = self.norm_pre(tokens)
 
     # Transformer
     transformer_output = self.transformer_encoder(tokens)
