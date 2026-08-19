@@ -10,6 +10,8 @@ import segmentation_models_pytorch as smp
 import torch
 import torch.nn as nn
 
+from scdiag.models.transformer_utils import TransformerBlock
+
 
 class UVito(nn.Module):
 
@@ -25,6 +27,7 @@ class UVito(nn.Module):
       nhead=8,
       dim_feedforward=2048,
       dropout=0.1,
+      drop_path_rate=0.1,
   ):
     super().__init__()
     self.num_cls_tokens = num_cls_tokens
@@ -59,22 +62,21 @@ class UVito(nn.Module):
     self.pos_embedding = nn.Parameter(
         torch.zeros(1, num_cls_tokens + h * w, transformer_dim))
 
-    # Step 6: Standard nn.TransformerEncoder (post-norm, the default)
-    encoder_layer = nn.TransformerEncoderLayer(
-        d_model=transformer_dim,
-        nhead=nhead,
-        dim_feedforward=dim_feedforward,
-        dropout=dropout,
-        batch_first=True,
-    )
-    self.transformer_encoder = nn.TransformerEncoder(
-        encoder_layer,
-        num_layers=num_transformer_layers,
-    )
+    # Step 6: Pre-norm Transformer blocks with DropPath (linear ramp)
+    dpr = torch.linspace(0, drop_path_rate, num_transformer_layers).tolist()
+    self.transformer_layers = nn.ModuleList([
+        TransformerBlock(
+            embed_dim=transformer_dim,
+            num_heads=nhead,
+            dropout=dropout,
+            drop_path=dpr[i],
+            dim_feedforward=dim_feedforward,
+        ) for i in range(num_transformer_layers)
+    ])
+    self.transformer_norm = nn.LayerNorm(transformer_dim)
 
-    # Step 7: Dropout, pre-transformer norm, and final head
+    # Step 7: Dropout and final head
     self.pos_drop = nn.Dropout(p=dropout)
-    self.norm_pre = nn.LayerNorm(transformer_dim)
     self.head_norm = nn.LayerNorm(transformer_dim)
     # Xavier-init classification head (DINOv2 convention: trunc_normal 0.02)
     self.mlp_head = nn.Linear(transformer_dim * num_cls_tokens, num_classes)
@@ -109,11 +111,10 @@ class UVito(nn.Module):
     tokens = tokens + self.pos_embedding
     tokens = self.pos_drop(tokens)
 
-    # Pre-transformer LayerNorm (standard in ViT architectures)
-    tokens = self.norm_pre(tokens)
-
-    # Transformer
-    transformer_output = self.transformer_encoder(tokens)
+    # Transformer blocks
+    for layer in self.transformer_layers:
+      tokens = layer(tokens)
+    transformer_output = self.transformer_norm(tokens)
 
     # Extract CLS tokens and flatten
     final_cls_states = transformer_output[:, :self.num_cls_tokens, :]
