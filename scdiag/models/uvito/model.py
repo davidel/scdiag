@@ -53,30 +53,33 @@ class UVito(nn.Module):
     self.patch_projection = nn.Linear(c, transformer_dim)
 
     # Step 5: Learnable CLS tokens + positional embeddings
-    self.cls_tokens = nn.Parameter(torch.randn(1, num_cls_tokens, transformer_dim))
+    # Initialized to zero (standard in DINOv2, MAE, DeiT) so the
+    # transformer starts from actual image content, not random noise.
+    self.cls_tokens = nn.Parameter(torch.zeros(1, num_cls_tokens, transformer_dim))
     self.pos_embedding = nn.Parameter(
-        torch.randn(1, num_cls_tokens + h * w, transformer_dim))
+        torch.zeros(1, num_cls_tokens + h * w, transformer_dim))
 
-    # Step 6: Pre-LayerNorm + standard nn.TransformerEncoder
+    # Step 6: Standard nn.TransformerEncoder (post-norm, the default)
     encoder_layer = nn.TransformerEncoderLayer(
         d_model=transformer_dim,
         nhead=nhead,
         dim_feedforward=dim_feedforward,
         dropout=dropout,
         batch_first=True,
-        norm_first=True,
     )
     self.transformer_encoder = nn.TransformerEncoder(
         encoder_layer,
         num_layers=num_transformer_layers,
-        enable_nested_tensor=False,
     )
 
     # Step 7: Dropout, pre-transformer norm, and final head
     self.pos_drop = nn.Dropout(p=dropout)
     self.norm_pre = nn.LayerNorm(transformer_dim)
     self.head_norm = nn.LayerNorm(transformer_dim)
+    # Xavier-init classification head (DINOv2 convention: trunc_normal 0.02)
     self.mlp_head = nn.Linear(transformer_dim * num_cls_tokens, num_classes)
+    nn.init.trunc_normal_(self.mlp_head.weight, std=0.02)
+    nn.init.zeros_(self.mlp_head.bias)
 
   def _backbone_features(self, x):
     """Run everything up to the CLS-flattened representation.
