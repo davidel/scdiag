@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from scdiag.model_utils import set_train_mode
 from scdiag.pretrain_methods.base import PretrainMethod
 from scdiag.pretrain_methods.registry import register_method
 
@@ -183,7 +184,7 @@ class IJEPAMethod(PretrainMethod):
     )
 
   def train_step(self, model, images, global_step):
-    model.train()
+    set_train_mode(model, 'train')
     loss, info = model(images)
     return loss, info
 

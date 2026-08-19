@@ -18,24 +18,29 @@ from torchvision.transforms import v2
 from torchvision.transforms.v2 import InterpolationMode
 
 from scdiag.checkpointing import (
-  checkpoint_dict,
-  create_model_report,
-  parse_state_flags,
-  restore_training_state,
-  resume_checkpoint,
-  serialize_lora_state,
+    checkpoint_dict,
+    create_model_report,
+    parse_state_flags,
+    restore_training_state,
+    resume_checkpoint,
+    serialize_lora_state,
 )
 from scdiag.cli_utils import KVPairAction
 from scdiag.datasets.hf_proxy import HFDatasetProxy
 from scdiag.grad_monitor import GradMonitor
 from scdiag.logging_utils import fatal, setup_logging
 from scdiag.metrics import confusion_row_strings
-from scdiag.model_utils import apply_lora, extract_lora_params, freeze_model
+from scdiag.model_utils import (
+    apply_lora,
+    extract_lora_params,
+    freeze_model,
+    set_train_mode,
+)
 from scdiag.models import load_model, load_processor
 from scdiag.optim_factory import (
-  build_param_groups,
-  create_optimizer,
-  create_scheduler,
+    build_param_groups,
+    create_optimizer,
+    create_scheduler,
 )
 from scdiag.script_utils import load_extern
 from scdiag.storage_utils import save_checkpoint
@@ -869,7 +874,7 @@ def train_one_epoch(
     epochs (used for the gradient monitor so it receives contiguous step
     numbers).  The updated value is returned.
     """
-  model.train()
+  set_train_mode(model, 'train')
   total_batches = len(dataloader)
   reporter = TrainReporting(
       total_batches=total_batches,
@@ -961,7 +966,7 @@ def evaluate_performance(model,
     *id2label* is not supplied) and *cm* is the confusion-matrix as a
     2-D ``numpy.ndarray`` (rows = true labels, cols = predicted labels).
     """
-  model.eval()
+  set_train_mode(model, 'eval')
   eval_loss, correct_top1, total_samples = 0.0, 0, 0
   all_preds = []
   all_labels = []

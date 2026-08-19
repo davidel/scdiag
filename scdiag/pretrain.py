@@ -41,6 +41,7 @@ from scdiag.datasets.ensemble import DatasetEnsemble
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.grad_monitor import GradMonitor
 from scdiag.logging_utils import fatal, setup_logging
+from scdiag.model_utils import set_train_mode
 from scdiag.models.registry import load_model
 from scdiag.optim_factory import (
     build_param_groups,
@@ -135,7 +136,7 @@ def log_validation_images(method,
   # recon is (N, C, H, W) — log first sample.
   writer.add_image("recon/original", images[0], global_step)
   writer.add_image("recon/reconstructed", recon[0].clamp(0, 1), global_step)
-  model.train()
+  set_train_mode(model, 'train')
 
 
 def train_one_epoch(
@@ -164,7 +165,7 @@ def train_one_epoch(
 
     Returns ``(avg_loss, global_step)``.
   """
-  model.train()
+  set_train_mode(model, 'train')
   total_loss = 0.0
   total_samples = 0
   start_time = time.time()

@@ -15,6 +15,54 @@ from scdiag.logging_utils import fatal
 from scdiag.models import load_model, load_processor
 
 
+def set_train_mode(net, mode='train'):
+  """Set a model to train or eval, respecting frozen sub-trees.
+
+  When *mode* is ``'train'``, frozen modules whose parameters were all
+  frozen via :func:`freeze_model` are forced back to eval mode after
+  the (recursive) ``model.train(True)`` call.  This prevents
+  BatchNorm running-statistics updates and Dropout activation inside
+  frozen backbones.
+
+  Parameters
+  ----------
+  net : nn.Module
+  mode : str, optional
+      ``'train'`` or ``'eval'``.  Defaults to ``'train'``.
+  """
+  if mode == 'eval':
+    net.train(False)
+  else:
+    frozen = _find_frozen_modules(net)
+    # Normal recursive train — fires any custom train() overrides.
+    net.train(True)
+    # Re-freeze: calls each module's own train(False), respecting
+    # any custom override rather than setting .training directly.
+    for m in frozen:
+      m.train(False)
+
+
+def _find_frozen_modules(net):
+  """Return the set of modules where the entire sub-tree is frozen.
+
+  A module is considered *fully frozen* when **all** of its own
+  parameters (non-recursive) have ``requires_grad=False`` **and**
+  every child sub-tree is also fully frozen.
+  """
+  frozen = set()
+
+  def net_process(mod):
+    children_frozen = all(net_process(c) for c in mod.children())
+    own_frozen = all(not p.requires_grad for p in mod.parameters(recurse=False))
+    fully_frozen = children_frozen and own_frozen
+    if fully_frozen:
+      frozen.add(mod)
+    return fully_frozen
+
+  net_process(net)
+  return frozen
+
+
 @contextmanager
 def model_mode(model, mode):
   """Context manager to temporarily set a model's training mode.
