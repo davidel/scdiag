@@ -53,9 +53,6 @@ def _assert_all_modules(module, expected_mode):
         f"got {m.training}")
 
 
-# ── _find_frozen_modules ────────────────────────────────────────────
-
-
 class TestFindFrozenModules:
 
   def test_nothing_frozen(self):
@@ -96,9 +93,6 @@ class TestFindFrozenModules:
     assert model.backbone not in frozen
     assert model.head not in frozen
     assert model not in frozen
-
-
-# ── set_train_mode ──────────────────────────────────────────────────
 
 
 class TestSetTrainMode:
