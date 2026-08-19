@@ -1045,6 +1045,10 @@ def main():
   train_transforms, val_transforms = build_transforms(processor, args.image_size,
                                                       train_aug_fn)
 
+  logging.info(f"Image size: {args.image_size}")
+  logging.info(f"Train transforms: {train_transforms}")
+  logging.info(f"Val transforms:   {val_transforms}")
+
   train_proxy, val_proxy = load_and_split_dataset(
       args.dataset,
       cache_dir=args.cache_dir,
