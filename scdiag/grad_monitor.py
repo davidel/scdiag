@@ -32,6 +32,8 @@ directly comparable across parameters of different sizes.
 import collections
 import logging
 
+from scdiag.table_utils import format_table
+
 
 def _find_common_root(strings):
   """Return the longest dotted prefix shared by all *strings*.
@@ -263,15 +265,20 @@ class GradMonitor:
       if prefix:
         lines.append(f"  Prefix (stripped): {prefix}")
 
-      nw = max(len(name) for name, _, _ in rows)
-      nw = max(nw, len("Name"))
-      hdr = (f"  {'Name':<{nw}} {'g_rms':>10} {'p_rms':>10}"
-             f" {'g/p':>10} {'g_max':>10} {'sparse':>7} {'status':<12}")
-      sep = "  " + "-" * len(hdr)
-      lines.append(hdr)
-      lines.append(sep)
+      headers = ["Name", "g_rms", "p_rms", "g/p", "g_max", "sparse", "status"]
+      aligns = ["left", "right", "right", "right", "right", "right", "left"]
+      table_rows = []
       for name, s, status in rows:
-        lines.append("  " + self._format_row(name, s, status, nw))
+        table_rows.append([
+            name,
+            f"{s['grad_norm']:>10.2e}",
+            f"{s['param_norm']:>10.2e}",
+            f"{s['grad_param_ratio']:>10.2e}",
+            f"{s['grad_max']:>10.2e}",
+            f"{s['grad_sparsity']:>6.1%}",
+            f"{status:<12}",
+        ])
+      lines.extend(format_table(headers, table_rows, align=aligns, prefix="  "))
 
     # ---- norm trend summary ----
     if self._norm_history > 0 and self._norm_buf:
@@ -344,29 +351,41 @@ class GradMonitor:
         f"  Norm Trends (last {len(self._norm_buf[next(iter(self._norm_buf))])}"
         f" snapshots, top {len(rows)}/{total} params by change):")
 
-    # Compute name width first so header and data align.
-    nw = max(len(r[0]) for r in rows)
-    nw = max(nw, len("Param"))
-    hdr = (f"  {'Param':<{nw}}"
-           f" {'g_dir':>5} {'g_chg%':>9} {'g_min':>9} {'g_max':>9}"
-           f" {'p_dir':>5} {'p_chg%':>9} {'p_min':>9} {'p_max':>9}")
-    sep = "  " + "-" * len(hdr)
-    lines.append(hdr)
-    lines.append(sep)
-
+    headers = [
+        "Param",
+        "g_dir",
+        "g_chg%",
+        "g_min",
+        "g_max",
+        "p_dir",
+        "p_chg%",
+        "p_min",
+        "p_max",
+    ]
+    aligns = [
+        "left",
+        "right",
+        "right",
+        "right",
+        "right",
+        "right",
+        "right",
+        "right",
+        "right",
+    ]
+    table_rows = []
     for r in rows:
       (name, gn_dir, gn_chg, gn_lo, gn_hi, pn_dir, pn_chg, pn_lo, pn_hi) = r
-      lines.append(f"  {name:<{nw}}"
-                   f" {gn_dir:>5} {gn_chg:>+8.1f}% {gn_lo:>9.2e} {gn_hi:>9.2e}"
-                   f" {pn_dir:>5} {pn_chg:>+8.1f}% {pn_lo:>9.2e} {pn_hi:>9.2e}")
-
+      table_rows.append([
+          name,
+          f"{gn_dir:>5}",
+          f"{gn_chg:>+8.1f}%",
+          f"{gn_lo:>9.2e}",
+          f"{gn_hi:>9.2e}",
+          f"{pn_dir:>5}",
+          f"{pn_chg:>+8.1f}%",
+          f"{pn_lo:>9.2e}",
+          f"{pn_hi:>9.2e}",
+      ])
+    lines.extend(format_table(headers, table_rows, align=aligns, prefix="  "))
     return lines
-
-  def _format_row(self, name, s, status, name_width):
-    return (f"{name:<{name_width}}"
-            f" {s['grad_norm']:>10.2e}"
-            f" {s['param_norm']:>10.2e}"
-            f" {s['grad_param_ratio']:>10.2e}"
-            f" {s['grad_max']:>10.2e}"
-            f" {s['grad_sparsity']:>6.1%}"
-            f" {status:<12}")

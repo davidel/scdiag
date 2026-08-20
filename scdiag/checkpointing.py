@@ -196,56 +196,48 @@ def _format_model_param_table(model):
     memory consumed by the model's parameters.  All columns are
     dynamically aligned into a tabular layout.
     """
+  from scdiag.table_utils import format_table
+
   params = list(model.named_parameters())
   if not params:
     return "Model has no parameters."
 
-  # Pre-compute display values to determine column widths.
-  rows = []
-  for name, param in params:
-    numel = param.numel()
-    param_bytes = numel * param.element_size()
-    shape_str = str(tuple(param.shape))
-    trainable = "yes" if param.requires_grad else "no"
-    rows.append((name, shape_str, numel, param_bytes, trainable))
-
-  # Column widths (header labels are included in the min width).
-  name_w = max(len(r[0]) for r in rows)
-  shape_w = max(len(r[1]) for r in rows)
-  params_w = max(len(_format_count(r[2])) for r in rows)
-  size_w = max(len(_format_bytes(r[3])) for r in rows)
-  trainable_w = max(len(r[4]) for r in rows)
-  trainable_w = max(trainable_w, len("Trainable"))
-
-  # Header.
-  header = (f"  {'Parameter':<{name_w}}  {'Shape':>{shape_w}}  "
-            f"{'Params':>{params_w}}  {'Size':>{size_w}}  "
-            f"{'Trainable':>{trainable_w}}")
-  sep = "  " + "-" * (len(header) - 2)
-
-  lines = []
-  lines.append("Model parameter details:")
-  lines.append(header)
-  lines.append(sep)
-
+  # Pre-compute display values.
   total_params = 0
   total_bytes = 0
   trainable_params = 0
-  for name, shape_str, numel, param_bytes, trainable in rows:
+  data_rows = []
+  for name, param in params:
+    numel = param.numel()
+    param_bytes = numel * param.element_size()
     total_params += numel
     total_bytes += param_bytes
-    if trainable == "yes":
+    if param.requires_grad:
       trainable_params += numel
-    lines.append(
-        f"  {name:<{name_w}}  {shape_str:>{shape_w}}  "
-        f"{_format_count(numel):>{params_w}}  {_format_bytes(param_bytes):>{size_w}}  "
-        f"{trainable:>{trainable_w}}")
+    data_rows.append([
+        name,
+        str(tuple(param.shape)),
+        _format_count(numel),
+        _format_bytes(param_bytes),
+        "yes" if param.requires_grad else "no",
+    ])
 
-  lines.append(sep)
+  headers = ["Parameter", "Shape", "Params", "Size", "Trainable"]
+  aligns = ["left", "right", "right", "right", "right"]
+  lines = ["Model parameter details:"]
+  lines.extend(format_table(headers, data_rows, align=aligns))
   lines.append(
-      f"  {'TOTAL':<{name_w}}  {'':>{shape_w}}  "
-      f"{_format_count(total_params):>{params_w}}  {_format_bytes(total_bytes):>{size_w}}  "
-      f"{_format_count(trainable_params):>{trainable_w}}")
+      format_table(
+          [""] * 5,
+          [[
+              "TOTAL",
+              "",
+              _format_count(total_params),
+              _format_bytes(total_bytes),
+              _format_count(trainable_params),
+          ]],
+          align=aligns,
+      )[-1])
   return "\n".join(lines)
 
 
