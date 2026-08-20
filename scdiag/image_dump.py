@@ -58,7 +58,9 @@ class ImageDump(v2.Transform):
       seq = ImageDump._counter
       ImageDump._counter += 1
 
-    path = os.path.join(self.save_dir, f"{self.prefix}_{seq:06d}.jpg")
+    path = os.path.join(
+        self.save_dir,
+        f"{self.prefix}_{os.getpid()}_{seq:06d}.jpg")
 
     if isinstance(img, Image.Image):
       img.save(path)

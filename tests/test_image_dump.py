@@ -59,6 +59,7 @@ class TestImageDump:
   def test_counter_is_sequential(self, tmp_path):
     # Reset class-level counter so test is deterministic.
     ImageDump._counter = 0
+    pid = os.getpid()
     dump1 = ImageDump(save_dir=str(tmp_path), p=1.0, prefix="seq")
     dump2 = ImageDump(save_dir=str(tmp_path), p=1.0, prefix="seq")
     img = Image.new("RGB", (16, 16))
@@ -69,9 +70,9 @@ class TestImageDump:
 
     files = sorted(tmp_path.glob("seq_*.jpg"))
     assert len(files) == 3
-    assert files[0].name == "seq_000000.jpg"
-    assert files[1].name == "seq_000001.jpg"
-    assert files[2].name == "seq_000002.jpg"
+    assert files[0].name == f"seq_{pid}_000000.jpg"
+    assert files[1].name == f"seq_{pid}_000001.jpg"
+    assert files[2].name == f"seq_{pid}_000002.jpg"
 
   def test_creates_directory_if_missing(self, tmp_path):
     target = tmp_path / "new_dir"
