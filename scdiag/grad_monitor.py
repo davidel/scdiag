@@ -355,11 +355,11 @@ class GradMonitor:
               for r in rows]
 
     lines = []
-    if prefix:
-      lines.append(f"  Prefix (stripped): {prefix}")
     lines.append(
         f"  Norm Trends (last {len(self._norm_buf[next(iter(self._norm_buf))])}"
         f" snapshots, top {len(rows)}/{total} params by change):")
+    if prefix:
+      lines.append(f"  Prefix (stripped): {prefix}")
 
     headers = [
         "Param",
