@@ -451,3 +451,37 @@ def test_trend_top_n_zero_shows_all(caplog):
   ]
   assert len(trend_headers) == 1
   assert "top 4/4" in trend_headers[0]
+
+
+def test_trend_strips_common_prefix(caplog):
+  """Trend table shows 'Prefix (stripped):' when params share a prefix."""
+
+  class NestedModel(nn.Module):
+
+    def __init__(self):
+      super().__init__()
+      self.block = nn.Sequential(nn.Linear(10, 20), nn.Linear(20, 5))
+
+    def forward(self, x):
+      return self.block(x)
+
+  model = NestedModel()
+  mon = GradMonitor(model, log_every=1, norm_history=10, trend_top_n=0)
+  x = torch.randn(4, 10)
+  target = torch.randn(4, 5)
+  opt = torch.optim.SGD(model.parameters(), lr=0.01)
+
+  for i in range(10):
+    _train_step(model, x, target, opt)
+    mon.step(i)
+
+  with caplog.at_level(logging.INFO):
+    mon.step(10)
+
+  prefix_lines = [
+      r.message for r in caplog.records
+      if "Prefix (stripped)" in r.message
+  ]
+  # All params share "block." prefix; trend table should strip it.
+  assert len(prefix_lines) == 1
+  assert "block." in prefix_lines[0]

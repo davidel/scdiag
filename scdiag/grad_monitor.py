@@ -346,7 +346,17 @@ class GradMonitor:
     if self._trend_top_n > 0 and len(rows) > self._trend_top_n:
       rows = rows[:self._trend_top_n]
 
+    # Strip common prefix for readability.
+    names = [r[0] for r in rows]
+    prefix = _find_common_root(names)
+    if prefix:
+      prefix += "."
+      rows = [(name[len(prefix):] if name.startswith(prefix) else name,) + r[1:]
+              for r in rows]
+
     lines = []
+    if prefix:
+      lines.append(f"  Prefix (stripped): {prefix}")
     lines.append(
         f"  Norm Trends (last {len(self._norm_buf[next(iter(self._norm_buf))])}"
         f" snapshots, top {len(rows)}/{total} params by change):")
