@@ -98,7 +98,6 @@ class CustomPatchTransformer(nn.Module):
     self.pos_embedding = nn.Parameter(
         torch.randn(1, self.num_tokens + 1, embed_dim) * 0.02)
     self.cls_token = nn.Parameter(torch.randn(1, 1, embed_dim) * 0.02)
-    self.cls_pos = nn.Parameter(torch.randn(1, 1, embed_dim) * 0.02)
     self.pos_drop = nn.Dropout(p=dropout)
     dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
     self.transformer_layers = nn.ModuleList([
@@ -145,8 +144,8 @@ class CustomPatchTransformer(nn.Module):
     B = patch_embeddings.shape[0]
     x = patch_embeddings
 
-    # Prepend learnable CLS token with its own positional embedding
-    cls = self.cls_token.expand(B, -1, -1) + self.cls_pos  # [B, 1, D]
+    # Prepend learnable CLS token (pos_embedding covers it at index 0)
+    cls = self.cls_token.expand(B, -1, -1)  # [B, 1, D]
     x = torch.cat([cls, x], dim=1)  # [B, 1+N, D]
     x = x + self.pos_embedding[:, :x.shape[1], :]
     x = self.pos_drop(x)
