@@ -19,8 +19,13 @@ and parameter norms.  Reports are logged via ``logging.info()`` every
 When ``detect_nan=True`` the monitor checks every step (not just log
 steps) for NaN / Inf in gradient tensors and logs a critical warning
 immediately if any are found.
+
+When ``norm_history`` > 0, per-layer gradient and parameter norms are
+accumulated in a rolling window and a trend summary is appended to each
+report.
 """
 
+import collections
 import logging
 
 
@@ -90,6 +95,9 @@ class GradMonitor:
         is flagged as GPR (G/P Ratio).  A value > 1.0 means the
         gradient update is larger than the weight itself.  Defaults to
         1.0.
+    norm_history : int
+        Maximum number of recent (step, grad_norm, param_norm) snapshots
+        to keep per parameter for trend analysis.  0 disables (default).
     """
 
   def __init__(
@@ -103,6 +111,7 @@ class GradMonitor:
       top_k=5,
       imbalance_factor=100.0,
       gpr_ceiling=1.0,
+      norm_history=0,
   ):
     self._model = model
     self._log_every = log_every
@@ -113,8 +122,11 @@ class GradMonitor:
     self._top_k = top_k
     self._imbalance_factor = imbalance_factor
     self._gpr_ceiling = gpr_ceiling
+    self._norm_history = norm_history
 
     self._consecutive_low = {}
+    self._norm_buf = collections.defaultdict(
+        lambda: collections.deque(maxlen=norm_history or None))
 
   def step(self, global_step):
     """Advance the monitor by one training step.
@@ -169,8 +181,7 @@ class GradMonitor:
           anomalies.append(f"EXPLODING({name}, norm={entry['grad_norm']:.2e})")
 
         if entry["grad_param_ratio"] > self._gpr_ceiling:
-          anomalies.append(
-              f"GPR({name}, ratio={entry['grad_param_ratio']:.2e})")
+          anomalies.append(f"GPR({name}, ratio={entry['grad_param_ratio']:.2e})")
 
         stats[name] = entry
 
@@ -182,6 +193,11 @@ class GradMonitor:
         if (v["grad_norm"] > 0 and v["grad_norm"] > median * self._imbalance_factor):
           anomalies.append(f"IMBALANCED({name})")
 
+    # ---- accumulate history ----
+    if self._norm_history > 0:
+      for name, s in stats.items():
+        self._norm_buf[name].append((global_step, s["grad_norm"], s["param_norm"]))
+
     self._log(global_step, stats, anomalies)
 
   def _log(self, global_step, stats, anomalies):
@@ -192,10 +208,12 @@ class GradMonitor:
 
     lines = [(f"[Step {global_step}] Gradient Report:"
               f" {len(stats)} params"
-              f" | grad_norm: mean={sum(norms)/len(norms) if norms else 0:.2e}"
+              f" | grad_norm:"
+              f" mean={sum(norms)/len(norms) if norms else 0:.2e}"
               f" max={max(norms) if norms else 0:.2e}"
               f" min={min(norms) if norms else 0:.2e}"
-              f" | grad/param: mean={sum(ratios)/len(ratios) if ratios else 0:.2e}")]
+              f" | grad/param:"
+              f" mean={sum(ratios)/len(ratios) if ratios else 0:.2e}")]
 
     name_status = {}
     for a in anomalies:
@@ -242,7 +260,85 @@ class GradMonitor:
       for name, s, status in rows:
         lines.append("  " + self._format_row(name, s, status, nw))
 
+    # ---- norm trend summary ----
+    if self._norm_history > 0 and self._norm_buf:
+      lines.extend(self._log_trends(global_step))
+
     logging.info("\n".join(lines))
+
+  def _log_trends(self, global_step):
+    """Append a norm-trend table to the current report.
+
+    For each parameter with at least two history entries, reports
+    the direction (growing/shrinking/stable), percentage change
+    over the window, and min/max values.
+    """
+    rows = []
+    for name, buf in sorted(self._norm_buf.items()):
+      if len(buf) < 2:
+        continue
+      first_step, first_gn, first_pn = buf[0]
+      last_step, last_gn, last_pn = buf[-1]
+      span = last_step - first_step
+      if span <= 0:
+        continue
+
+      # --- grad norm trend ---
+      if first_gn > 0:
+        gn_change = (last_gn - first_gn) / first_gn * 100
+        gn_vals = [e[1] for e in buf]
+        gn_direction = ("UP"
+                        if gn_change > 10 else "DOWN" if gn_change < -10 else "---")
+      else:
+        gn_change = 0.0
+        gn_vals = [e[1] for e in buf]
+        gn_direction = "---"
+
+      # --- param norm trend ---
+      if first_pn > 0:
+        pn_change = (last_pn - first_pn) / first_pn * 100
+        pn_vals = [e[2] for e in buf]
+        pn_direction = ("UP"
+                        if pn_change > 10 else "DOWN" if pn_change < -10 else "---")
+      else:
+        pn_change = 0.0
+        pn_vals = [e[2] for e in buf]
+        pn_direction = "---"
+
+      rows.append((
+          name,
+          gn_direction,
+          gn_change,
+          min(gn_vals),
+          max(gn_vals),
+          pn_direction,
+          pn_change,
+          min(pn_vals),
+          max(pn_vals),
+      ))
+
+    if not rows:
+      return []
+
+    lines = []
+    lines.append(
+        f"  Norm Trends (last {len(self._norm_buf[next(iter(self._norm_buf))])}"
+        f" snapshots, {rows[0][0] and len(rows)} params):")
+    hdr = (f"  {'Param':<{len(rows[0][0])}}"
+           f" {'g_dir':>5} {'g_chg%':>8} {'g_min':>9} {'g_max':>9}"
+           f" {'p_dir':>5} {'p_chg%':>8} {'p_min':>9} {'p_max':>9}")
+    sep = "  " + "-" * len(hdr)
+    lines.append(hdr)
+    lines.append(sep)
+
+    nw = max(len(r[0]) for r in rows)
+    for r in rows:
+      (name, gn_dir, gn_chg, gn_lo, gn_hi, pn_dir, pn_chg, pn_lo, pn_hi) = r
+      lines.append(f"  {name:<{nw}}"
+                   f" {gn_dir:>5} {gn_chg:>+7.1f}% {gn_lo:>9.2e} {gn_hi:>9.2e}"
+                   f" {pn_dir:>5} {pn_chg:>+7.1f}% {pn_lo:>9.2e} {pn_hi:>9.2e}")
+
+    return lines
 
   def _format_row(self, name, s, status, name_width):
     return (f"{name:<{name_width}}"

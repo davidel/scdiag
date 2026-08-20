@@ -505,6 +505,13 @@ def parse_args(argv=None):
       help="Log gradient stats every N steps. -1 (default) = disabled.",
   )
   parser.add_argument(
+      "--norm_history",
+      type=int,
+      default=0,
+      help="Keep last N norm snapshots per param for trend analysis. "
+      "0 (default) = disabled. Requires --grad_monitor.",
+  )
+  parser.add_argument(
       "--save_every",
       type=int,
       default=500,
@@ -1205,8 +1212,14 @@ def main():
   completed_epoch = start_epoch - 1  # last fully completed (-1 = none yet)
   grad_monitor = None
   if args.grad_monitor >= 0:
-    grad_monitor = GradMonitor(model, log_every=args.grad_monitor)
+    grad_monitor = GradMonitor(
+        model,
+        log_every=args.grad_monitor,
+        norm_history=args.norm_history,
+    )
     logging.info(f"Gradient monitoring enabled (every {args.grad_monitor} steps).")
+    if args.norm_history > 0:
+      logging.info(f"  Norm trend history: last {args.norm_history} snapshots")
 
   # Report the final model state after LoRA, freezing, optimizer setup, and
   # checkpoint restoration, immediately before training begins.

@@ -318,3 +318,89 @@ def test_gpr_no_flag_when_below_ceiling(caplog):
     mon.step(0)
 
   assert "GPR" not in caplog.text
+
+
+# ---- norm_history tests ----
+
+
+def test_no_trend_when_norm_history_disabled(caplog):
+  model = TinyModel()
+  mon = GradMonitor(model, log_every=1, norm_history=0)
+  x = torch.randn(4, 10)
+  target = torch.randn(4, 5)
+  opt = torch.optim.SGD(model.parameters(), lr=0.01)
+
+  for i in range(5):
+    _train_step(model, x, target, opt)
+    mon.step(i)
+
+  assert "Norm Trends" not in caplog.text
+
+
+def test_trend_appears_after_two_snapshots(caplog):
+  model = TinyModel()
+  mon = GradMonitor(model, log_every=1, norm_history=10)
+  x = torch.randn(4, 10)
+  target = torch.randn(4, 5)
+  opt = torch.optim.SGD(model.parameters(), lr=0.01)
+
+  # First snapshot — only one entry, no trend yet.
+  _train_step(model, x, target, opt)
+  caplog.clear()
+  with caplog.at_level(logging.INFO):
+    mon.step(0)
+  assert "Norm Trends" not in caplog.text
+
+  # Second snapshot — now we have two entries.
+  _train_step(model, x, target, opt)
+  caplog.clear()
+  with caplog.at_level(logging.INFO):
+    mon.step(1)
+  assert "Norm Trends" in caplog.text
+  assert "g_dir" in caplog.text
+  assert "p_dir" in caplog.text
+
+
+def test_norm_history_rolling_window(caplog):
+  """Deque maxlen limits history to norm_history entries."""
+  model = TinyModel()
+  history_size = 5
+  mon = GradMonitor(model, log_every=1, norm_history=history_size)
+  x = torch.randn(4, 10)
+  target = torch.randn(4, 5)
+  opt = torch.optim.SGD(model.parameters(), lr=0.01)
+
+  for i in range(20):
+    _train_step(model, x, target, opt)
+    mon.step(i)
+
+  # Check that no deque exceeds the maxlen.
+  for buf in mon._norm_buf.values():
+    assert len(buf) <= history_size
+
+
+def test_trend_direction_growing(caplog):
+  """When param norm grows, trend reports UP."""
+  model = TinyModel()
+  mon = GradMonitor(model, log_every=1, norm_history=10)
+  x = torch.randn(4, 10)
+  target = torch.randn(4, 5)
+  opt = torch.optim.SGD(model.parameters(), lr=0.01)
+
+  # Train normally for a few steps to build history.
+  for i in range(5):
+    _train_step(model, x, target, opt)
+    mon.step(i)
+
+  # Artificially inflate gradients to push param norms up.
+  with caplog.at_level(logging.INFO):
+    for i in range(5, 15):
+      _train_step(model, x, target, opt)
+      # Scale up weights directly to make norm growth obvious.
+      with torch.no_grad():
+        for p in model.parameters():
+          p.data.mul_(1.5)
+      mon.step(i)
+
+  # At least one param should show UP in the trend.
+  assert "UP" in caplog.text
