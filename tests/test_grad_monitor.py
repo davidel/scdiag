@@ -404,3 +404,50 @@ def test_trend_direction_growing(caplog):
 
   # At least one param should show UP in the trend.
   assert "UP" in caplog.text
+
+
+def test_trend_top_n_limits_output(caplog):
+  """trend_top_n caps the number of rows in the trend table."""
+  model = TinyModel()
+  # 4 params total; limit to 2.
+  mon = GradMonitor(model, log_every=1, norm_history=10, trend_top_n=2)
+  x = torch.randn(4, 10)
+  target = torch.randn(4, 5)
+  opt = torch.optim.SGD(model.parameters(), lr=0.01)
+
+  for i in range(10):
+    _train_step(model, x, target, opt)
+    mon.step(i)
+
+  with caplog.at_level(logging.INFO):
+    mon.step(10)
+
+  trend_headers = [
+      r.message for r in caplog.records
+      if "params by change" in r.message
+  ]
+  assert len(trend_headers) == 1
+  assert "top 2/4" in trend_headers[0]
+
+
+def test_trend_top_n_zero_shows_all(caplog):
+  """trend_top_n=0 shows all params."""
+  model = TinyModel()
+  mon = GradMonitor(model, log_every=1, norm_history=10, trend_top_n=0)
+  x = torch.randn(4, 10)
+  target = torch.randn(4, 5)
+  opt = torch.optim.SGD(model.parameters(), lr=0.01)
+
+  for i in range(10):
+    _train_step(model, x, target, opt)
+    mon.step(i)
+
+  with caplog.at_level(logging.INFO):
+    mon.step(10)
+
+  trend_headers = [
+      r.message for r in caplog.records
+      if "params by change" in r.message
+  ]
+  assert len(trend_headers) == 1
+  assert "top 4/4" in trend_headers[0]

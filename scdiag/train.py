@@ -512,6 +512,13 @@ def parse_args(argv=None):
       "0 (default) = disabled. Requires --grad_monitor.",
   )
   parser.add_argument(
+      "--trend_top_n",
+      type=int,
+      default=10,
+      help="Show top N params in trend table by abs change %. "
+      "0 = show all. Requires --norm_history.",
+  )
+  parser.add_argument(
       "--save_every",
       type=int,
       default=500,
@@ -1216,6 +1223,7 @@ def main():
         model,
         log_every=args.grad_monitor,
         norm_history=args.norm_history,
+        trend_top_n=args.trend_top_n,
     )
     logging.info(f"Gradient monitoring enabled (every {args.grad_monitor} steps).")
     if args.norm_history > 0:

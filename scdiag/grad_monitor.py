@@ -102,6 +102,9 @@ class GradMonitor:
     norm_history : int
         Maximum number of recent (step, grad_norm, param_norm) snapshots
         to keep per parameter for trend analysis.  0 disables (default).
+    trend_top_n : int
+        Number of top-changing parameters to show in the trend table,
+        sorted by max absolute change percentage.  0 shows all.
     """
 
   def __init__(
@@ -116,6 +119,7 @@ class GradMonitor:
       imbalance_factor=100.0,
       gpr_ceiling=1.0,
       norm_history=0,
+      trend_top_n=10,
   ):
     self._model = model
     self._log_every = log_every
@@ -127,6 +131,7 @@ class GradMonitor:
     self._imbalance_factor = imbalance_factor
     self._gpr_ceiling = gpr_ceiling
     self._norm_history = norm_history
+    self._trend_top_n = trend_top_n
 
     self._consecutive_low = {}
     self._norm_buf = collections.defaultdict(
@@ -328,23 +333,32 @@ class GradMonitor:
     if not rows:
       return []
 
+    # Sort by max absolute change percentage descending, take top_n.
+    rows.sort(key=lambda r: max(abs(r[2]), abs(r[6])), reverse=True)
+    total = len(rows)
+    if self._trend_top_n > 0 and len(rows) > self._trend_top_n:
+      rows = rows[:self._trend_top_n]
+
     lines = []
     lines.append(
         f"  Norm Trends (last {len(self._norm_buf[next(iter(self._norm_buf))])}"
-        f" snapshots, {len(rows)} params):")
-    hdr = (f"  {'Param':<{len(rows[0][0])}}"
-           f" {'g_dir':>5} {'g_chg%':>8} {'g_min':>9} {'g_max':>9}"
-           f" {'p_dir':>5} {'p_chg%':>8} {'p_min':>9} {'p_max':>9}")
+        f" snapshots, top {len(rows)}/{total} params by change):")
+
+    # Compute name width first so header and data align.
+    nw = max(len(r[0]) for r in rows)
+    nw = max(nw, len("Param"))
+    hdr = (f"  {'Param':<{nw}}"
+           f" {'g_dir':>5} {'g_chg%':>9} {'g_min':>9} {'g_max':>9}"
+           f" {'p_dir':>5} {'p_chg%':>9} {'p_min':>9} {'p_max':>9}")
     sep = "  " + "-" * len(hdr)
     lines.append(hdr)
     lines.append(sep)
 
-    nw = max(len(r[0]) for r in rows)
     for r in rows:
       (name, gn_dir, gn_chg, gn_lo, gn_hi, pn_dir, pn_chg, pn_lo, pn_hi) = r
       lines.append(f"  {name:<{nw}}"
-                   f" {gn_dir:>5} {gn_chg:>+7.1f}% {gn_lo:>9.2e} {gn_hi:>9.2e}"
-                   f" {pn_dir:>5} {pn_chg:>+7.1f}% {pn_lo:>9.2e} {pn_hi:>9.2e}")
+                   f" {gn_dir:>5} {gn_chg:>+8.1f}% {gn_lo:>9.2e} {gn_hi:>9.2e}"
+                   f" {pn_dir:>5} {pn_chg:>+8.1f}% {pn_lo:>9.2e} {pn_hi:>9.2e}")
 
     return lines
 
