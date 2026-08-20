@@ -126,7 +126,7 @@ def test_no_stall_on_first_step(caplog):
 
 def test_stall_detection_after_window(caplog):
   model = TinyModel()
-  mon = GradMonitor(model, log_every=1, stall_window=3, norm_floor=1e-8)
+  mon = GradMonitor(model, log_every=1, stall_window=3)
   x = torch.randn(4, 10)
   target = torch.randn(4, 5)
   opt = torch.optim.SGD(model.parameters(), lr=0.01)
@@ -149,7 +149,7 @@ def test_stall_detection_after_window(caplog):
 
 def test_explosion_detection(caplog):
   model = TinyModel()
-  mon = GradMonitor(model, log_every=1, norm_ceiling=10.0)
+  mon = GradMonitor(model, log_every=1, norm_ceiling=1.0)
   x = torch.randn(4, 10)
   target = torch.randn(4, 5)
   opt = torch.optim.SGD(model.parameters(), lr=0.01)
@@ -174,7 +174,7 @@ def test_report_without_grad(caplog):
   with caplog.at_level(logging.INFO):
     mon.step(0)
 
-  assert "grad_norm: mean=0.00e+00" in caplog.text
+  assert "grad_rms: mean=0.00e+00" in caplog.text
 
 
 def test_imbalance_detection(caplog):

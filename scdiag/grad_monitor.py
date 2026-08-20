@@ -23,6 +23,10 @@ immediately if any are found.
 When ``norm_history`` > 0, per-layer gradient and parameter norms are
 accumulated in a rolling window and a trend summary is appended to each
 report.
+
+All norms reported are **RMS** (root mean square): L2 norm divided by
+``sqrt(numel)``.  This makes them independent of tensor shape and
+directly comparable across parameters of different sizes.
 """
 
 import collections
@@ -79,11 +83,11 @@ class GradMonitor:
         Number of consecutive log-steps a layer's gradient norm must
         stay below ``norm_floor`` before it is flagged as stalled.
     norm_floor : float
-        Gradient-norm threshold below which a layer is considered
-        inactive.
+        Gradient RMS threshold below which a parameter is considered
+        inactive.  Default ``1e-7``.
     norm_ceiling : float
-        Gradient-norm threshold above which a layer is considered
-        exploding.
+        Gradient RMS threshold above which a parameter is considered
+        exploding.  Default ``1.0``.
     top_k : int
         Number of healthy (non-anomalous) params to show in the report,
         sorted by gradient norm descending.
@@ -106,8 +110,8 @@ class GradMonitor:
       log_every=50,
       detect_nan=False,
       stall_window=50,
-      norm_floor=1e-8,
-      norm_ceiling=100.0,
+      norm_floor=1e-7,
+      norm_ceiling=1.0,
       top_k=5,
       imbalance_factor=100.0,
       gpr_ceiling=1.0,
@@ -154,7 +158,11 @@ class GradMonitor:
     for name, p in self._model.named_parameters():
       if p.requires_grad:
         entry = {}
-        entry["param_norm"] = float(p.data.norm())
+        numel = p.numel()
+        rms_scale = numel**0.5
+
+        param_rms = float(p.data.norm()) / rms_scale
+        entry["param_norm"] = param_rms
 
         if p.grad is None:
           entry["grad_norm"] = 0.0
@@ -164,12 +172,12 @@ class GradMonitor:
           entry["grad_param_ratio"] = 0.0
         else:
           g = p.grad.data
-          g_norm = float(g.norm())
-          entry["grad_norm"] = g_norm
+          grad_rms = float(g.norm()) / rms_scale
+          entry["grad_norm"] = grad_rms
           entry["grad_mean"] = float(g.float().mean())
           entry["grad_max"] = float(g.abs().max())
           entry["grad_sparsity"] = float((g.abs() < 1e-7).float().mean())
-          entry["grad_param_ratio"] = g_norm / (entry["param_norm"] + 1e-12)
+          entry["grad_param_ratio"] = grad_rms / (param_rms + 1e-12)
 
         is_low = entry["grad_norm"] < self._norm_floor
         prev = self._consecutive_low.get(name, 0)
@@ -208,7 +216,7 @@ class GradMonitor:
 
     lines = [(f"[Step {global_step}] Gradient Report:"
               f" {len(stats)} params"
-              f" | grad_norm:"
+              f" | grad_rms:"
               f" mean={sum(norms)/len(norms) if norms else 0:.2e}"
               f" max={max(norms) if norms else 0:.2e}"
               f" min={min(norms) if norms else 0:.2e}"
@@ -252,7 +260,7 @@ class GradMonitor:
 
       nw = max(len(name) for name, _, _ in rows)
       nw = max(nw, len("Name"))
-      hdr = (f"  {'Name':<{nw}} {'g_norm':>10} {'p_norm':>10}"
+      hdr = (f"  {'Name':<{nw}} {'g_rms':>10} {'p_rms':>10}"
              f" {'g/p':>10} {'g_max':>10} {'sparse':>7} {'status':<12}")
       sep = "  " + "-" * len(hdr)
       lines.append(hdr)
@@ -323,7 +331,7 @@ class GradMonitor:
     lines = []
     lines.append(
         f"  Norm Trends (last {len(self._norm_buf[next(iter(self._norm_buf))])}"
-        f" snapshots, {rows[0][0] and len(rows)} params):")
+        f" snapshots, {len(rows)} params):")
     hdr = (f"  {'Param':<{len(rows[0][0])}}"
            f" {'g_dir':>5} {'g_chg%':>8} {'g_min':>9} {'g_max':>9}"
            f" {'p_dir':>5} {'p_chg%':>8} {'p_min':>9} {'p_max':>9}")
