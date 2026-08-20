@@ -147,6 +147,7 @@ scdiag-train --model cls_model_wrapper:google/vit-base-patch16-224 \
 | `--log_every` | `20` | Log every N steps |
 | `--grad_monitor` | `-1` | Log gradient statistics every N steps; `-1` disables. See [Gradient Monitor](#gradient-monitor) for column meanings. |
 | `--norm_history` | `0` | Keep last N norm snapshots per parameter for trend analysis. Requires `--grad_monitor`. See [Norm trend history](#norm-trend-history). |
+| `--trend_top_n` | `10` | Show top N params in trend table by abs change %. `0` = show all. |
 | `--grad_clip` | `1.0` | Maximum gradient norm for clipping. `0` disables clipping. |
 | `--save_every` | `500` | Save checkpoint every N steps |
 | `--num_workers` | `2` | DataLoader worker processes |
@@ -423,6 +424,7 @@ scdiag-train --model convvit \
 | `--log_level` | `INFO` | Minimum logging level. |
 | `--grad_monitor` | `-1` | Log gradient statistics every N steps; `-1` disables. See [Gradient Monitor](#gradient-monitor) for column meanings. |
 | `--norm_history` | `0` | Keep last N norm snapshots per parameter for trend analysis. Requires `--grad_monitor`. See [Norm trend history](#norm-trend-history). |
+| `--trend_top_n` | `10` | Show top N params in trend table by abs change %. `0` = show all. |
 | `--grad_clip` | `1.0` | Maximum gradient norm for clipping. `0` disables clipping. |
 | `--lr_group` | `None` | Per-parameter-group learning rates (repeatable). Format: `"REGEX=LR"`. Regexes matched against `named_parameters()`; first match wins. Unmatched trainable params use `--lr`. Example: `"backbone.*=1e-5" "classifier.*=1e-3"` |
 | `--vis_every` | `0` | Log reconstruction visualisation to TensorBoard every N steps. `0` disables visualisation logging. |
