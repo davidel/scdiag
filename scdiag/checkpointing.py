@@ -224,20 +224,15 @@ def _format_model_param_table(model):
 
   headers = ["Parameter", "Shape", "Params", "Size", "Trainable"]
   aligns = ["left", "right", "right", "right", "right"]
+  footer = [
+      "TOTAL", "",
+      _format_count(total_params),
+      _format_bytes(total_bytes),
+      _format_count(trainable_params),
+  ]
   lines = ["Model parameter details:"]
-  lines.extend(format_table(headers, data_rows, align=aligns))
-  lines.append(
-      format_table(
-          [""] * 5,
-          [[
-              "TOTAL",
-              "",
-              _format_count(total_params),
-              _format_bytes(total_bytes),
-              _format_count(trainable_params),
-          ]],
-          align=aligns,
-      )[-1])
+  lines.extend(
+      format_table(headers, data_rows, align=aligns, footer=footer))
   return "\n".join(lines)
 
 

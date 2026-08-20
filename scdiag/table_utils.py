@@ -5,7 +5,7 @@ newline.  Column widths are computed automatically from the data.
 """
 
 
-def format_table(headers, rows, align=None, prefix="  "):
+def format_table(headers, rows, align=None, prefix="  ", footer=None):
   """Build an aligned text table.
 
   Parameters
@@ -19,21 +19,27 @@ def format_table(headers, rows, align=None, prefix="  "):
       If *None* every column defaults to right-aligned.
   prefix : str
       Indentation prepended to every line.
+  footer : list[str] | None
+      Optional summary row rendered after the separator, using the
+      same column alignment as data rows.
 
   Returns
   -------
   list[str]
-      Lines: header, separator, data rows.
+      Lines: header, separator, data rows, optional footer.
   """
   if not headers:
     return []
   n_cols = len(headers)
   if align is None:
     align = ["right"] * n_cols
-  # Compute column widths: max of header and all data cells.
+  # Compute column widths: max of header, all data cells, and footer.
   widths = [len(h) for h in headers]
   for row in rows:
     for i, cell in enumerate(row):
+      widths[i] = max(widths[i], len(cell))
+  if footer:
+    for i, cell in enumerate(footer):
       widths[i] = max(widths[i], len(cell))
 
   def _fmt(text, col_idx):
@@ -47,4 +53,6 @@ def format_table(headers, rows, align=None, prefix="  "):
   lines = [hdr, sep]
   for row in rows:
     lines.append(prefix + " ".join(_fmt(cell, i) for i, cell in enumerate(row)))
+  if footer:
+    lines.append(prefix + " ".join(_fmt(cell, i) for i, cell in enumerate(footer)))
   return lines
