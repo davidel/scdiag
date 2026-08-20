@@ -146,6 +146,7 @@ scdiag-train --model cls_model_wrapper:google/vit-base-patch16-224 \
 | `--checkpoint` | `scdiag` | Checkpoint base path (`_latest.pt` / `_best.pt` appended) |
 | `--log_every` | `20` | Log every N steps |
 | `--grad_monitor` | `-1` | Log gradient statistics every N steps; `-1` disables. See [Gradient Monitor](#gradient-monitor) for column meanings. |
+| `--norm_history` | `0` | Keep last N norm snapshots per parameter for trend analysis. Requires `--grad_monitor`. See [Norm trend history](#norm-trend-history). |
 | `--grad_clip` | `1.0` | Maximum gradient norm for clipping. `0` disables clipping. |
 | `--save_every` | `500` | Save checkpoint every N steps |
 | `--num_workers` | `2` | DataLoader worker processes |
@@ -195,13 +196,18 @@ gradients, imbalanced parameter updates) before it shows up in the loss.
 #### Summary line
 
 ```
-[Step 29400] Gradient Report: 202 params | grad_norm: mean=5.68e-01 max=3.41e+00 min=1.66e-05 | grad/param: mean=2.94e-01
+[Step 29400] Gradient Report: 202 params | grad_rms: mean=5.68e-01 max=3.41e+00 min=1.66e-05 | grad/param: mean=2.94e-01
 ```
+
+All norms are **RMS** (root mean square): L2 norm divided by `sqrt(numel)`.
+This makes them independent of tensor shape and directly comparable across
+parameters of different sizes. A freshly initialized `nn.Linear(1024, 1024)`
+with `std=0.02` would show `p_rms ≈ 0.02`.
 
 | Field | Meaning |
 |---|---|
 | `params` | Total number of trainable parameters (those with `requires_grad=True`). |
-| `grad_norm: mean/max/min` | L2 norm of the gradient tensor for each parameter, then aggregated across all trainable params. `max` is the single most aggressive gradient — the one most likely to cause instability. |
+| `grad_rms: mean/max/min` | RMS of the gradient tensor for each parameter, then aggregated across all trainable params. `max` is the single most aggressive gradient — the one most likely to cause instability. |
 | `grad/param: mean` | Average of the gradient-to-parameter ratio (see *g/p* below). Healthy models typically show mean g/p < 0.1. Values > 1.0 mean updates are larger than the weights themselves. |
 
 #### Per-parameter columns
@@ -210,9 +216,9 @@ Each row reports one trainable parameter (or parameter tensor). Columns:
 
 | Column | Symbol | How it's computed | What to look for |
 |---|---|---|---|
-| **g_norm** | `‖∇L‖` | `torch.norm(grad)` — L2 norm of the full gradient tensor for this parameter. | Compare across params. One param with g_norm 100× higher than others is a problem. |
-| **p_norm** | `‖W‖` | `torch.norm(param)` — L2 norm of the parameter tensor itself. | Gives scale context. A freshly initialized `nn.Linear(1024, 1024)` typically has p_norm ~18–55 depending on init. |
-| **g/p** | `‖∇L‖ / (‖W‖ + ε)` | g_norm divided by p_norm (with ε = 10⁻¹² to avoid division by zero). | The single most useful column. Tells you the **relative size of the update**. Healthy: < 0.1. Concerning: > 1.0 (update overshoots the parameter). Dangerous: > 5.0 (parameter is being thrown around randomly). |
+| **g_rms** | `‖∇L‖/√N` | `torch.norm(grad) / sqrt(numel)` — RMS of the gradient tensor. | Compare across params. One param with g_rms 100× higher than others is a problem. |
+| **p_rms** | `‖W‖/√N` | `torch.norm(param) / sqrt(numel)` — RMS of the parameter tensor. | Gives per-element scale context. With `trunc_normal_(std=0.02)`, expect `p_rms ≈ 0.02`. |
+| **g/p** | `‖∇L‖ / (‖W‖ + ε)` | g_rms divided by p_rms (with ε = 10⁻¹² to avoid division by zero). | The single most useful column. Tells you the **relative size of the update**. Healthy: < 0.1. Concerning: > 1.0 (update overshoots the parameter). Dangerous: > 5.0 (parameter is being thrown around randomly). |
 | **g_max** | `max\|∇L\|` | `grad.abs().max()` — largest absolute gradient value anywhere in the tensor. | Highlights individual neurons that are getting extreme gradients even when the overall norm looks reasonable. |
 | **sparse** | `% zero` | Fraction of gradient elements with `\|grad\| < 1e-7`. | High sparsity (> 50%) means most neurons in this layer aren't receiving gradient signal. Can indicate dead neurons or a learning rate that's too low. |
 | **status** | | Anomaly detection flag (see below). | `OK` = healthy. Anything else deserves investigation. |
@@ -222,21 +228,40 @@ Each row reports one trainable parameter (or parameter tensor). Columns:
 | Flag | Full name | Condition |
 |---|---|---|
 | `OK` | Normal | No anomaly detected. |
-| `STL` | Stalled | g_norm has been below `norm_floor` (1e-8) for `stall_window` consecutive log steps (default: 50) — the parameter has stopped learning. |
-| `OVF` | Exploding | g_norm exceeds `norm_ceiling` (100) — the gradient is dangerously large. |
-| `IMB` | Imbalanced | g_norm exceeds 100× the median gradient norm across all params — this parameter is being updated much more aggressively than others. |
+| `STL` | Stalled | g_rms has been below `norm_floor` (1e-7) for `stall_window` consecutive log steps (default: 50) — the parameter has stopped learning. |
+| `OVF` | Exploding | g_rms exceeds `norm_ceiling` (1.0) — the gradient is dangerously large. |
+| `IMB` | Imbalanced | g_rms exceeds 100× the median gradient RMS across all params — this parameter is being updated much more aggressively than others. |
 | `GPR` | G/P Ratio | g/p (gradient-to-parameter ratio) exceeds `gpr_ceiling` (default: 1.0) — the update step is larger than the weight itself, meaning the parameter is being pushed further than its current scale in a single step. |
 
 The thresholds (`norm_floor`, `norm_ceiling`, `stall_window`, `imbalance_factor`,
 `gpr_ceiling`) are configurable on the `GradMonitor` constructor but not
 exposed via CLI flags.
 
+#### Norm trend history
+
+`--norm_history N` (requires `--grad_monitor`) keeps the last N norm snapshots
+per parameter. A trend summary table is appended to each report:
+
+```
+  Norm Trends (last 10 snapshots, 82 params):
+  Param      g_dir   g_chg%     g_min     g_max p_dir   p_chg%     p_min     p_max
+  -----------------------------------------------------------------------------------
+  fc1.weight    ---     -2.3%  5.37e-01  5.50e-01   ---    -0.0%  2.41e+00  2.41e+00
+```
+
+| Column | Meaning |
+|---|---|
+| `g_dir` / `p_dir` | `UP` (>+10% change), `DOWN` (<-10%), or `---` (stable). |
+| `g_chg%` / `p_chg%` | Percentage change from first to last snapshot in the window. |
+| `g_min` / `g_max` | Min/max g_rms observed in the window. |
+| `p_min` / `p_max` | Min/max p_rms observed in the window. |
+
 #### Reading the report
 
 **Healthy training** looks like:
 - g/p ratios well below 1.0 for all params
 - `grad/param: mean` in the 0.01–0.1 range
-- g_norm values within ~10× of each other across layers
+- g_rms values within ~10× of each other across layers
 - No `OVF` or `IMB` flags
 
 **Overfitting** (high train accuracy, low val accuracy):
@@ -246,12 +271,12 @@ exposed via CLI flags.
 **Exploding gradients** (loss spikes, NaN):
 - One or more params with `OVF` status
 - g/p > 5.0 on some layers
-- `grad_norm: max` orders of magnitude larger than `mean`
+- `grad_rms: max` orders of magnitude larger than `mean`
 - Fix: lower LR, add gradient clipping (`--grad_clip 1.0`), or use a warmup schedule.
 
 **Vanishing gradients** (loss flat, no learning):
 - Many params with `STL` status
-- g_norm values near 1e-8 or below
+- g_rms values near 1e-7 or below
 - High sparsity (> 50%)
 - Fix: increase LR, check for dead neurons, verify the loss is connected to the parameters being monitored.
 
@@ -397,6 +422,7 @@ scdiag-train --model convvit \
 | `--checkpoint` | (required) | Checkpoint path prefix (saves `_latest.pt` and `_best.pt`). |
 | `--log_level` | `INFO` | Minimum logging level. |
 | `--grad_monitor` | `-1` | Log gradient statistics every N steps; `-1` disables. See [Gradient Monitor](#gradient-monitor) for column meanings. |
+| `--norm_history` | `0` | Keep last N norm snapshots per parameter for trend analysis. Requires `--grad_monitor`. See [Norm trend history](#norm-trend-history). |
 | `--grad_clip` | `1.0` | Maximum gradient norm for clipping. `0` disables clipping. |
 | `--lr_group` | `None` | Per-parameter-group learning rates (repeatable). Format: `"REGEX=LR"`. Regexes matched against `named_parameters()`; first match wins. Unmatched trainable params use `--lr`. Example: `"backbone.*=1e-5" "classifier.*=1e-3"` |
 | `--vis_every` | `0` | Log reconstruction visualisation to TensorBoard every N steps. `0` disables visualisation logging. |
@@ -510,7 +536,7 @@ scdiag-train --model convvit --model_arg depth=6 num_heads=8 dropout=0.2
 
 1. Create `scdiag/models/{name}/` with:
    - `model.py` — the `nn.Module` architecture
-   - `processor.py` — image processor (must have `__call__(images)` → tensor)
+   - `processor.py` — image processor (must expose `.image_mean`, `.image_std` properties; registered via `@register_processor`)
    - `loader.py` — `@register_model("{name}")` decorated loader function
      whose `**kwargs` accept arbitrary overrides (forwarded from `--model_arg`)
    - `__init__.py` — re-export public symbols
@@ -529,6 +555,7 @@ scdiag-train --model convvit --model_arg depth=6 num_heads=8 dropout=0.2
 | Name | Description | `--model` value |
 |---|---|---|
 | ConvViT | Multi-block conv stem (4 blocks → patch_size 16) + 12-layer ViT encoder with CLS-guided attention pooling | `convvit` |
+| UVito | Frozen SMP encoder (e.g. ResNet50) + learnable patch projection + Transformer encoder with CLS tokens | `uvito` |
 | ClsModelWrapper | HuggingFace backbone + custom classifier head | `cls_model_wrapper:<hf_name>` |
 
 ### Custom Classifiers
