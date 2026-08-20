@@ -93,19 +93,19 @@ def load_convvit(
         command line.
     """
   # Allow CLI / caller overrides via --model_arg (e.g. depth=6 num_heads=8).
-  config = SimpleNamespace(
-      image_size=image_size,
-      embed_dim=768,
-      num_heads=12,
-      depth=12,
-      dropout=0.0,
-      drop_path_rate=0.1,
-      num_conv_layers=4,
-      num_labels=num_labels,
-      id2label=id2label,
-      label2id=label2id,
+  config = SimpleNamespace(**{
+      "image_size": image_size,
+      "embed_dim": 768,
+      "num_heads": 12,
+      "depth": 12,
+      "dropout": 0.0,
+      "drop_path_rate": 0.1,
+      "num_conv_layers": 4,
+      "num_labels": num_labels,
+      "id2label": id2label,
+      "label2id": label2id,
       **kwargs,
-  )
+  })
 
   logging.info(
       "Building ConvViT  (image_size=%d, num_labels=%d, depth=%d, "

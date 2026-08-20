@@ -5,6 +5,7 @@ import tempfile
 
 import pytest
 import torch
+import torch.nn as nn
 from PIL import Image
 
 from scdiag.model_utils import extract_backbone_features
@@ -410,6 +411,64 @@ class TestLoadCustomModel:
     out = model(pixel_values=pixel_values)
     assert isinstance(out, ModelOutput)
     assert out.logits.shape == (1, 3)
+
+  def test_model_arg_overrides_convvit(self):
+    """--model_arg depth=6 should override the default depth=12."""
+    id2label = {0: "a", 1: "b"}
+    label2id = {"a": 0, "b": 1}
+
+    model = load_model(
+        "convvit",
+        num_labels=2,
+        id2label=id2label,
+        label2id=label2id,
+        image_size=224,
+        device=torch.device("cpu"),
+        depth=6,
+        drop_path_rate=0.2,
+    )
+    assert model.config.depth == 6
+    assert model.config.drop_path_rate == 0.2
+    # Default that was NOT overridden should stay.
+    assert model.config.num_heads == 12
+
+  def test_model_arg_overrides_uvito(self, monkeypatch):
+    """--model_arg should propagate to UVito config and model."""
+    id2label = {0: "a", 1: "b"}
+    label2id = {"a": 0, "b": 1}
+
+    # Mock UVito.__init__ to avoid downloading ResNet weights.
+    from scdiag.models.uvito import model as uvito_mod
+
+    captured_kwargs = {}
+
+    def _mock_init(self, **kwargs):
+      nn.Module.__init__(self)
+      captured_kwargs.update(kwargs)
+
+    monkeypatch.setattr(uvito_mod.UVito, "__init__", _mock_init)
+
+    model = load_model(
+        "uvito",
+        num_labels=2,
+        id2label=id2label,
+        label2id=label2id,
+        image_size=224,
+        device=torch.device("cpu"),
+        num_transformer_layers=3,
+        drop_path_rate=0.2,
+    )
+    # Config should carry the overrides.
+    assert model.config.num_transformer_layers == 3
+    assert model.config.drop_path_rate == 0.2
+    # Default that was NOT overridden should stay in config.
+    assert model.config.image_size == 224
+    # The model constructor should have received the overrides.
+    assert captured_kwargs["num_transformer_layers"] == 3
+    assert captured_kwargs["drop_path_rate"] == 0.2
+    # Only explicitly-passed kwargs appear; constructor defaults are irrelevant
+    # because we mocked __init__.
+    assert "nhead" not in captured_kwargs  # not passed by test
 
   def test_unknown_model_raises(self):
     # load_model falls through to HuggingFace for unknown names,

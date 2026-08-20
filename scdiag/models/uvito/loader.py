@@ -68,16 +68,19 @@ def load_uvito(
   device : str or torch.device
   checkpoint_path : str or None
   """
-  config = SimpleNamespace(
-      num_labels=num_labels,
-      id2label=id2label,
-      label2id=label2id,
-      image_size=image_size,
-  )
+  config = SimpleNamespace(**{
+      "num_labels": num_labels,
+      "id2label": id2label,
+      "label2id": label2id,
+      "image_size": image_size,
+      **kwargs,
+  })
 
   model = UVito(
       num_classes=num_labels,
       img_size=image_size,
+      **{k: v for k, v in kwargs.items()
+         if k not in ("num_labels", "id2label", "label2id", "image_size")},
   )
 
   if checkpoint_path and os.path.isfile(checkpoint_path):
