@@ -301,15 +301,15 @@ def fmt_weights(weights, decimals=3):
   return "[" + ", ".join(f"{v:.{decimals}f}" for v in weights.tolist()) + "]"
 
 
-def compute_class_weights(train_dataset, num_labels):
+def compute_class_weights(train_dataset, num_labels, label_column="label"):
   """Compute inverse-frequency class weights as a CPU tensor.
 
     *train_dataset* is a raw HF ``Dataset`` (before ``set_transform`` is
     applied) so that column access does not trigger any registered
     transforms.
     """
-  feat = train_dataset.features["label"]
-  raw_labels = train_dataset["label"]
+  feat = train_dataset.features[label_column]
+  raw_labels = train_dataset[label_column]
   if isinstance(feat, datasets.ClassLabel):
     labels = np.array(
         feat.str2int(raw_labels) if isinstance(raw_labels[0], str) else raw_labels,
@@ -1075,7 +1075,8 @@ def main():
   num_labels = train_proxy.num_labels
   logging.info(f"num_labels: {num_labels}")
 
-  w_freq = compute_class_weights(train_proxy.dataset, num_labels)
+  w_freq = compute_class_weights(train_proxy.dataset, num_labels,
+                                 train_proxy.label_column)
   logging.info(f"Inverse-frequency weights: {fmt_weights(w_freq)}")
 
   # Convert proxy label2id (str values) to int values for parse_class_multipliers.

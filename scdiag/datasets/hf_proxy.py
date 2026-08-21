@@ -57,9 +57,10 @@ class HFDatasetProxy:
   })
 
   def __init__(self, hf_dataset, transform=None, image_column=None, label_column=None):
-    self.dataset = self.normalize_image_column(hf_dataset, image_column)
-    self.dataset = self.normalize_labels(self.dataset, label_column)
-    self._image_col = image_column or self.detect_image_column(self.dataset)
+    self._image_col = image_column or self.detect_image_column(hf_dataset)
+    self.dataset = self.normalize_image_column(hf_dataset, self._image_col)
+    self._label_col = label_column or self.detect_label_column(self.dataset)
+    self.dataset = self.normalize_labels(self.dataset, self._label_col)
     self._transform = transform
 
   def __len__(self):
@@ -68,7 +69,7 @@ class HFDatasetProxy:
   def __getitem__(self, idx):
     item = self.dataset[idx]
     image = item[self._image_col]
-    label = item["label"]
+    label = item[self._label_col]
     if hasattr(image, "convert"):
       image = image.convert("RGB")
     if self._transform is not None:
@@ -78,10 +79,10 @@ class HFDatasetProxy:
   @property
   def label_names(self):
     """Return the list of class names from the ``label`` feature."""
-    feat = self.dataset.features["label"]
+    feat = self.dataset.features[self._label_col]
     if isinstance(feat, datasets.ClassLabel):
       return feat.names
-    return sorted(set(self.dataset["label"]))
+    return sorted(set(self.dataset[self._label_col]))
 
   @property
   def num_labels(self):
@@ -97,6 +98,11 @@ class HFDatasetProxy:
   def id2label(self):
     """Return a ``{str(i): name}`` mapping."""
     return {str(i): name for i, name in enumerate(self.label_names)}
+
+  @property
+  def label_column(self):
+    """Return the name of the column used for labels."""
+    return self._label_col
 
   @staticmethod
   def detect_image_column(dataset):
@@ -146,7 +152,7 @@ class HFDatasetProxy:
 
   @staticmethod
   def normalize_labels(dataset, label_column=None):
-    """Cast the selected label column to ClassLabel and rename to ``label``."""
+    """Cast the selected label column to ClassLabel."""
     label_col = label_column or HFDatasetProxy.detect_label_column(dataset)
     if label_col is not None and label_col not in dataset.features:
       fatal(
@@ -156,8 +162,6 @@ class HFDatasetProxy:
       return dataset
     if not isinstance(dataset.features[label_col], datasets.ClassLabel):
       dataset = dataset.class_encode_column(label_col)
-    if label_col != "label":
-      dataset = dataset.rename_column(label_col, "label")
     return dataset
 
   @staticmethod

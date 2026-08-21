@@ -239,7 +239,7 @@ class TestDetectLabelColumn:
 
 class TestLoadAndSplit:
 
-  def test_renames_label_and_returns_proxies(self):
+  def test_preserves_original_label_column_name(self):
     train_mod = _import_train()
     raw = _make_synthetic_dataset(label_col="dx", image_col="image")
 
@@ -248,8 +248,10 @@ class TestLoadAndSplit:
 
     assert isinstance(train_p, train_mod.HFDatasetProxy)
     assert isinstance(val_p, train_mod.HFDatasetProxy)
-    assert "label" in train_p.dataset.column_names
-    assert "label" in val_p.dataset.column_names
+    assert "dx" in train_p.dataset.column_names
+    assert "dx" in val_p.dataset.column_names
+    assert train_p.label_column == "dx"
+    assert val_p.label_column == "dx"
 
   def test_preserves_label_column_if_already_named_label(self):
     train_mod = _import_train()
@@ -297,7 +299,8 @@ class TestLoadAndSplit:
 
     with patch("scdiag.train.load_dataset", return_value=raw):
       train_p, _val_p = train_mod.load_and_split_dataset("fake_dataset")
-    assert "label" in train_p.dataset.column_names
+    assert "diagnosis" in train_p.dataset.column_names
+    assert train_p.label_column == "diagnosis"
 
 
 # Compute class weights
@@ -573,8 +576,8 @@ class TestBuildTransformsWithCustomAug:
     train_mod = _import_train()
     # Passing train_aug_fn=None should behave like the original default
     train_t, _val_t = train_mod.build_transforms(self._mock_processor(),
-                                                image_size=64,
-                                                train_aug_fn=None)
+                                                 image_size=64,
+                                                 train_aug_fn=None)
     img = Image.fromarray(np.random.randint(0, 256, (128, 128, 3), dtype=np.uint8))
     result = train_t(img)
     assert isinstance(result, torch.Tensor)
