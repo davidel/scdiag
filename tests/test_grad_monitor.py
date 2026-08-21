@@ -422,10 +422,7 @@ def test_trend_top_n_limits_output(caplog):
   with caplog.at_level(logging.INFO):
     mon.step(10)
 
-  trend_headers = [
-      r.message for r in caplog.records
-      if "params by change" in r.message
-  ]
+  trend_headers = [r.message for r in caplog.records if "params by change" in r.message]
   assert len(trend_headers) == 1
   assert "top 2/4" in trend_headers[0]
 
@@ -445,10 +442,7 @@ def test_trend_top_n_zero_shows_all(caplog):
   with caplog.at_level(logging.INFO):
     mon.step(10)
 
-  trend_headers = [
-      r.message for r in caplog.records
-      if "params by change" in r.message
-  ]
+  trend_headers = [r.message for r in caplog.records if "params by change" in r.message]
   assert len(trend_headers) == 1
   assert "top 4/4" in trend_headers[0]
 
@@ -478,10 +472,48 @@ def test_trend_strips_common_prefix(caplog):
   with caplog.at_level(logging.INFO):
     mon.step(10)
 
-  prefix_lines = [
-      r.message for r in caplog.records
-      if "Prefix (stripped)" in r.message
-  ]
+  prefix_lines = [r.message for r in caplog.records if "Prefix (stripped)" in r.message]
   # All params share "block." prefix; trend table should strip it.
   assert len(prefix_lines) == 1
   assert "block." in prefix_lines[0]
+
+
+def test_trend_disambiguates_duplicate_suffixes(caplog):
+  """When stripping a prefix produces identical names, the full name is used."""
+
+  class MultiHead(nn.Module):
+
+    def __init__(self):
+      super().__init__()
+      self.head_a = nn.Linear(10, 5)
+      self.head_b = nn.Linear(10, 5)
+
+    def forward(self, x):
+      return self.head_a(x) + self.head_b(x)
+
+  model = MultiHead()
+  mon = GradMonitor(model, log_every=1, norm_history=10, trend_top_n=0)
+  x = torch.randn(4, 10)
+  target = torch.randn(4, 5)
+  opt = torch.optim.SGD(model.parameters(), lr=0.01)
+
+  for i in range(10):
+    _train_step(model, x, target, opt)
+    mon.step(i)
+
+  with caplog.at_level(logging.INFO):
+    mon.step(10)
+
+  trend_lines = [r.message for r in caplog.records if "Norm Trends" in r.message]
+  assert len(trend_lines) == 1
+
+  # Both .weight and .bias share the suffix "head_a.weight" / "head_b.weight"
+  # after stripping "multi_head." — they must not collide.
+  param_lines = [
+      r.message
+      for r in caplog.records
+      if "head_a" in r.message or "head_b" in r.message
+  ]
+  # Should see both head_a and head_b in the trend table.
+  assert any("head_a" in l for l in param_lines)
+  assert any("head_b" in l for l in param_lines)

@@ -351,8 +351,11 @@ class GradMonitor:
     prefix = _find_common_root(names)
     if prefix:
       prefix += "."
-      rows = [(name[len(prefix):] if name.startswith(prefix) else name,) + r[1:]
-              for r in rows]
+      stripped = [(name.removeprefix(prefix), name) for name in names]
+      # Detect duplicates — fall back to full name for any collision.
+      counts = collections.Counter(s for s, _ in stripped)
+      rows = [(full if counts[short] > 1 else short,) + r[1:]
+              for (short, full), r in zip(stripped, rows)]
 
     lines = []
     lines.append(
