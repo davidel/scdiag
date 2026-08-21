@@ -1,9 +1,11 @@
 # scdiag
 
-Fine-tune HuggingFace image-classification models for skin-lesion classification
-(and other image datasets) with a hand-rolled PyTorch training loop. Supports
-self-supervised pre-training (SimMIM, I-JEPA) on multi-source dermoscopy
-datasets.
+Train, pre-train, and evaluate image-classification models for skin-lesion
+diagnosis and other medical imaging tasks.  Supports HuggingFace models,
+custom architectures (ConvViT, UVito), and pluggable classifier heads with a
+hand-rolled PyTorch training loop.  Includes self-supervised pre-training
+(SimMIM, I-JEPA), XGBoost ensemble inference, and dataset preparation
+utilities for common dermoscopy benchmarks.
 
 ## Features
 

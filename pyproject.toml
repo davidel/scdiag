@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "scdiag"
 version = "0.1.0"
-description = "Fine-tune HuggingFace vision models for skin-lesion classification."
+description = "Train, pre-train, and evaluate image-classification models for skin-lesion diagnosis."
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.9"
