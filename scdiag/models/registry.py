@@ -228,6 +228,8 @@ def load_processor(
 
   # Check if a custom processor is registered under the model name
   # (e.g. "convvit") or under the backbone/processor name.
+  if parsed.backbone is not None:
+    kwargs["backbone"] = parsed.backbone
   for name in dict.fromkeys([parsed.model, parsed.processor]):
     if name in _PROCESSOR_REGISTRY:
       logging.info("Loading custom processor '%s' from registry.", name)

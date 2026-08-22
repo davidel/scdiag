@@ -16,11 +16,13 @@ from scdiag.model_utils import build_val_transform, load_model_for_inference
 
 def parse_args(argv=None):
   parser = argparse.ArgumentParser(
-      description="Classify images with a fine-tuned HF model.")
+      description="Classify images with a fine-tuned model (HuggingFace or timm).")
   parser.add_argument(
       "--model",
       required=True,
-      help="HuggingFace model name or local HF path (defines architecture + processor).",
+      help="HuggingFace model name/path or timm model "
+      "(e.g. 'timm:eva02_base_patch14_224.mim_in22k'). "
+      "Defines architecture and processor.",
   )
   parser.add_argument(
       "--checkpoint",

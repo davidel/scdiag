@@ -24,6 +24,7 @@ from scdiag.models.registry import (
 # effects required by model loading.
 import scdiag.models.cls_model_wrapper  # noqa: F401
 import scdiag.models.convvit  # noqa: F401
+import scdiag.models.timm  # noqa: F401
 import scdiag.models.uvito  # noqa: F401
 
 __all__ = [

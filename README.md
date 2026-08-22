@@ -1,8 +1,9 @@
 # scdiag
 
 Train, pre-train, and evaluate image-classification models for skin-lesion
-diagnosis and other medical imaging tasks.  Supports HuggingFace models,
-custom architectures (ConvViT, UVito), and pluggable classifier heads with a
+diagnosis and other medical imaging tasks.  Supports HuggingFace and
+[timm](https://github.com/huggingface/pytorch-image-models) models, custom
+architectures (ConvViT, UVito), and pluggable classifier heads with a
 hand-rolled PyTorch training loop.  Includes self-supervised pre-training
 (SimMIM, I-JEPA), XGBoost ensemble inference, and dataset preparation
 utilities for common dermoscopy benchmarks.
@@ -35,6 +36,11 @@ utilities for common dermoscopy benchmarks.
   model, or register custom architectures via the `scdiag.models` registry.
   First custom model: **ConvViT** (multi-block conv stem + ViT encoder with
   CLS-guided attention pooling). Use `--model convvit` to select it.
+- **timm integration** — load any model from
+  [timm](https://github.com/huggingface/pytorch-image-models) with
+  `--model timm:<model_name>`.  Supports all timm model families (ResNet,
+  ViT, ConvNeXt, EVA-02, EfficientNet, etc.) with model-specific
+  preprocessing resolved automatically.  Install with `pip install scdiag[timm]`.
 - **ClsModelWrapper** — wrap any HuggingFace backbone with a custom
   classifier head. Use `--model cls_model_wrapper:<hf_name>` with
   `--classifier` to select a registered classifier or a `.py` script.
@@ -523,11 +529,20 @@ PyTorch and XGBoost predictions:
 ## Custom Models
 
 scdiag supports any HuggingFace `AutoModelForImageClassification` model out of
-the box.  You can also register custom model architectures:
+the box.  It also supports models from
+[timm](https://github.com/huggingface/pytorch-image-models) via the `timm:`
+prefix, and you can register custom model architectures:
 
 ```bash
 # Use a HuggingFace model
 scdiag-train --model facebook/convnextv2-base-22-22k-384 ...
+
+# Use a timm model (pretrained on ImageNet-21k via MIM)
+scdiag-train --model timm:hf_hub:timm/eva02_base_patch14_224.mim_in22k \
+    --num_labels 8 --image_size 224 ...
+
+# Use a timm model with native weights (no hf_hub: prefix needed)
+scdiag-train --model timm:resnet18 --image_size 224 ...
 
 # Use the built-in ConvViT (conv stem + ViT encoder)
 scdiag-train --model convvit --image_size 224 ...
@@ -558,6 +573,7 @@ scdiag-train --model convvit --model_arg depth=6 num_heads=8 dropout=0.2
 
 | Name | Description | `--model` value |
 |---|---|---|
+| timm | Any model from the [timm](https://github.com/huggingface/pytorch-image-models) library (ResNet, ViT, ConvNeXt, EVA-02, EfficientNet, …) | `timm:<model_name>` |
 | ConvViT | Multi-block conv stem (4 blocks → patch_size 16) + 12-layer ViT encoder with CLS-guided attention pooling | `convvit` |
 | UVito | Frozen SMP encoder (e.g. ResNet50) + learnable patch projection + Transformer encoder with CLS tokens | `uvito` |
 | ClsModelWrapper | HuggingFace backbone + custom classifier head | `cls_model_wrapper:<hf_name>` |
@@ -613,6 +629,7 @@ automatic shape-based alignment.
 
 ```bash
 pip install -e ".[dev]"
+pip install -e ".[timm]"   # optional: timm model support
 pytest
 ```
 

@@ -332,7 +332,7 @@ def compute_class_weights(train_dataset, num_labels, label_column="label"):
 
 def parse_args(argv=None):
   parser = argparse.ArgumentParser(
-      description="Fine-tune a HuggingFace image-classification model.",
+      description="Fine-tune an image-classification model (HuggingFace or timm).",
       formatter_class=argparse.ArgumentDefaultsHelpFormatter,
   )
 
@@ -340,7 +340,8 @@ def parse_args(argv=None):
       "--model",
       type=str,
       default="google/vit-base-patch16-224",
-      help="HuggingFace model name or path.",
+      help="HuggingFace model name/path, or timm model "
+      "(e.g. 'timm:eva02_base_patch14_224.mim_in22k').",
   )
   parser.add_argument(
       "--dataset",

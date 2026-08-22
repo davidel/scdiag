@@ -280,7 +280,8 @@ def parse_args(argv=None):
       type=str,
       default="convvit",
       help="Model name registered in the scdiag registry "
-      "(e.g. 'convvit' or an HuggingFace model ID).",
+      "(e.g. 'convvit', a HuggingFace model ID, or "
+      "'timm:<model_name>' for timm models).",
   )
   parser.add_argument(
       "--datasets",
