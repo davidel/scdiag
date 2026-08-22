@@ -266,6 +266,64 @@ class TestCreateScheduler:
       create_scheduler(optimizer, name=str(script))
 
 
+class TestCreateOptimizerScript:
+  """Tests for create_optimizer with custom .py script dispatch."""
+
+  def test_custom_optimizer_script(self, tmp_path):
+    model = nn.Linear(10, 2)
+    params = list(model.parameters())
+    script = tmp_path / "my_opt.py"
+    script.write_text("import torch.optim as o\n"
+                      "def create_optimizer(params, **kw):\n"
+                      "    return o.SGD(params, lr=kw.get('lr', 0.1))\n")
+    # lr and weight_decay are forwarded to scripts, so kw['lr'] = 0.01.
+    opt = create_optimizer(params, name=str(script), lr=0.01)
+    assert isinstance(opt, optim.SGD)
+    assert opt.param_groups[0]["lr"] == 0.01
+
+  def test_custom_optimizer_script_param_groups(self, tmp_path):
+    model = nn.Sequential(nn.Linear(10, 8), nn.Linear(8, 2))
+    named_params = dict(model.named_parameters())
+    groups = build_param_groups(named_params,
+                                lr=1e-3,
+                                weight_decay=0.01,
+                                lr_groups=["0.*=1e-5", "1.*=1e-3"])
+    script = tmp_path / "my_opt.py"
+    script.write_text("import torch.optim as o\n"
+                      "def create_optimizer(params, **kw):\n"
+                      "    return o.AdamW(params, lr=0.001)\n")
+    opt = create_optimizer(groups, name=str(script))
+    assert isinstance(opt, optim.AdamW)
+    assert len(opt.param_groups) == 2
+
+  def test_custom_optimizer_missing_fn(self, tmp_path):
+    script = tmp_path / "bad_opt.py"
+    script.write_text("x = 42\n")
+    model = nn.Linear(10, 2)
+    with pytest.raises(ValueError, match="does not define"):
+      create_optimizer(list(model.parameters()), name=str(script))
+
+  def test_script_opt_arg_forwarded(self, tmp_path):
+    model = nn.Linear(10, 2)
+    script = tmp_path / "my_opt.py"
+    # Script reads lr, weight_decay, and momentum from **kwargs.
+    script.write_text(
+        "import torch.optim as o\n"
+        "def create_optimizer(params, **kw):\n"
+        "    return o.SGD(params, lr=kw['lr'], momentum=kw['momentum'])\n")
+    # lr and weight_decay are forwarded by the factory.
+    # Extra --opt_arg values (momentum) are forwarded too.
+    opt = create_optimizer(
+        list(model.parameters()),
+        name=str(script),
+        lr=0.05,
+        momentum=0.9,
+    )
+    assert isinstance(opt, optim.SGD)
+    assert opt.param_groups[0]["lr"] == 0.05  # forwarded from lr=
+    assert opt.param_groups[0]["momentum"] == 0.9
+
+
 class TestReportLr:
   """Tests for report_lr."""
 

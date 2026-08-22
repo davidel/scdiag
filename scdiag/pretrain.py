@@ -461,7 +461,8 @@ def parse_args(argv=None):
       "--optimizer",
       type=str,
       default="AdamW",
-      help="torch.optim optimizer class name (case-sensitive). "
+      help="torch.optim optimizer class name (case-sensitive), "
+      "or a path to a custom .py script. "
       "Examples: AdamW (default), Adam, SGD.",
   )
   parser.add_argument(

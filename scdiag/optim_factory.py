@@ -95,12 +95,26 @@ def build_param_groups(named_params, lr, weight_decay, lr_groups=None):
 def create_optimizer(params, *, name="AdamW", lr=1e-4, weight_decay=0.01, **kwargs):
   """Create an optimizer by name, forwarding extra keyword arguments.
 
+  Three dispatch modes:
+
+  1. **name ends with ``.py``** — loads the script and calls its
+     ``create_optimizer(params, **kwargs)``.
+  2. **name is a ``torch.optim`` class name** — instantiates it directly.
+  3. **name is ``None``** — falls back to the default ``AdamW``.
+
   *params* can be either a plain iterable of parameters (the legacy
   interface) or a list of param-group dicts as returned by
   :func:`build_param_groups`.  In the latter case the ``lr`` and
   ``weight_decay`` keyword arguments are ignored because each group
   already carries its own values.
   """
+  if name is not None and name.endswith(".py"):
+    return _load_optimizer_script(params,
+                                  name,
+                                  lr=lr,
+                                  weight_decay=weight_decay,
+                                  **kwargs)
+
   cls = getattr(optim, name, None)
   if cls is None or not isinstance(cls, type):
     available = [
@@ -220,3 +234,17 @@ def _load_scheduler_script(optimizer, path_or_url, **extra):
   ``create_scheduler(optimizer, **kwargs)``.
   """
   return extern_call(path_or_url, "create_scheduler", optimizer, **extra)
+
+
+def _load_optimizer_script(params, path_or_url, lr=1e-4, weight_decay=0.01, **extra):
+  """Load a custom optimizer from a Python file or URL.
+
+  The script must define a callable
+  ``create_optimizer(params, **kwargs)``.
+
+  ``lr`` and ``weight_decay`` are forwarded so that scripts receive the
+  same values the user passed via ``--lr`` / ``--weight_decay``.
+  """
+  extra.setdefault("lr", lr)
+  extra.setdefault("weight_decay", weight_decay)
+  return extern_call(path_or_url, "create_optimizer", params, **extra)
