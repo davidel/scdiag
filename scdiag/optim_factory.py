@@ -289,7 +289,7 @@ def report_lr(optimizer, writer=None, step=0):
   """Return a string representation of the current learning rate(s).
 
   For a single param group returns ``"lr=1.23e-04"``.  For multiple
-  groups returns ``"group0:1.23e-04 group1:5.67e-05"``.
+  groups returns ``"lr=[1.23e-04, 5.67e-05]"`` (min, max).
 
   If *writer* is provided, also writes ``Train/lr`` (single group) or
   ``Train/lr_group{i}`` (multiple groups) scalars to TensorBoard.
@@ -305,13 +305,16 @@ def report_lr(optimizer, writer=None, step=0):
     if writer is not None:
       writer.add_scalar("Train/lr", lr, step)
     return f"lr={lr:.2e}"
-  parts = []
+  lrs = []
   for i, g in enumerate(groups):
     lr = g["lr"]
-    parts.append(f"group{i}:{lr:.2e}")
+    lrs.append(lr)
     if writer is not None:
       writer.add_scalar(f"Train/lr_group{i}", lr, step)
-  return " ".join(parts)
+  lr_min, lr_max = min(lrs), max(lrs)
+  if lr_min == lr_max:
+    return f"lr={lr_min:.2e}"
+  return f"lr=[{lr_min:.2e}, {lr_max:.2e}]"
 
 
 def create_scheduler(optimizer, *, name=None, epochs=100, base_lr=1e-4, **kwargs):

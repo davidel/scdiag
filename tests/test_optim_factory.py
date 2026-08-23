@@ -344,8 +344,7 @@ class TestReportLr:
                                 lr_groups=["0.*=1e-5", "1.*=1e-3"])
     opt = create_optimizer(groups, name="AdamW")
     result = report_lr(opt)
-    assert "group0:1.00e-05" in result
-    assert "group1:1.00e-03" in result
+    assert result == "lr=[1.00e-05, 1.00e-03]"
 
   def test_tensorboard_single_group(self):
     model = nn.Linear(10, 2)
@@ -383,8 +382,7 @@ class TestReportLr:
 
     writer = FakeWriter()
     result = report_lr(opt, writer=writer, step=42)
-    assert "group0:1.00e-05" in result
-    assert "group1:1.00e-03" in result
+    assert result == "lr=[1.00e-05, 1.00e-03]"
     assert writer.scalars["Train/lr_group0"] == (1e-5, 42)
     assert writer.scalars["Train/lr_group1"] == (1e-3, 42)
 
