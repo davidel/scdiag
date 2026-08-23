@@ -151,6 +151,7 @@ scdiag-train --model cls_model_wrapper:google/vit-base-patch16-224 \
 | `--grad_accum_steps` | `1` | Gradient accumulation steps |
 | `--amp_dtype` | `None` | Mixed precision: `float16` or `bfloat16` |
 | `--lr_group` | `None` | Per-parameter-group learning rates (repeatable). Format: `"REGEX=LR"`. Regexes matched against `named_parameters()`; first match wins. Unmatched trainable params use `--lr`. Example: `"backbone.*=1e-5" "classifier.*=1e-3"` |
+| `--llrd_decay` | `None` | Layer-wise learning rate decay factor. When set, learning rates decay by this factor per depth level (shallow layers get lower LR). Depth is inferred from numeric segments in parameter names (e.g. `blocks.0`, `blocks.11`). Example: `--llrd_decay 0.85` |
 | `--checkpoint` | `scdiag` | Checkpoint base path (`_latest.pt` / `_best.pt` appended) |
 | `--log_every` | `20` | Log every N steps |
 | `--grad_monitor` | `-1` | Log gradient statistics every N steps; `-1` disables. See [Gradient Monitor](#gradient-monitor) for column meanings. |
@@ -435,6 +436,7 @@ scdiag-train --model convvit \
 | `--trend_top_n` | `10` | Show top N params in trend table by abs change %. `0` = show all. |
 | `--grad_clip` | `1.0` | Maximum gradient norm for clipping. `0` disables clipping. |
 | `--lr_group` | `None` | Per-parameter-group learning rates (repeatable). Format: `"REGEX=LR"`. Regexes matched against `named_parameters()`; first match wins. Unmatched trainable params use `--lr`. Example: `"backbone.*=1e-5" "classifier.*=1e-3"` |
+| `--llrd_decay` | `None` | Layer-wise learning rate decay factor. When set, learning rates decay by this factor per depth level (shallow layers get lower LR). Depth is inferred from numeric segments in parameter names (e.g. `blocks.0`, `blocks.11`). Example: `--llrd_decay 0.85` |
 | `--vis_every` | `0` | Log reconstruction visualisation to TensorBoard every N steps. `0` disables visualisation logging. |
 | `--model_arg` | `{}` | Override model configuration (repeatable). Example: `--model_arg depth=6 num_heads=8` |
 | `--proc_arg` | `{}` | Override processor configuration (repeatable). |
