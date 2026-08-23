@@ -1,5 +1,6 @@
 """Shared model loading and preprocessing utilities."""
 
+import inspect
 import logging
 import re
 from contextlib import contextmanager
@@ -13,6 +14,29 @@ from torchvision.transforms.functional import InterpolationMode
 from scdiag.checkpointing import _format_count
 from scdiag.logging_utils import fatal
 from scdiag.models import load_model, load_processor
+
+
+def filter_kwargs(func, kwargs):
+  """Return a copy of *kwargs* containing only keys *func* accepts.
+
+  Inspects ``func``'s signature and keeps only the keyword arguments
+  that appear as explicit parameters.  If *func* accepts ``**kwargs``,
+  all of *kwargs* is returned unchanged.
+
+  Args:
+      func: Callable to inspect.
+      kwargs: Dict of keyword arguments to filter.
+
+  Returns:
+      A new dict with only the accepted keys.
+  """
+  sig = inspect.signature(func)
+  has_var_keyword = any(
+      p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+  if has_var_keyword:
+    return dict(kwargs)
+  accepted = set(sig.parameters)
+  return {k: v for k, v in kwargs.items() if k in accepted}
 
 
 def set_train_mode(net, mode='train'):

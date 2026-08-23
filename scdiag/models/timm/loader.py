@@ -65,7 +65,8 @@ def load_timm_model(
 
   # Pop args that are not timm.create_model() parameters.
   pretrained = kwargs.pop("pretrained", True)
-  kwargs.pop("classifier_args", None)
+  from scdiag.model_utils import filter_kwargs
+  kwargs = filter_kwargs(timm.create_model, kwargs)
 
   timm_model = timm.create_model(
       backbone,
