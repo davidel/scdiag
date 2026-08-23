@@ -39,6 +39,7 @@ from scdiag.model_utils import (
 from scdiag.models import load_model, load_processor
 from scdiag.optim_factory import (
     build_param_groups,
+    build_param_groups_llrd,
     create_optimizer,
     create_scheduler,
 )
@@ -396,12 +397,19 @@ def parse_args(argv=None):
   parser.add_argument(
       "--lr_group",
       nargs="+",
-      default=None,
       metavar="REGEX=LR",
       help="Per-parameter-group learning rates. "
       "E.g. --lr_group 'backbone.*=1e-5' 'classifier.*=1e-3'. "
       "Regexes matched against named_parameters(); first match wins. "
       "Unmatched trainable params use --lr.",
+  )
+  parser.add_argument(
+      "--llrd_decay",
+      type=float,
+      metavar="FACTOR",
+      help="Layer-wise learning rate decay factor. "
+      "When set, learning rates decay by this factor per depth level "
+      "(shallow layers get lower LR). E.g. --llrd_decay 0.85.",
   )
 
   parser.add_argument(
@@ -451,7 +459,6 @@ def parse_args(argv=None):
   parser.add_argument(
       "--classifier",
       type=str,
-      default=None,
       help="Classifier head spec: a registered name (e.g. 'mlp') or a "
       "path to a .py file defining a Classifier class. Only used with "
       "--model cls_model_wrapper:<hf_name>.",
@@ -469,7 +476,6 @@ def parse_args(argv=None):
   parser.add_argument(
       "--freeze",
       type=str,
-      default=None,
       help="Comma-separated list of regex patterns (re.match) for "
       "parameter names to keep trainable. All other parameters are "
       "frozen. Each pattern is anchored at the start of the name. "
@@ -591,7 +597,6 @@ def parse_args(argv=None):
   lora_group.add_argument(
       "--lora_target_modules",
       type=str,
-      default=None,
       help="Comma-separated module names to apply LoRA to "
       "(e.g. 'query,key,value'). Auto-detect if omitted.",
   )
@@ -618,7 +623,6 @@ def parse_args(argv=None):
   parser.add_argument(
       "--param_rename",
       nargs="+",
-      default=None,
       help="Regex-based key rename patterns for --source_checkpoint. "
       "Each pattern is 'SEARCH;REPLACE' where SEARCH is a Python regex "
       "and REPLACE may use $1, $2, … for capture groups. "
@@ -731,7 +735,6 @@ def parse_args(argv=None):
   parser.add_argument(
       "--scheduler",
       type=str,
-      default=None,
       help="torch.optim.lr_scheduler class name (case-sensitive), "
       "or a path to a custom .py script. "
       "Examples: CosineAnnealingLR, StepLR. "
@@ -1185,12 +1188,20 @@ def main():
       patterns.extend(re.escape(k) for k in extract_lora_params(model))
     freeze_model(model, tuple(patterns))
 
-  param_groups = build_param_groups(
-      dict(model.named_parameters()),
-      lr=args.lr,
-      weight_decay=args.weight_decay,
-      lr_groups=args.lr_group,
-  )
+  if args.llrd_decay is not None:
+    param_groups = build_param_groups_llrd(
+        dict(model.named_parameters()),
+        lr=args.lr,
+        weight_decay=args.weight_decay,
+        decay_factor=args.llrd_decay,
+    )
+  else:
+    param_groups = build_param_groups(
+        dict(model.named_parameters()),
+        lr=args.lr,
+        weight_decay=args.weight_decay,
+        lr_groups=args.lr_group,
+    )
   optimizer = create_optimizer(
       param_groups,
       name=args.optimizer,

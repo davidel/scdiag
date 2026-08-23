@@ -6,6 +6,8 @@ import torch.optim as optim
 
 from scdiag.optim_factory import (
     build_param_groups,
+    build_param_groups_llrd,
+    compute_params_depths,
     create_optimizer,
     create_scheduler,
     report_lr,
@@ -385,3 +387,139 @@ class TestReportLr:
     assert "group1:1.00e-03" in result
     assert writer.scalars["Train/lr_group0"] == (1e-5, 42)
     assert writer.scalars["Train/lr_group1"] == (1e-3, 42)
+
+
+class TestComputeParamsDepths:
+  """Tests for compute_params_depths."""
+
+  def test_basic_transformer(self):
+    names = [
+        "encoder.layer.0.self_attn.q_proj.weight",
+        "encoder.layer.0.self_attn.k_proj.weight",
+        "encoder.layer.1.self_attn.q_proj.weight",
+        "encoder.layer.1.self_attn.k_proj.weight",
+        "encoder.layer.11.self_attn.q_proj.weight",
+        "encoder.layer.11.self_attn.k_proj.weight",
+        "head.fc.weight",
+        "head.fc.bias",
+    ]
+    depths = compute_params_depths(names)
+    # All params in layer 0 share the same depth.
+    assert depths["encoder.layer.0.self_attn.q_proj.weight"] == \
+           depths["encoder.layer.0.self_attn.k_proj.weight"]
+    # All params in layer 1 share the same depth.
+    assert depths["encoder.layer.1.self_attn.q_proj.weight"] == \
+           depths["encoder.layer.1.self_attn.k_proj.weight"]
+    # Layer 11 is deeper than layer 1.
+    assert depths["encoder.layer.11.self_attn.q_proj.weight"] > \
+           depths["encoder.layer.1.self_attn.q_proj.weight"]
+    # Non-block params (head) get depth 0.
+    assert depths["head.fc.weight"] == 0
+    assert depths["head.fc.bias"] == 0
+
+  def test_no_numeric_keys(self):
+    names = ["layer.weight", "layer.bias"]
+    depths = compute_params_depths(names)
+    # All at depth 0 since there are no numeric segments.
+    assert all(d == 0 for d in depths.values())
+
+  def test_empty(self):
+    assert compute_params_depths([]) == {}
+
+
+class TestBuildParamGroupsLlrd:
+  """Tests for build_param_groups_llrd."""
+
+  def _make_model(self):
+    """Create a small model with named params for testing."""
+
+    class Toy(nn.Module):
+
+      def __init__(self):
+        super().__init__()
+        self.encoder = nn.ModuleDict({
+            "layer_0": nn.Linear(4, 4),
+            "layer_1": nn.Linear(4, 4),
+        })
+        self.head = nn.Linear(4, 2)
+
+    return Toy()
+
+  def test_correct_number_of_groups(self):
+    model = self._make_model()
+    groups = build_param_groups_llrd(
+        dict(model.named_parameters()),
+        lr=1e-3,
+        weight_decay=0.01,
+        decay_factor=0.85,
+    )
+    # Each depth level produces up to 2 groups (with/without weight decay).
+    # Verify no empty param lists.
+    for g in groups:
+      assert len(g["params"]) > 0
+
+  def test_weight_decay_split(self):
+    model = self._make_model()
+    groups = build_param_groups_llrd(
+        dict(model.named_parameters()),
+        lr=1e-3,
+        weight_decay=0.01,
+        decay_factor=0.85,
+    )
+    for g in groups:
+      if g["weight_decay"] == 0.0:
+        # All params in this group should be 1-D (bias).
+        for p in g["params"]:
+          assert p.ndim == 1
+      elif g["weight_decay"] == 0.01:
+        # All params in this group should be >= 2-D (weight).
+        for p in g["params"]:
+          assert p.ndim > 1
+
+  def test_lr_values_ordered(self):
+    model = self._make_model()
+    groups = build_param_groups_llrd(
+        dict(model.named_parameters()),
+        lr=1e-3,
+        weight_decay=0.01,
+        decay_factor=0.85,
+    )
+    # Collect unique (depth, lr) pairs.
+    depth_lr = {}
+    for g in groups:
+      depth = g["depth"]
+      lr = g["lr"]
+      if depth not in depth_lr:
+        depth_lr[depth] = lr
+      else:
+        # Same depth must have same lr.
+        assert depth_lr[depth] == lr
+
+    # Deeper levels should have higher lr (closer to base lr).
+    depths_sorted = sorted(depth_lr.keys())
+    for i in range(1, len(depths_sorted)):
+      assert depth_lr[depths_sorted[i]] > depth_lr[depths_sorted[i - 1]]
+
+  def test_decay_factor_one_means_equal_lr(self):
+    model = self._make_model()
+    groups = build_param_groups_llrd(
+        dict(model.named_parameters()),
+        lr=1e-3,
+        weight_decay=0.01,
+        decay_factor=1.0,
+    )
+    lrs = {g["lr"] for g in groups}
+    # With decay_factor=1.0, all groups should have the same lr.
+    assert len(lrs) == 1
+    assert 1e-3 in lrs
+
+  def test_optimizable(self):
+    model = self._make_model()
+    groups = build_param_groups_llrd(
+        dict(model.named_parameters()),
+        lr=1e-3,
+        weight_decay=0.01,
+        decay_factor=0.85,
+    )
+    opt = optim.AdamW(groups)
+    assert len(opt.param_groups) == len(groups)

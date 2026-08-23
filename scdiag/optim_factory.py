@@ -4,6 +4,7 @@ Used by ``train.py`` and ``pretrain.py`` to replace hardcoded optimizer /
 scheduler creation with configurable versions driven by CLI arguments.
 """
 
+import collections
 import logging
 import re
 
@@ -90,6 +91,142 @@ def build_param_groups(named_params, lr, weight_decay, lr_groups=None):
     groups.append({"params": fallback, "lr": lr, "weight_decay": weight_decay})
 
   return groups
+
+
+# ---------------------------------------------------------------------------
+# Layer-wise learning-rate decay (LLRD)
+# ---------------------------------------------------------------------------
+
+
+def _infer_depth(names):
+  """Build a trie from dotted parameter names.
+
+  Args:
+      names: Iterable of parameter names (e.g. from
+          ``model.named_parameters()``).
+
+  Returns:
+      Nested dict (trie) representing the parameter namespace.
+  """
+
+  def insert(root, name):
+    parent = root
+    for p in name.split("."):
+      cnode = parent.get(p)
+      if cnode is None:
+        parent[p] = cnode = {}
+      parent = cnode
+
+  root = {}
+  for name in names:
+    insert(root, name)
+  return root
+
+
+def _depthize(root, dest=None, names=None, depth=0):
+  """Walk the trie and assign a numeric depth to each leaf path.
+
+  Numeric keys (e.g. ``"0"``, ``"11"``) represent repeated blocks and
+  receive increasing depths.  Non-numeric keys inherit the current depth.
+
+  Args:
+      root: Current trie node.
+      dest: Accumulator dict mapping ``["dotted", "path"]`` → int depth.
+      names: Path prefix accumulated so far.
+      depth: Current depth counter.
+
+  Returns:
+      The *dest* dict (populated in-place).
+  """
+  cdest = {} if dest is None else dest
+  cnames = [] if names is None else names
+
+  layers = []
+  for cname, cnode in root.items():
+    name = ".".join(cnames + [cname])
+    if cname.isdigit():
+      layers.append((cname, cnode))
+    else:
+      cdest[name] = depth
+      _depthize(cnode, dest=cdest, names=cnames + [cname], depth=depth)
+
+  n = 1
+  for lid, lnode in sorted(layers, key=lambda x: int(x[0])):
+    _depthize(lnode, dest=cdest, names=cnames + [lid], depth=depth + n)
+    n += 1
+
+  return cdest
+
+
+def compute_params_depths(names):
+  """Infer a depth for every parameter name via the trie structure.
+
+  Args:
+      names: Iterable of dotted parameter names.
+
+  Returns:
+      Dict mapping each parameter name to an integer depth.  Deeper
+      blocks (e.g. later transformer layers) receive higher values.
+  """
+  return _depthize(_infer_depth(names))
+
+
+def build_param_groups_llrd(named_params, lr, weight_decay, decay_factor=0.85):
+  """Build optimizer param groups with layer-wise learning-rate decay.
+
+  Shallow blocks (e.g. early transformer layers) receive a smaller
+  learning rate, while deeper blocks and non-block parameters use a
+  rate closer to *lr*.
+
+  Args:
+      named_params: Dict mapping parameter names to Parameters (e.g.
+          ``dict(model.named_parameters())``).
+      lr: Base learning rate.
+      weight_decay: Weight decay for parameters with ``ndim > 1``.
+      decay_factor: Multiplicative decay per depth level.  A value of
+          0.85 means each shallower level has 85% of the next level's
+          learning rate.
+
+  Returns:
+      List of param-group dicts suitable for ``torch.optim``.
+  """
+  depth_map = compute_params_depths(named_params.keys())
+  max_depth = max(depth_map.values()) if depth_map else 0
+
+  dparams = collections.defaultdict(list)
+  for name, param in named_params.items():
+    if param.requires_grad:
+      depth = depth_map.get(name, 0)
+      dparams[depth].append((name, param))
+
+  param_groups = []
+  for depth, params in sorted(dparams.items()):
+    lr_value = lr * (decay_factor**(max_depth - depth))
+
+    wdecay_params = []
+    ndecay_params = []
+    for name, param in params:
+      if param.ndim > 1:
+        wdecay_params.append(param)
+      else:
+        ndecay_params.append(param)
+
+    if wdecay_params:
+      param_groups.append({
+          "params": wdecay_params,
+          "lr": lr_value,
+          "depth": depth,
+          "weight_decay": weight_decay,
+      })
+    if ndecay_params:
+      param_groups.append({
+          "params": ndecay_params,
+          "lr": lr_value,
+          "depth": depth,
+          "weight_decay": 0.0,
+      })
+
+  return param_groups
 
 
 def create_optimizer(params, *, name="AdamW", lr=1e-4, weight_decay=0.01, **kwargs):
