@@ -63,8 +63,9 @@ def load_timm_model(
   """
   import timm  # local import so the module is optional
 
-  # Allow --model_arg pretrained=False to skip weight downloads.
+  # Pop args that are not timm.create_model() parameters.
   pretrained = kwargs.pop("pretrained", True)
+  kwargs.pop("classifier_args", None)
 
   timm_model = timm.create_model(
       backbone,
