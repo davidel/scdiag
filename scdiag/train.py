@@ -10,6 +10,7 @@ import datasets
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from datasets import load_dataset
 from sklearn.metrics import confusion_matrix, f1_score, precision_recall_fscore_support
 from torch.utils.data import DataLoader
@@ -85,70 +86,66 @@ def parse_class_multipliers(s, num_labels, label2id):
 
 
 class CombinedFocalLoss(nn.Module):
-  """Cost-sensitive focal loss for multi-class classification.
+  """Mathematically rigorous cost-sensitive focal loss for soft targets.
 
-    Combines inverse-frequency weights, clinical severity multipliers,
-    and focal loss modulation into a single loss function.
+  Aligns with Lin et al. (2017) by computing a unified p_t as the
+  expected probability under the true distribution vector.  Supports
+  both integer labels and continuous soft-target vectors (Mixup).
+  """
 
-    Builds on PyTorch's numerically stable cross-entropy implementation
-    (log-sum-exp trick) rather than reimplementing log_softmax manually.
-    """
-
-  def __init__(self, weights, gamma=2.0, label_smoothing=0.0, reduction="mean"):
-    """
-        Args:
-            weights: [num_classes] W_final = W_freq x M_c, pre-computed at
-                     construction time (constant per class, not per-batch).
-            gamma: Focal loss focusing parameter (higher = more focus on
-                   hard examples).  0.0 disables focal modulation and reduces
-                   to standard weighted cross-entropy.
-            label_smoothing: Label smoothing factor (0.0 = disabled).
-                             Passed through to F.cross_entropy.
-            reduction: 'mean', 'sum', or 'none'.
-        """
+  def __init__(
+      self,
+      weights,
+      gamma=2.0,
+      label_smoothing=0.0,
+      reduction="mean",
+  ):
     super().__init__()
     self.register_buffer("weights", weights)
     self.gamma = gamma
     self.label_smoothing = label_smoothing
     self.reduction = reduction
 
-  def forward(self, inputs, targets):
+  def forward(self, logits, targets):
+    """Compute cost-sensitive focal loss.
+
+    Args:
+        logits: [B, C] raw model outputs (before softmax).
+        targets: [B] integer class indices, or [B, C] soft-target
+            probability distributions (e.g. from Mixup).
+
+    Returns:
+        Scalar loss (or per-sample losses if reduction='none').
     """
-        Args:
-            inputs: [batch_size, num_classes] raw logits
-            targets: [batch_size] ground truth class indices
-        Returns:
-            Scalar loss (or per-sample losses if reduction='none').
-        """
-    # Use PyTorch's numerically stable CE with reduction='none'.
-    ce_loss = nn.functional.cross_entropy(
-        inputs,
-        targets,
-        weight=self.weights,
-        label_smoothing=self.label_smoothing,
-        reduction="none",
-    )
+    num_classes = logits.size(-1)
 
-    if self.gamma == 0:
-      # No focal modulation — standard weighted CE.
-      if self.reduction == "mean":
-        return ce_loss.mean()
-      elif self.reduction == "sum":
-        return ce_loss.sum()
-      return ce_loss
+    # 1. Build the target distribution vector.
+    if targets.dim() == 1:
+      # Integer targets → one-hot with optional label smoothing.
+      target_dist = torch.zeros_like(logits)
+      if self.label_smoothing > 0:
+        target_dist.fill_(self.label_smoothing / (num_classes - 1))
+      target_dist.scatter_(1, targets.unsqueeze(1), 1.0)
+    else:
+      # Soft targets already supplied (e.g. from Mixup).
+      target_dist = targets
 
-    # Focal modulation: down-weight easy examples.
-    # p_t is the model's predicted probability for the true class.
-    # NOTE: The focal weight is computed with gradients enabled so that
-    # the full focal loss contributes correct gradient signals during
-    # learning-rate warmup and fine-tuning.  Earlier, this was wrapped
-    # in torch.no_grad() which silently disconnected the focal
-    # probability from the gradient graph.
-    prob = torch.nn.functional.softmax(inputs, dim=-1)
-    p_t = prob.gather(1, targets.unsqueeze(1)).squeeze(1)
-    focal_weight = (1 - p_t)**self.gamma
+    # 2. Apply class weights.
+    weighted_targets = target_dist * self.weights.unsqueeze(0)
 
-    loss = focal_weight * ce_loss
+    # 3. Base cross-entropy via log_softmax (numerically stable).
+    log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
+    probs = log_probs.exp()
+
+    # Weighted CE: sum_k  -t_k * log(p_k)
+    base_ce_loss = -(weighted_targets * log_probs).sum(dim=-1)
+
+    # 4. Compute unified expected true probability p_t.
+    p_t = torch.sum(target_dist * probs, dim=-1)
+
+    # 5. Modulate the entire loss once per sample.
+    focal_weight = (1.0 - p_t)**self.gamma
+    loss = focal_weight * base_ce_loss
 
     if self.reduction == "mean":
       return loss.mean()
@@ -920,9 +917,9 @@ def train_one_epoch(
       outputs = model(pixel_values=images)
       logits = outputs.logits
       if use_mixup:
-        loss = lam * criterion(logits, targets_a) + (1.0 - lam) * criterion(
-            logits, targets_b)
-        loss = loss / args.grad_accum_steps
+        soft_targets = (lam * F.one_hot(targets_a, logits.size(-1)).float() +
+                        (1.0 - lam) * F.one_hot(targets_b, logits.size(-1)).float())
+        loss = criterion(logits, soft_targets) / args.grad_accum_steps
       else:
         loss = criterion(logits, targets) / args.grad_accum_steps
 

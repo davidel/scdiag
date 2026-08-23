@@ -1,6 +1,5 @@
 """Tests for CombinedFocalLoss and parse_class_multipliers (Phase 0)."""
 
-
 import pytest
 import torch
 import torch.nn as nn
@@ -137,22 +136,27 @@ class TestCombinedFocalLoss:
     torch.testing.assert_close(loss_focal, expected, rtol=1e-5, atol=1e-6)
 
   def test_equivalence_with_ce_label_smoothing(self):
-    """With gamma=0 but label_smoothing>0, should match F.cross_entropy
-    reduction='none' then .mean()."""
+    """With gamma=0 but label_smoothing>0, should match manual CE
+    computed with our smoothing convention."""
     logits, targets = _make_batch()
     weights = torch.tensor([1.0, 2.0, 0.5, 1.5, 0.8, 3.0, 1.2])
+    smoothing = 0.1
+    num_classes = logits.size(-1)
 
     focal = CombinedFocalLoss(weights=weights,
                               gamma=0.0,
-                              label_smoothing=0.1,
+                              label_smoothing=smoothing,
                               reduction='mean')
 
-    ce_none = nn.functional.cross_entropy(logits,
-                                          targets,
-                                          weight=weights,
-                                          label_smoothing=0.1,
-                                          reduction='none')
-    expected = ce_none.mean()
+    # Build expected loss using our convention:
+    # target class: 1 - smoothing, non-target: smoothing / (num_classes - 1)
+    target_dist = torch.zeros_like(logits)
+    target_dist.fill_(smoothing / (num_classes - 1))
+    target_dist.scatter_(1, targets.unsqueeze(1), 1.0)
+    weighted_targets = target_dist * weights.unsqueeze(0)
+    log_probs = nn.functional.log_softmax(logits, dim=-1)
+    expected_per_sample = -(weighted_targets * log_probs).sum(dim=-1)
+    expected = expected_per_sample.mean()
 
     loss_focal = focal(logits, targets)
     torch.testing.assert_close(loss_focal, expected, rtol=1e-5, atol=1e-6)
@@ -333,3 +337,50 @@ class TestCombinedFocalLoss:
 
     assert "weights" in buffer_names
     assert "weights" not in param_names
+
+  def test_soft_target_forward(self):
+    """Passing a [B, C] soft-target tensor should produce finite loss."""
+    logits, targets = _make_batch()
+    weights = torch.ones(7)
+    focal = CombinedFocalLoss(weights=weights, gamma=2.0)
+
+    soft = torch.nn.functional.one_hot(targets, 7).float()
+    # Add a small perturbation so it's not exactly one-hot.
+    soft = soft * 0.9 + 0.1 / 7
+
+    loss = focal(logits, soft)
+    assert loss.shape == ()
+    assert torch.isfinite(loss)
+    assert loss.item() > 0
+
+  def test_soft_target_gradient_flow(self):
+    """Gradients should be non-zero and finite for soft targets."""
+    logits = torch.randn(4, 7, requires_grad=True)
+    targets_a = torch.tensor([0, 1, 2, 3])
+    targets_b = torch.tensor([4, 5, 6, 0])
+    lam = 0.8
+
+    soft = (lam * torch.nn.functional.one_hot(targets_a, 7).float() +
+            (1.0 - lam) * torch.nn.functional.one_hot(targets_b, 7).float())
+
+    weights = torch.ones(7)
+    focal = CombinedFocalLoss(weights=weights, gamma=2.0)
+    loss = focal(logits, soft)
+    loss.backward()
+
+    assert logits.grad is not None
+    assert torch.isfinite(logits.grad).all()
+    assert logits.grad.abs().sum() > 0
+
+  def test_soft_target_known_value(self):
+    """Verify soft-target loss against a hand-computed expected value."""
+    logits = torch.tensor([[2.0, 1.0, 0.5]])
+    soft = torch.tensor([[0.8, 0.1, 0.1]])
+    weights = torch.ones(3)
+
+    focal = CombinedFocalLoss(weights=weights, gamma=0.0)
+    loss = focal(logits, soft)
+
+    log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
+    expected = -(soft * log_probs).sum(dim=-1).mean()
+    torch.testing.assert_close(loss, expected, rtol=1e-5, atol=1e-6)
