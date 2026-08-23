@@ -33,6 +33,8 @@ def load_timm_model(
     device="cpu",
     checkpoint_path=None,
     cache_dir=None,
+    pretrained=True,
+    classifier_args=None,
     **kwargs,
 ):
   """Instantiate a timm model wrapped for the scdiag protocol.
@@ -62,10 +64,6 @@ def load_timm_model(
     (e.g. ``drop_path_rate``, ``pretrained_cfg_overlay``).
   """
   import timm  # local import so the module is optional
-
-  # Pop args that are not timm.create_model() parameters.
-  pretrained = kwargs.pop("pretrained", True)
-  kwargs.pop("classifier_args", None)
 
   timm_model = timm.create_model(
       backbone,
