@@ -1153,8 +1153,9 @@ def main():
     )
   if args.sampler == "weighted":
     sampler = build_weighted_sampler(
-        train_proxy,
+        train_proxy.dataset,
         num_labels,
+        train_proxy.label_column,
         args.sampler_weights,
         multipliers=clinical_m,
         replacement=args.sampler_replacement,

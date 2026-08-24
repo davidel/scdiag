@@ -1,5 +1,4 @@
 """Tests for scdiag.datasets.weighted_sampler."""
-
 import torch
 from torch.utils.data import WeightedRandomSampler
 
@@ -15,8 +14,12 @@ class _FakeDataset:
   def __len__(self):
     return len(self._data)
 
-  def __getitem__(self, idx):
-    return self._data[idx]
+  def __getitem__(self, key):
+    if isinstance(key, str):
+      if key == "label":
+        return [d["label"] for d in self._data]
+      raise KeyError(key)
+    return self._data[key]
 
 
 class TestBuildWeightedSampler:
@@ -26,7 +29,10 @@ class TestBuildWeightedSampler:
     # 90 samples of class 0, 10 samples of class 1.
     labels = [0] * 90 + [1] * 10
     ds = _FakeDataset(labels)
-    sampler = build_weighted_sampler(ds, num_labels=2, weight_mode="frequency")
+    sampler = build_weighted_sampler(ds,
+                                     num_labels=2,
+                                     label_column="label",
+                                     weight_mode="frequency")
     assert isinstance(sampler, WeightedRandomSampler)
     weights = list(sampler.weights)
     # Class 1 weight should be ~9x class 0 weight.
@@ -35,7 +41,10 @@ class TestBuildWeightedSampler:
   def test_frequency_weights_num_samples(self):
     labels = [0, 0, 1, 1, 2]
     ds = _FakeDataset(labels)
-    sampler = build_weighted_sampler(ds, num_labels=3, weight_mode="frequency")
+    sampler = build_weighted_sampler(ds,
+                                     num_labels=3,
+                                     label_column="label",
+                                     weight_mode="frequency")
     assert sampler.num_samples == 5
 
   def test_combined_weights_match_loss_weights(self):
@@ -45,6 +54,7 @@ class TestBuildWeightedSampler:
     multipliers = torch.tensor([2.0, 1.0])
     sampler = build_weighted_sampler(ds,
                                      num_labels=2,
+                                     label_column="label",
                                      weight_mode="combined",
                                      multipliers=multipliers)
     weights = list(sampler.weights)
@@ -60,6 +70,7 @@ class TestBuildWeightedSampler:
     multipliers = torch.tensor([3.0, 1.0])
     sampler = build_weighted_sampler(ds,
                                      num_labels=2,
+                                     label_column="label",
                                      weight_mode="multipliers",
                                      multipliers=multipliers)
     weights = list(sampler.weights)
@@ -72,6 +83,7 @@ class TestBuildWeightedSampler:
     ds = _FakeDataset(labels)
     sampler = build_weighted_sampler(ds,
                                      num_labels=2,
+                                     label_column="label",
                                      weight_mode="frequency",
                                      replacement=True)
     # With replacement, same index can appear multiple times.
@@ -83,6 +95,7 @@ class TestBuildWeightedSampler:
     ds = _FakeDataset(labels)
     sampler = build_weighted_sampler(ds,
                                      num_labels=10,
+                                     label_column="label",
                                      weight_mode="frequency",
                                      replacement=False)
     indices = list(sampler)
@@ -92,7 +105,10 @@ class TestBuildWeightedSampler:
   def test_missing_multipliers_raises(self):
     ds = _FakeDataset([0, 1])
     try:
-      build_weighted_sampler(ds, num_labels=2, weight_mode="combined")
+      build_weighted_sampler(ds,
+                             num_labels=2,
+                             label_column="label",
+                             weight_mode="combined")
       assert False, "Expected ValueError"
     except ValueError:
       pass
@@ -100,7 +116,10 @@ class TestBuildWeightedSampler:
   def test_invalid_weight_mode_raises(self):
     ds = _FakeDataset([0, 1])
     try:
-      build_weighted_sampler(ds, num_labels=2, weight_mode="bogus")
+      build_weighted_sampler(ds,
+                             num_labels=2,
+                             label_column="label",
+                             weight_mode="bogus")
       assert False, "Expected ValueError"
     except ValueError:
       pass
@@ -108,7 +127,10 @@ class TestBuildWeightedSampler:
   def test_single_class(self):
     labels = [0] * 100
     ds = _FakeDataset(labels)
-    sampler = build_weighted_sampler(ds, num_labels=1, weight_mode="frequency")
+    sampler = build_weighted_sampler(ds,
+                                     num_labels=1,
+                                     label_column="label",
+                                     weight_mode="frequency")
     indices = list(sampler)
     assert len(indices) == 100
     # All weights are equal (single class), so every index appears once.

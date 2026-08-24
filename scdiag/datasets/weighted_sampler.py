@@ -1,5 +1,4 @@
 """Build a WeightedRandomSampler for class-imbalanced training."""
-
 import logging
 
 import torch
@@ -8,25 +7,27 @@ from torch.utils.data import WeightedRandomSampler
 
 def build_weighted_sampler(dataset,
                            num_labels,
+                           label_column,
                            weight_mode,
                            multipliers=None,
                            replacement=False):
   """Compute per-sample weights and return a WeightedRandomSampler.
 
-    Args:
-      dataset: Training proxy dataset with ``"label"`` key accessible by index.
-      num_labels: Number of classes.
-      weight_mode: ``"frequency"`` (inverse-freq), ``"multipliers"``
-        (clinical severity), or ``"combined"`` (freq × multipliers).
-      multipliers: Per-class multiplier tensor. Required when *weight_mode*
-        is ``"multipliers"`` or ``"combined"``.
-      replacement: Sample with replacement.
+  Args:
+    dataset: Raw HuggingFace ``Dataset`` (before ``set_transform``).
+    num_labels: Number of classes.
+    label_column: Name of the label column in the dataset.
+    weight_mode: ``"frequency"`` (inverse-freq), ``"multipliers"``
+      (clinical severity), or ``"combined"`` (freq × multipliers).
+    multipliers: Per-class multiplier tensor. Required when *weight_mode*
+      is ``"multipliers"`` or ``"combined"``.
+    replacement: Sample with replacement.
 
-    Returns:
-      A ``torch.utils.data.WeightedRandomSampler`` that yields indices with
-      probabilities proportional to the computed per-sample weights.
-    """
-  labels = [dataset[i]["label"] for i in range(len(dataset))]
+  Returns:
+    A ``torch.utils.data.WeightedRandomSampler`` that yields indices with
+    probabilities proportional to the computed per-sample weights.
+  """
+  labels = dataset[label_column]
 
   class_counts = torch.zeros(num_labels)
   for label in labels:
