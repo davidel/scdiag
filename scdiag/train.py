@@ -28,6 +28,7 @@ from scdiag.checkpointing import (
 )
 from scdiag.cli_utils import KVPairAction
 from scdiag.datasets.hf_proxy import HFDatasetProxy
+from scdiag.datasets.weighted_sampler import build_weighted_sampler
 from scdiag.grad_monitor import GradMonitor
 from scdiag.logging_utils import fatal, setup_logging
 from scdiag.metrics import confusion_row_strings
@@ -68,7 +69,9 @@ def parse_class_multipliers(s, num_labels, label2id):
     if "=" not in pair:
       fatal(
           f"Invalid --class_multipliers entry: '{pair}'. "
-          "Expected NAME=VALUE (e.g. melanoma=4.0).", ValueError)
+          "Expected NAME=VALUE (e.g. melanoma=4.0).",
+          ValueError,
+      )
     name, val = pair.split("=", 1)
     name, val = name.strip(), val.strip()
     if name.isdigit():
@@ -77,7 +80,9 @@ def parse_class_multipliers(s, num_labels, label2id):
       if name not in label2id:
         fatal(
             f"Unknown class name '{name}' in --class_multipliers. "
-            f"Available: {list(label2id.keys())}", ValueError)
+            f"Available: {list(label2id.keys())}",
+            ValueError,
+        )
       idx = label2id[name]
     if not (0 <= idx < num_labels):
       fatal(f"Label index {idx} out of range [0, {num_labels})", ValueError)
@@ -88,10 +93,10 @@ def parse_class_multipliers(s, num_labels, label2id):
 class CombinedFocalLoss(nn.Module):
   """Mathematically rigorous cost-sensitive focal loss for soft targets.
 
-  Aligns with Lin et al. (2017) by computing a unified p_t as the
-  expected probability under the true distribution vector.  Supports
-  both integer labels and continuous soft-target vectors (Mixup).
-  """
+    Aligns with Lin et al. (2017) by computing a unified p_t as the
+    expected probability under the true distribution vector.  Supports
+    both integer labels and continuous soft-target vectors (Mixup).
+    """
 
   def __init__(
       self,
@@ -109,14 +114,14 @@ class CombinedFocalLoss(nn.Module):
   def forward(self, logits, targets):
     """Compute cost-sensitive focal loss.
 
-    Args:
-        logits: [B, C] raw model outputs (before softmax).
-        targets: [B] integer class indices, or [B, C] soft-target
-            probability distributions (e.g. from Mixup).
+        Args:
+            logits: [B, C] raw model outputs (before softmax).
+            targets: [B] integer class indices, or [B, C] soft-target
+                probability distributions (e.g. from Mixup).
 
-    Returns:
-        Scalar loss (or per-sample losses if reduction='none').
-    """
+        Returns:
+            Scalar loss (or per-sample losses if reduction='none').
+        """
     num_classes = logits.size(-1)
 
     # 1. Build the target distribution vector.
@@ -170,7 +175,7 @@ def load_augmentation_script(path_or_url):
         FileNotFoundError: If a local path does not exist.
         ValueError: If the script does not define a callable
             ``create_train_transform``.
-  """
+    """
   return load_extern(path_or_url, "create_train_transform")
 
 
@@ -196,7 +201,9 @@ def build_transforms(processor, image_size, train_aug_fn=None):
     if not isinstance(user_transforms, list):
       fatal(
           "create_train_transform() must return a list of transforms, "
-          f"got {type(user_transforms).__name__}", TypeError)
+          f"got {type(user_transforms).__name__}",
+          TypeError,
+      )
     train_augmentations = v2.Compose(user_transforms + tail)
   else:
     train_augmentations = v2.Compose([
@@ -239,31 +246,39 @@ def load_and_split_dataset(
 
   # Single split: validate, split and wrap.
   if isinstance(raw, datasets.Dataset):
-    detected_image_column = (image_column or HFDatasetProxy.detect_image_column(raw))
+    detected_image_column = image_column or HFDatasetProxy.detect_image_column(raw)
     if detected_image_column is None:
       fatal(
           f"No image column detected in {dataset_name}. "
-          f"Columns: {list(raw.features.keys())}", ValueError)
+          f"Columns: {list(raw.features.keys())}",
+          ValueError,
+      )
     split = raw.train_test_split(test_size=test_size, seed=seed)
     return (
-        HFDatasetProxy(split["train"],
-                       transform=train_transform,
-                       image_column=image_column,
-                       label_column=label_column),
-        HFDatasetProxy(split["test"],
-                       transform=val_transform,
-                       image_column=image_column,
-                       label_column=label_column),
+        HFDatasetProxy(
+            split["train"],
+            transform=train_transform,
+            image_column=image_column,
+            label_column=label_column,
+        ),
+        HFDatasetProxy(
+            split["test"],
+            transform=val_transform,
+            image_column=image_column,
+            label_column=label_column,
+        ),
     )
 
   # DatasetDict: validate and ensure train/test splits exist.
   for split_name in raw:
-    detected_image_column = (image_column or
-                             HFDatasetProxy.detect_image_column(raw[split_name]))
+    detected_image_column = image_column or HFDatasetProxy.detect_image_column(
+        raw[split_name])
     if detected_image_column is None:
       fatal(
           f"No image column in split '{split_name}' of {dataset_name}. "
-          f"Columns: {list(raw[split_name].features.keys())}", ValueError)
+          f"Columns: {list(raw[split_name].features.keys())}",
+          ValueError,
+      )
 
   splits = set(raw.keys())
   if "train" not in splits or "test" not in splits:
@@ -278,19 +293,29 @@ def load_and_split_dataset(
       names = list(raw.keys())
       raw = datasets.DatasetDict({"train": raw[names[0]], "test": raw[names[1]]})
 
-  logging.info("Using image column: %s%s", image_column or "auto-detected",
-               " (explicit)" if image_column else "")
-  logging.info("Using label column: %s%s", label_column or "auto-detected",
-               " (explicit)" if label_column else "")
+  logging.info(
+      "Using image column: %s%s",
+      image_column or "auto-detected",
+      " (explicit)" if image_column else "",
+  )
+  logging.info(
+      "Using label column: %s%s",
+      label_column or "auto-detected",
+      " (explicit)" if label_column else "",
+  )
   return (
-      HFDatasetProxy(raw["train"],
-                     transform=train_transform,
-                     image_column=image_column,
-                     label_column=label_column),
-      HFDatasetProxy(raw["test"],
-                     transform=val_transform,
-                     image_column=image_column,
-                     label_column=label_column),
+      HFDatasetProxy(
+          raw["train"],
+          transform=train_transform,
+          image_column=image_column,
+          label_column=label_column,
+      ),
+      HFDatasetProxy(
+          raw["test"],
+          transform=val_transform,
+          image_column=image_column,
+          label_column=label_column,
+      ),
   )
 
 
@@ -320,7 +345,9 @@ def compute_class_weights(train_dataset, num_labels, label_column="label"):
   if len(actual_labels) > num_labels:
     fatal(
         f"Dataset has {len(actual_labels)} unique labels but "
-        f"num_labels={num_labels}", ValueError)
+        f"num_labels={num_labels}",
+        ValueError,
+    )
   counts = np.bincount(labels, minlength=num_labels).astype(np.float64)
   counts = np.maximum(counts, 1.0)
   weights = 1.0 / counts
@@ -431,6 +458,27 @@ def parse_args(argv=None):
       "(e.g. melanoma) or integer label index. VALUE is a float. "
       "Unspecified classes default to 1.0. Example: "
       "'melanoma=4.0,melanocytic_Nevi=0.5'.",
+  )
+  parser.add_argument(
+      "--sampler",
+      default="none",
+      choices=["none", "weighted"],
+      help="Training sampler. 'weighted' uses WeightedRandomSampler to "
+      "upsample rare classes.",
+  )
+  parser.add_argument(
+      "--sampler_weights",
+      default="frequency",
+      choices=["frequency", "multipliers", "combined"],
+      help="How to compute per-sample weights for --sampler weighted: "
+      "'frequency' (inverse-freq), 'multipliers' (--class_multipliers), "
+      "or 'combined' (freq x multipliers).",
+  )
+  parser.add_argument(
+      "--sampler_replacement",
+      action="store_true",
+      default=False,
+      help="Sample with replacement when using --sampler weighted.",
   )
   parser.add_argument(
       "--grad_accum_steps",
@@ -783,13 +831,15 @@ def train_xgboost_on_backbone(args,
   ckpt_path = select_best_checkpoint(args.checkpoint)
   if ckpt_path is not None:
     logging.info(f"Loading checkpoint: {ckpt_path}")
-    model_best, xgb_processor = load_model_for_inference(args.model,
-                                                         ckpt_path,
-                                                         device="cpu",
-                                                         cache_dir=args.cache_dir,
-                                                         num_labels=num_labels,
-                                                         image_size=args.image_size,
-                                                         proc_kwargs=args.proc_arg)
+    model_best, xgb_processor = load_model_for_inference(
+        args.model,
+        ckpt_path,
+        device="cpu",
+        cache_dir=args.cache_dir,
+        num_labels=num_labels,
+        image_size=args.image_size,
+        proc_kwargs=args.proc_arg,
+    )
     model_best = model_best.to(device)
 
     # 2. Rebuild train and val datasets with val transforms (not train augs)
@@ -890,7 +940,7 @@ def train_one_epoch(
     epochs (used for the gradient monitor so it receives contiguous step
     numbers).  The updated value is returned.
     """
-  set_train_mode(model, 'train')
+  set_train_mode(model, "train")
   total_batches = len(dataloader)
   reporter = TrainReporting(
       total_batches=total_batches,
@@ -982,7 +1032,7 @@ def evaluate_performance(model,
     *id2label* is not supplied) and *cm* is the confusion-matrix as a
     2-D ``numpy.ndarray`` (rows = true labels, cols = predicted labels).
     """
-  set_train_mode(model, 'eval')
+  set_train_mode(model, "eval")
   eval_loss, correct_top1, total_samples = 0.0, 0, 0
   all_preds = []
   all_labels = []
@@ -1098,15 +1148,34 @@ def main():
   if len(train_proxy) < args.batch_size:
     fatal(
         f"Training set ({len(train_proxy)} samples) is smaller than "
-        f"batch_size ({args.batch_size}). Reduce --batch_size.", ValueError)
-  train_loader = DataLoader(
-      train_proxy,
-      batch_size=args.batch_size,
-      shuffle=True,
-      num_workers=args.num_workers,
-      pin_memory=(device.type == "cuda"),
-      drop_last=True,
-  )
+        f"batch_size ({args.batch_size}). Reduce --batch_size.",
+        ValueError,
+    )
+  if args.sampler == "weighted":
+    sampler = build_weighted_sampler(
+        train_proxy,
+        num_labels,
+        args.sampler_weights,
+        multipliers=clinical_m,
+        replacement=args.sampler_replacement,
+    )
+    train_loader = DataLoader(
+        train_proxy,
+        batch_size=args.batch_size,
+        sampler=sampler,
+        num_workers=args.num_workers,
+        pin_memory=(device.type == "cuda"),
+        drop_last=True,
+    )
+  else:
+    train_loader = DataLoader(
+        train_proxy,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=args.num_workers,
+        pin_memory=(device.type == "cuda"),
+        drop_last=True,
+    )
   val_loader = DataLoader(
       val_proxy,
       batch_size=args.batch_size,
@@ -1307,7 +1376,7 @@ def main():
                 best_macro_f1=best_macro_f1,
                 global_step=optimizer_global_step,
                 save_frozen=args.save_frozen,
-                lora_state_blob=serialize_lora_state(model) if args.lora else None,
+                lora_state_blob=(serialize_lora_state(model) if args.lora else None),
             ),
             args.checkpoint + "_best.pt",
             remote_uri=args.remote_checkpoint,
@@ -1349,12 +1418,14 @@ def main():
 
     if args.xgboost_model:
       # Access raw HF datasets (before proxy wrapping) for XGBoost.
-      train_xgboost_on_backbone(args,
-                                train_proxy.dataset,
-                                val_proxy.dataset,
-                                device,
-                                num_labels=num_labels,
-                                batch_size=args.batch_size)
+      train_xgboost_on_backbone(
+          args,
+          train_proxy.dataset,
+          val_proxy.dataset,
+          device,
+          num_labels=num_labels,
+          batch_size=args.batch_size,
+      )
 
 
 if __name__ == "__main__":
