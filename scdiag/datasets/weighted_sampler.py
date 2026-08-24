@@ -9,9 +9,13 @@ def build_weighted_sampler(dataset,
                            num_labels,
                            label_column,
                            weight_mode,
-                           multipliers=None,
-                           replacement=False):
+                           multipliers=None):
   """Compute per-sample weights and return a WeightedRandomSampler.
+
+  Uses ``replacement=True`` so that minority-class samples are duplicated
+  throughout the epoch, keeping every batch balanced.  With
+  ``replacement=False`` minority samples are exhausted early, causing the
+  model to collapse to the majority class by end-of-epoch.
 
   Args:
     dataset: Raw HuggingFace ``Dataset`` (before ``set_transform``).
@@ -21,7 +25,6 @@ def build_weighted_sampler(dataset,
       (clinical severity), or ``"combined"`` (freq × multipliers).
     multipliers: Per-class multiplier tensor. Required when *weight_mode*
       is ``"multipliers"`` or ``"combined"``.
-    replacement: Sample with replacement.
 
   Returns:
     A ``torch.utils.data.WeightedRandomSampler`` that yields indices with
@@ -54,11 +57,11 @@ def build_weighted_sampler(dataset,
   sampler = WeightedRandomSampler(
       weights=sample_weights,
       num_samples=len(sample_weights),
-      replacement=replacement,
+      replacement=True,
   )
 
   logging.info(f"WeightedRandomSampler: {len(sample_weights):,} samples, "
-               f"weight_mode={weight_mode!r}, replacement={replacement}")
+               f"weight_mode={weight_mode!r}")
   for i, w in enumerate(class_weights):
     logging.info(f"  class {i}: count={int(class_counts[i])}, "
                  f"weight={w:.4f}")

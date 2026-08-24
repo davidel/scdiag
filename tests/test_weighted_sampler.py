@@ -78,29 +78,20 @@ class TestBuildWeightedSampler:
     assert abs(weights[0] - 3.0) < 1e-5
     assert abs(weights[50] - 1.0) < 1e-5
 
-  def test_replacement_true_allows_duplicates(self):
-    labels = [0, 0, 0, 1]
+  def test_balanced_batches_throughout_epoch(self):
+    """With replacement=True, minority classes appear in late batches."""
+    labels = [0] * 90 + [1] * 10
     ds = _FakeDataset(labels)
     sampler = build_weighted_sampler(ds,
                                      num_labels=2,
                                      label_column="label",
-                                     weight_mode="frequency",
-                                     replacement=True)
-    # With replacement, same index can appear multiple times.
+                                     weight_mode="frequency")
     indices = list(sampler)
-    assert len(indices) == 4
-
-  def test_replacement_false_no_duplicates(self):
-    labels = list(range(10))
-    ds = _FakeDataset(labels)
-    sampler = build_weighted_sampler(ds,
-                                     num_labels=10,
-                                     label_column="label",
-                                     weight_mode="frequency",
-                                     replacement=False)
-    indices = list(sampler)
-    # Without replacement, all indices should appear exactly once.
-    assert sorted(indices) == list(range(10))
+    assert len(indices) == 100
+    # Minority class indices (90-99) should appear in the last half.
+    last_half = indices[50:]
+    has_minority = any(90 <= i <= 99 for i in last_half)
+    assert has_minority, "Minority class missing from late batches"
 
   def test_missing_multipliers_raises(self):
     ds = _FakeDataset([0, 1])
@@ -133,5 +124,5 @@ class TestBuildWeightedSampler:
                                      weight_mode="frequency")
     indices = list(sampler)
     assert len(indices) == 100
-    # All weights are equal (single class), so every index appears once.
-    assert sorted(indices) == list(range(100))
+    # Single class: all indices 0-99 valid; duplicates OK with replacement.
+    assert all(0 <= i < 100 for i in indices)

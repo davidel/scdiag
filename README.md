@@ -402,6 +402,8 @@ carrying over old optimizer/scheduler states.
 | `--label_smoothing` | `0.0` | Label smoothing factor. |
 | `--focal_gamma` | `0.0` | Focal loss gamma (`0` = disabled). Down-weights easy examples. |
 | `--class_multipliers` | `""` | Per-class severity multipliers. Example: `"melanoma=3.0,nevus=1.0"`. |
+| `--sampler` | `none` | Training sampler: `none` (shuffle) or `weighted` (WeightedRandomSampler for class imbalance). |
+| `--sampler_weights` | `frequency` | Weight mode for `--sampler weighted`: `frequency` (inverse-freq), `multipliers` (--class_multipliers), or `combined` (freq × multipliers). |
 | `--mixup_alpha` | `0.0` | Mixup alpha (`0` = disabled; recommended: `0.2`). |
 | `--grad_accum_steps` | `1` | Gradient accumulation steps (effective batch = batch_size × steps). |
 | `--amp_dtype` | `None` | Mixed precision: `float16` or `bfloat16`. |

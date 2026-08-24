@@ -474,12 +474,7 @@ def parse_args(argv=None):
       "'frequency' (inverse-freq), 'multipliers' (--class_multipliers), "
       "or 'combined' (freq x multipliers).",
   )
-  parser.add_argument(
-      "--sampler_replacement",
-      action="store_true",
-      default=False,
-      help="Sample with replacement when using --sampler weighted.",
-  )
+
   parser.add_argument(
       "--grad_accum_steps",
       type=int,
@@ -1166,7 +1161,6 @@ def main():
         train_proxy.label_column,
         args.sampler_weights,
         multipliers=clinical_m,
-        replacement=args.sampler_replacement,
     )
     train_loader = DataLoader(
         train_proxy,
