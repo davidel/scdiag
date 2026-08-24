@@ -6,3 +6,6 @@
 dist/
 build/
 .url_cache/
+
+# HuggingFace / timm cache
+.cache/
