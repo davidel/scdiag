@@ -1142,8 +1142,16 @@ def main():
   )
   logging.info(f"Clinical multipliers (M_c): {fmt_weights(clinical_m)}")
 
-  class_weights = (w_freq * clinical_m).to(device)
-  logging.info(f"Final class weights (W_freq x M_c): {fmt_weights(class_weights)}")
+  if args.sampler == "weighted":
+    # When using a weighted sampler, class representation is already
+    # balanced in each batch, so we skip w_freq to avoid double-
+    # compensating for class imbalance.
+    class_weights = clinical_m.to(device)
+    logging.info(f"Final class weights (M_c only, sampler handles frequency): "
+                 f"{fmt_weights(class_weights)}")
+  else:
+    class_weights = (w_freq * clinical_m).to(device)
+    logging.info(f"Final class weights (W_freq x M_c): {fmt_weights(class_weights)}")
 
   if len(train_proxy) < args.batch_size:
     fatal(

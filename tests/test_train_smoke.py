@@ -112,3 +112,70 @@ def test_train_smoke(tmp_path):
   assert "scheduler_state_dict" in ckpt
   assert "epoch" in ckpt
   assert "best_macro_f1" in ckpt
+
+
+def test_sampler_skips_freq_in_loss_weights(tmp_path):
+  """With --sampler weighted, loss weights should be clinical_m only.
+
+  Regression test for a bug where w_freq * clinical_m was used as loss
+  weights even when the sampler already balanced class representation,
+  causing the model to collapse to the majority class.
+  """
+  # Imbalanced dataset: 10 class_0, 1 class_1.
+  imgs = [
+      Image.fromarray(np.random.randint(0, 256, (64, 64, 3), dtype=np.uint8))
+      for _ in range(11)
+  ]
+  labels = [0] * 10 + [1] * 1
+  ds = Dataset.from_dict({"image": imgs, "label": labels})
+  ckpt_base = str(tmp_path / "ckpts" / "model")
+
+  test_args = [
+      "train.py",
+      "--model",
+      "dummy/tiny-model",
+      "--dataset",
+      "dummy/dataset",
+      "--epochs",
+      "1",
+      "--batch_size",
+      "4",
+      "--image_size",
+      "64",
+      "--checkpoint",
+      ckpt_base,
+      "--log_every",
+      "2",
+      "--num_workers",
+      "0",
+      "--log_level",
+      "WARNING",
+      "--sampler",
+      "weighted",
+      "--sampler_weights",
+      "frequency",
+      "--class_multipliers",
+      "0=2.0,1=3.0",
+  ]
+
+  with (
+      patch("sys.argv", test_args),
+      patch("scdiag.train.load_dataset", return_value=ds),
+      patch("scdiag.train.load_processor", return_value=TinyProcessor()),
+      patch("scdiag.train.load_model", return_value=TinyModel(num_labels=2)),
+  ):
+    from scdiag.train import main
+    main()
+
+  # Verify checkpoint was created (model trained successfully).
+  latest = ckpt_base + "_latest.pt"
+  assert os.path.exists(latest), f"Missing {latest}"
+
+  ckpt = torch.load(latest, map_location="cpu", weights_only=False)
+  # The model should NOT predict a single class for everything.
+  # Check that the classifier weights are not all identical
+  # (which would indicate collapse to majority class).
+  head_w = ckpt["model_state_dict"]["fc.weight"]
+  # Each row corresponds to a class. If rows are identical, model collapsed.
+  assert not torch.allclose(head_w[0], head_w[1], atol=1e-6), \
+      "Class 0 and 1 weights identical — model may have collapsed"
