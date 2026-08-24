@@ -5,8 +5,9 @@ diagnosis and other medical imaging tasks.  Supports HuggingFace and
 [timm](https://github.com/huggingface/pytorch-image-models) models, custom
 architectures (ConvViT, UVito), and pluggable classifier heads with a
 hand-rolled PyTorch training loop.  Includes self-supervised pre-training
-(SimMIM, I-JEPA), XGBoost ensemble inference, and dataset preparation
-utilities for common dermoscopy benchmarks.
+(SimMIM, I-JEPA) and supervised contrastive learning (SupCon), XGBoost
+ensemble inference, and dataset preparation utilities for common dermoscopy
+benchmarks.
 
 ## Features
 
@@ -74,14 +75,23 @@ utilities for common dermoscopy benchmarks.
   - **`ijepa`** — joint-embedding predictive architecture (Assran et al.,
     CVPR 2023). Predicts latent representations of masked blocks using a
     student–teacher setup with EMA momentum ramping.
+  - **`supcon`** — supervised contrastive learning (Khosla et al., NeurIPS
+    2020). Learns representations by pulling together features from the
+    same class and pushing apart features from different classes. Uses a
+    `ContrastiveEncoder` (backbone + projection head) and a
+    `BalancedBatchSampler` for controlled class sampling.
   Each method adds its own CLI arguments (e.g. `--mask_ratio` for SimMIM,
-  `--teacher_momentum` for I-JEPA). New methods can be added by
-  implementing the `PretrainMethod` interface in `scdiag/pretrain_methods/`.
+  `--teacher_momentum` for I-JEPA, `--proj_dim` and `--temperature` for
+  SupCon). New methods can be added by implementing the `PretrainMethod`
+  interface in `scdiag/pretrain_methods/`.
 - **Model-agnostic** — use `--model` to select any backbone registered in the
   model registry (e.g. `convvit`, or any HuggingFace model ID).
 - **Multi-source dataset ensemble** — stitches together multiple HuggingFace
   datasets (e.g. HAM10000, ISIC challenges, Derm1M) into a single unified
   pre-training corpus with flat indexing and lazy loading.
+- **Label-aware pre-training** — methods that require labels (e.g. SupCon)
+  validate dataset compatibility, remap labels across datasets, and use
+  a balanced batch sampler for controlled class distribution.
 - **Mixed precision** — AMP support (`float16` with GradScaler, or `bfloat16`).
 - **Reconstruction visualisation** — periodic TensorBoard logging of
   method-specific validation images for qualitative monitoring (e.g.
@@ -383,14 +393,16 @@ scaler states are not carried over.
 
 ## Pre-Training
 
-Pre-train any registered model's encoder on unlabeled dermoscopy images before
-fine-tuning. Use `--method` to select the algorithm (default: `simmim`).
+Pre-train any registered model's encoder before fine-tuning. Use `--method` to
+select the algorithm (default: `simmim`). Methods that need labels (e.g.
+SupCon) automatically detect and validate label support across dataset ensembles.
 
 ```bash
+# Masked image modelling (SimMIM)
 scdiag-pretrain --method simmim \
                 --model convvit \
                 --datasets HAM10000 "redlessone/Derm1M" \
-                --cache_dir ~/.cache/huggingface \
+                --cache_dir /tmp/pretrain_cache \
                 --hf_token hf_XXXX \
                 --image_size 448 \
                 --batch_size 32 \
@@ -400,6 +412,22 @@ scdiag-pretrain --method simmim \
                 --sched_arg T_max=200 --sched_arg eta_min=1e-6 \
                 --amp_dtype bfloat16 \
                 --checkpoint ./checkpoints/convvit_simmim
+
+# Supervised contrastive learning (SupCon)
+scdiag-pretrain --method supcon \
+                --model convvit \
+                --datasets HAM10000 \
+                --cache_dir /tmp/pretrain_cache \
+                --hf_token hf_XXXX \
+                --image_size 448 \
+                --batch_size 64 \
+                --samples_per_class 16 \
+                --proj_dim 128 \
+                --temperature 0.07 \
+                --epochs 100 \
+                --lr 1e-4 \
+                --amp_dtype bfloat16 \
+                --checkpoint ./checkpoints/convvit_supcon
 ```
 
 Then load the pre-trained encoder during supervised fine-tuning:
@@ -411,15 +439,18 @@ scdiag-train --model convvit \
              --epochs 100
 ```
 
+### Pre-Training CLI Arguments
+
 | Argument | Default | Description |
 |---|---|---|
-| `--method` | `simmim` | Pre-training method. Choices: `simmim`, `ijepa`. Method-specific args follow. |
+| `--method` | `simmim` | Pre-training method. Choices: `simmim`, `ijepa`, `supcon`. Method-specific args follow. |
 | `--model` | `convvit` | Model name registered in scdiag (e.g. `convvit`) or HuggingFace model ID. |
 | `--datasets` | (required) | Space-separated dataset names or local paths. HuggingFace IDs or directories. |
 | `--cache_dir` | `None` | HuggingFace cache directory for dataset and model downloads. |
 | `--hf_token` | `None` | HuggingFace token for gated datasets (or set `HF_TOKEN` env var). |
-| `--image_column` | auto-detected | Explicit HF image column for pretraining datasets |
-| `--strict_datasets` | `False` | Abort instead of skipping a dataset that fails to load |
+| `--image_column` | auto-detected | Explicit HF image column for pretraining datasets. |
+| `--label_column` | `None` | Explicit HF label column for pretraining datasets. Required by `--method supcon` if the dataset uses non-standard label column names. |
+| `--strict_datasets` | `False` | Abort instead of skipping a dataset that fails to load. |
 | `--image_size` | `448` | Input image size (square). |
 | `--batch_size` | `32` | Per-GPU batch size. |
 | `--epochs` | `200` | Total pre-training epochs. |
@@ -437,7 +468,7 @@ scdiag-train --model convvit \
 | `--grad_clip` | `1.0` | Maximum gradient norm for clipping. `0` disables clipping. |
 | `--lr_group` | `None` | Per-parameter-group learning rates (repeatable). Format: `"REGEX=LR"`. Regexes matched against `named_parameters()`; first match wins. Unmatched trainable params use `--lr`. Example: `"backbone.*=1e-5" "classifier.*=1e-3"` |
 | `--llrd_decay` | `None` | Layer-wise learning rate decay factor. When set, learning rates decay by this factor per depth level (shallow layers get lower LR). Depth is inferred from numeric segments in parameter names (e.g. `blocks.0`, `blocks.11`). Example: `--llrd_decay 0.85` |
-| `--vis_every` | `0` | Log reconstruction visualisation to TensorBoard every N steps. `0` disables visualisation logging. |
+| `--vis_every` | `0` | Log reconstruction visualisation to TensorBoard every N steps. `0` disables visualisation logging. Only applicable to reconstruction-based methods (SimMIM). |
 | `--model_arg` | `{}` | Override model configuration (repeatable). Example: `--model_arg depth=6 num_heads=8` |
 | `--proc_arg` | `{}` | Override processor configuration (repeatable). |
 | `--optimizer` | `AdamW` | `torch.optim` optimizer class name (case-sensitive), or a `.py` script path. Examples: `AdamW`, `Adam`, `SGD` |
@@ -446,6 +477,17 @@ scdiag-train --model convvit \
 | `--sched_arg` | `{}` | Extra scheduler kwargs (repeatable). Example: `--sched_arg T_max=50` |
 | `--source_checkpoint` | `None` | Path to a source checkpoint to absorb parameters from. Useful for continuing from a prior run or loading weights from a different architecture. |
 | `--param_rename` | `None` | Regex-based key rename patterns for `--source_checkpoint`. Each pattern is `SEARCH;REPLACE` where SEARCH is a Python regex and REPLACE may use `$1`, `$2`, etc. Applied before shape-based alignment. |
+
+### SupCon-Specific Arguments
+
+These arguments are only used by `--method supcon`:
+
+| Argument | Default | Description |
+|---|---|---|
+| `--proj_dim` | `128` | Output dimensionality of the projection head. |
+| `--proj_hidden` | `None` | Hidden layer size of the projection MLP. `None` uses a single linear layer (no hidden). |
+| `--temperature` | `0.07` | NT-Xent temperature. Lower values sharpen the contrastive distribution. |
+| `--samples_per_class` | `16` | Number of samples to draw per class in each batch. Batch size should be divisible by this value. |
 
 ### Dataset Ensemble
 
@@ -464,6 +506,16 @@ first requested. By default, datasets that fail to load are logged and skipped
 
 Images that cannot be decoded are skipped with a warning. This avoids blocking
 pre-training on corrupted files while keeping the dataset pipeline fast.
+
+#### Label Validation
+
+When using `--method supcon` (or any future label-aware method), the ensemble
+validates that every dataset supports labels. Datasets without a label column
+cause an error before training begins, so you get a clear message instead of a
+runtime failure mid-epoch. Labels are remapped to a shared global label space
+across all datasets, so mixing HAM10000 (with its label column) and a
+different dataset with overlapping but differently-named classes works
+transparently.
 
 ### Preparing Datasets
 
@@ -579,6 +631,7 @@ scdiag-train --model convvit --model_arg depth=6 num_heads=8 dropout=0.2
 | ConvViT | Multi-block conv stem (4 blocks → patch_size 16) + 12-layer ViT encoder with CLS-guided attention pooling | `convvit` |
 | UVito | Frozen SMP encoder (e.g. ResNet50) + learnable patch projection + Transformer encoder with CLS tokens | `uvito` |
 | ClsModelWrapper | HuggingFace backbone + custom classifier head | `cls_model_wrapper:<hf_name>` |
+| ContrastiveEncoder | Backbone + projection head for contrastive pre-training (used automatically by `--method supcon`) | `contrastive_encoder:<hf_name>` |
 
 ### Custom Classifiers
 
