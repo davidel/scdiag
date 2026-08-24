@@ -141,17 +141,17 @@ class TestDatasetEnsembleLabels:
       _HFDataset.__init__ = orig
 
   def test_imagefolder_rejects_with_labels(self):
-    tmpdir = tempfile.mkdtemp()
-    img = Image.new("RGB", (64, 64), "red")
-    img.save(os.path.join(tmpdir, "test.jpg"))
-    with pytest.raises(ValueError, match="does not provide labels"):
-      DatasetEnsemble(
-          [{
-              "name": tmpdir,
-              "source": "imagefolder"
-          }],
-          with_labels=True,
-      )
+    with tempfile.TemporaryDirectory() as tmpdir:
+      img = Image.new("RGB", (64, 64), "red")
+      img.save(os.path.join(tmpdir, "test.jpg"))
+      with pytest.raises(ValueError, match="does not provide labels"):
+        DatasetEnsemble(
+            [{
+                "name": tmpdir,
+                "source": "imagefolder"
+            }],
+            with_labels=True,
+        )
 
   def test_summary_with_labels(self):
     hf_ds = _make_fake_hf_dataset(n=16, num_classes=4)
