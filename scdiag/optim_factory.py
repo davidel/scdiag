@@ -300,6 +300,8 @@ def report_lr(optimizer, writer=None, step=0):
       step: The global training step for TensorBoard.
   """
   groups = optimizer.param_groups
+  if not groups:
+    return "lr=?"
   if len(groups) == 1:
     lr = groups[0]["lr"]
     if writer is not None:

@@ -77,8 +77,15 @@ class HFDatasetProxy:
     return image, label
 
   @property
+  def has_labels(self):
+    """Return True when a label column was detected."""
+    return self._label_col is not None
+
+  @property
   def label_names(self):
     """Return the list of class names from the ``label`` feature."""
+    if self._label_col is None:
+      return []
     feat = self.dataset.features[self._label_col]
     if isinstance(feat, datasets.ClassLabel):
       return feat.names

@@ -92,7 +92,7 @@ class SimMIMMethod(PretrainMethod):
     model.mask_ratio = args.mask_ratio
     return model
 
-  def train_step(self, model, images, global_step):
+  def train_step(self, model, images, global_step, *, labels=None):
     mask = make_mask(images, model.patch_size, model.mask_ratio)
     output, target = model(images, mask)
     loss = simmim_loss(output, target, mask)

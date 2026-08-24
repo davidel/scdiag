@@ -62,17 +62,22 @@ _IMAGE_EXTS = {
 class ImageFolderDataset:
   """Reads images from a flat (or nested) directory tree.
 
-    This is a lightweight drop-in replacement for
-    ``datasets.load_dataset("imagefolder", ...)`` that avoids the
-    multi-minute Arrow conversion overhead for large on-disk image
-    collections.  Only images are returned — no labels, no metadata —
-    making it suitable for self-supervised pre-training (SimMIM / MAE).
+  This is a lightweight drop-in replacement for
+  ``datasets.load_dataset("imagefolder", ...)`` that avoids the
+  multi-minute Arrow conversion overhead for large on-disk image
+  collections.  Only images are returned — no labels, no metadata —
+  making it suitable for self-supervised pre-training (SimMIM / MAE).
 
-    Parameters
-    ----------
-    root_dir : str | Path
-        Root directory containing images (recursively scanned).
-    """
+  Parameters
+  ----------
+  root_dir : str | Path
+      Root directory containing images (recursively scanned).
+  """
+
+  @property
+  def has_labels(self):
+    """Return False — local image folders carry no label information."""
+    return False
 
   def __init__(self, root_dir):
     self.name = str(root_dir)

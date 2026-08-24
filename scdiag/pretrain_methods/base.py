@@ -14,6 +14,7 @@ class PretrainMethod(ABC):
     """
 
   NAME = ""  # CLI name (e.g. "simmim", "ijepa")
+  needs_labels = False  # Set True for methods requiring labels.
 
   @abstractmethod
   def add_args(self, parser):
@@ -39,13 +40,15 @@ class PretrainMethod(ABC):
     ...
 
   @abstractmethod
-  def train_step(self, model, images, global_step):
+  def train_step(self, model, images, global_step, *, labels=None):
     """Compute loss for one batch.
 
         Args:
           model: Module returned by :meth:`build`.
           images: ``(B, C, H, W)`` batch.
           global_step: Current global training step.
+          labels: Optional batch of integer class labels, required
+              for label-aware methods (e.g. supervised contrastive).
 
         Returns:
           ``(loss, info)`` where *info* contains scalars to log.

@@ -183,7 +183,7 @@ class IJEPAMethod(PretrainMethod):
         weight=args.ijepa_weight,
     )
 
-  def train_step(self, model, images, global_step):
+  def train_step(self, model, images, global_step, *, labels=None):
     set_train_mode(model, 'train')
     loss, info = model(images)
     return loss, info

@@ -37,6 +37,7 @@ from scdiag.checkpointing import (
     resume_checkpoint,
 )
 from scdiag.cli_utils import KVPairAction
+from scdiag.datasets.balanced_sampler import BalancedBatchSampler
 from scdiag.datasets.ensemble import DatasetEnsemble
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.grad_monitor import GradMonitor
@@ -67,7 +68,11 @@ def build_pretrain_transform(image_size=448):
 
 
 class _TransformWrapper:
-  """Apply a transform to a PIL image returned by DatasetEnsemble."""
+  """Apply a transform to items returned by DatasetEnsemble.
+
+  Handles both images-only mode (returns transformed tensor) and
+  label mode (returns ``(tensor, label)`` tuple).
+  """
 
   def __init__(self, dataset, transform):
     self._dataset = dataset
@@ -77,12 +82,17 @@ class _TransformWrapper:
     return len(self._dataset)
 
   def __getitem__(self, idx):
-    return self._transform(self._dataset[idx])
+    item = self._dataset[idx]
+    if isinstance(item, tuple):
+      image, label = item
+      return self._transform(image), label
+    return self._transform(item)
 
 
-def build_pretrain_dataset(args):
+def build_pretrain_dataset(args, needs_labels=False):
   """Build the DatasetEnsemble + transform pipeline."""
   configs = []
+  label_column = getattr(args, "label_column", None)
   for name in args.datasets:
     name = name.strip()
     if not name:
@@ -93,12 +103,15 @@ def build_pretrain_dataset(args):
     elif os.path.isdir(name):
       configs.append({"name": name, "source": "imagefolder"})
     else:
-      configs.append({
+      cfg = {
           "name": name,
           "source": "hf",
           "split": "train",
           "image_column": args.image_column,
-      })
+      }
+      if label_column:
+        cfg["label_column"] = label_column
+      configs.append(cfg)
 
   if not configs:
     fatal("No datasets specified. Use --datasets <name1> <name2> ...", ValueError)
@@ -108,11 +121,12 @@ def build_pretrain_dataset(args):
       cache_dir=args.cache_dir,
       hf_token=args.hf_token,
       strict=args.strict_datasets,
+      with_labels=needs_labels,
   )
   transform = build_pretrain_transform(args.image_size)
   dataset = _TransformWrapper(ensemble, transform)
   logging.info(ensemble.summary())
-  return dataset
+  return dataset, ensemble
 
 
 def log_validation_images(method,
@@ -176,15 +190,28 @@ def train_one_epoch(
 
   total_batches = len(loader)
 
-  for step, images in enumerate(loader):
-    images = images.to(device, non_blocking=True)
+  needs_labels = method.needs_labels
+
+  for step, batch in enumerate(loader):
+    if needs_labels:
+      images, labels = batch
+      images = images.to(device, non_blocking=True)
+      labels = labels.to(device, non_blocking=True)
+    else:
+      images = batch.to(device, non_blocking=True)
+      labels = None
 
     with torch.amp.autocast(
         "cuda",
         dtype=amp_dtype,
         enabled=(amp_dtype is not None and device.type == "cuda"),
     ):
-      loss, _info = method.train_step(model, images, global_step)
+      loss, _info = method.train_step(
+          model,
+          images,
+          global_step,
+          labels=labels,
+      )
 
     loss = loss / grad_accum_steps
     if amp_dtype == torch.float16 and scaler is not None:
@@ -297,6 +324,12 @@ def parse_args(argv=None):
       help="Image column name for HF datasets; auto-detected when omitted.",
   )
   parser.add_argument(
+      "--label_column",
+      type=str,
+      help="Label column name for HF datasets; auto-detected when omitted. "
+      "Required when using a label-aware pre-training method.",
+  )
+  parser.add_argument(
       "--strict_datasets",
       action=argparse.BooleanOptionalAction,
       default=False,
@@ -332,6 +365,14 @@ def parse_args(argv=None):
       default=1,
       help="Gradient accumulation steps. Effective batch "
       "size = batch_size * grad_accum_steps.",
+  )
+  parser.add_argument(
+      "--samples_per_class",
+      type=int,
+      default=4,
+      help="Samples per class in each batch.  Only used by "
+      "label-aware methods (e.g. supcon).  batch_size must "
+      "be divisible by this value.",
   )
   parser.add_argument("--epochs",
                       type=int,
@@ -554,19 +595,38 @@ def main(argv=None):
     logging.info(gpu_stats_str(device))
 
   logging.info("Building dataset ...")
-  dataset = build_pretrain_dataset(args)
+  dataset, ensemble = build_pretrain_dataset(
+      args,
+      needs_labels=method.needs_labels,
+  )
   logging.info(f"Total images: {len(dataset):,}")
   if len(dataset) == 0:
     fatal("No images loaded from any dataset. "
           "Check --datasets, --hf_token, and --cache_dir.")
-  loader = DataLoader(
-      dataset,
-      batch_size=args.batch_size,
-      shuffle=True,
-      num_workers=args.num_workers,
-      pin_memory=(device.type == "cuda"),
-      drop_last=True,
-  )
+
+  if method.needs_labels:
+    sampler = BalancedBatchSampler(
+        labels=ensemble.labels_array,
+        batch_size=args.batch_size,
+        samples_per_class=args.samples_per_class,
+    )
+    loader = DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        sampler=sampler,
+        num_workers=args.num_workers,
+        pin_memory=(device.type == "cuda"),
+        drop_last=True,
+    )
+  else:
+    loader = DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=args.num_workers,
+        pin_memory=(device.type == "cuda"),
+        drop_last=True,
+    )
 
   logging.info("Loading model '%s' via registry ...", args.model)
   base_model = load_model(

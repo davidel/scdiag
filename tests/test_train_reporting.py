@@ -9,12 +9,14 @@ import torch
 def _make_reporter(**kwargs):
   """Create a TrainReporting with sensible defaults for testing."""
   from scdiag.train_reporting import TrainReporting
+  opt = MagicMock()
+  opt.param_groups = [{"lr": 1e-4}]
   defaults = {
       "total_batches": 10,
       "log_every": 5,
       "writer": None,
       "device": torch.device("cpu"),
-      "optimizer": MagicMock(),
+      "optimizer": opt,
   }
   defaults.update(kwargs)
   return TrainReporting(**defaults)
