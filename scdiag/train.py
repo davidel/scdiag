@@ -48,6 +48,7 @@ from scdiag.optim_factory import (
 from scdiag.script_utils import load_extern
 from scdiag.storage_utils import save_checkpoint
 from scdiag.train_reporting import TrainReporting
+from scdiag.tta import create_default_tta_transform, load_tta_transform
 
 
 def parse_class_multipliers(s, num_labels, label2id):
@@ -398,6 +399,14 @@ def parse_args(argv=None):
       "create_train_transform(image_size, **kwargs) -> list of v2 "
       "transforms. The fixed tail (ToImage, ToDtype, Normalize) is "
       "appended automatically.",
+  )
+  parser.add_argument(
+      "--tta",
+      type=str,
+      help="Test-Time Augmentation. 'default' uses the built-in "
+      "4-view transform (identity + flips). A path/URL loads an "
+      "external script defining create_tta_transform. "
+      "Omit to disable TTA.",
   )
   parser.add_argument(
       "--epochs",
@@ -1019,34 +1028,45 @@ def evaluate_performance(model,
                          criterion,
                          device,
                          amp_dtype,
-                         id2label=None):
+                         id2label=None,
+                         tta_transform=None):
   """Evaluate on a validation/test set.
 
     Returns ``(eval_loss, top1_acc_pct, macro_f1, per_class_f1, cm)`` where
     *per_class_f1* is a dict ``{class_name: f1_score}`` (or ``{}`` if
     *id2label* is not supplied) and *cm* is the confusion-matrix as a
     2-D ``numpy.ndarray`` (rows = true labels, cols = predicted labels).
+
+    When *tta_transform* is provided predictions are averaged over N views
+    (including the original) while the loss is always computed on the
+    original image only.
     """
   set_train_mode(model, "eval")
+  amp_enabled = (amp_dtype is not None and device.type == "cuda")
   eval_loss, correct_top1, total_samples = 0.0, 0, 0
   all_preds = []
   all_labels = []
   with torch.no_grad():
     for images, targets in dataloader:
       images, targets = images.to(device), targets.to(device)
-      with torch.amp.autocast(
-          "cuda",
-          dtype=amp_dtype,
-          enabled=(amp_dtype is not None and device.type == "cuda"),
-      ):
-        outputs = model(pixel_values=images)
-        logits = outputs.logits
-        loss = criterion(logits, targets)
+      with torch.amp.autocast("cuda", dtype=amp_dtype, enabled=amp_enabled):
+        logits_orig = model(pixel_values=images).logits
+        loss = criterion(logits_orig, targets)
+
+        if tta_transform is not None:
+          views = tta_transform(images)
+          B, N = views.shape[:2]
+          logits_aug = model(pixel_values=views.flatten(0, 1)).logits
+          probs = (logits_orig.softmax(-1) +
+                   logits_aug.softmax(-1).unflatten(0, (B, N)).sum(1)) / (N + 1)
+          preds = probs.argmax(dim=1)
+        else:
+          preds = logits_orig.argmax(dim=1)
 
       eval_loss += loss.item() * images.size(0)
       total_samples += targets.size(0)
-      correct_top1 += (logits.argmax(dim=1) == targets).sum().item()
-      all_preds.extend(logits.argmax(dim=1).cpu().tolist())
+      correct_top1 += (preds == targets).sum().item()
+      all_preds.extend(preds.cpu().tolist())
       all_labels.extend(targets.cpu().tolist())
 
   avg_loss = eval_loss / total_samples
@@ -1102,6 +1122,15 @@ def main():
     train_aug_fn = load_augmentation_script(args.train_augmentation_script)
     logging.info(f"Using custom augmentation script: "
                  f"{args.train_augmentation_script}")
+
+  # Resolve TTA transform.
+  tta_transform = None
+  if args.tta == "default":
+    tta_transform = create_default_tta_transform(image_size=args.image_size)
+    logging.info("TTA enabled: default (identity + 3 flips, N=4)")
+  elif args.tta is not None:
+    tta_transform = load_tta_transform(args.tta, image_size=args.image_size)
+    logging.info(f"TTA enabled: loaded from {args.tta}")
 
   train_transforms, val_transforms = build_transforms(processor, args.image_size,
                                                       train_aug_fn)
@@ -1350,6 +1379,7 @@ def main():
           device,
           args.amp_dtype,
           id2label=train_proxy.id2label,
+          tta_transform=tta_transform,
       )
       writer.add_scalar("Epoch/Loss_Val", v_loss, epoch)
       writer.add_scalar("Epoch/Accuracy_Val_Top1", v_t1, epoch)

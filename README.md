@@ -442,6 +442,7 @@ carrying over old optimizer/scheduler states.
 | `--model_arg` | `{}` | Override model configuration (repeatable). |
 | `--proc_arg` | `{}` | Override processor configuration (repeatable). |
 | `--train_augmentation_script` | `None` | Custom augmentation script. Must define `create_train_transform()`. |
+| `--tta` | `None` | Test-Time Augmentation. `default` uses built-in 4-view transform (identity + flips). A path/URL loads an external script defining `create_tta_transform()`. Omit to disable. |
 
 Training automatically resumes from an existing `_latest.pt` or `_best.pt`
 checkpoint if one exists at the `--checkpoint` path.
