@@ -12,7 +12,7 @@ def supcon_loss(features, labels, temperature=0.07):
   """Supervised contrastive loss.
 
   Args:
-      features: ``(B, D)`` L2-normalized projection features.
+      features: ``(B, D)`` projection features (will be L2-normalized).
       labels: ``(B,)`` integer class labels.
       temperature: Temperature scaling factor.
 
@@ -29,19 +29,17 @@ def supcon_loss(features, labels, temperature=0.07):
   features = F.normalize(features, dim=1)
   logits = torch.mm(features, features.T) / temperature
 
-  # Mask out self-similarity on the diagonal.
-  logits_mask = torch.ones_like(mask) - torch.eye(mask.shape[0], device=device)
-  mask = mask * logits_mask
+  # Exclude self-pairs by masking the diagonal to a very negative value.
+  # logsumexp treats exp(-1e9) ≈ 0, so self-pairs are excluded from the
+  # normalization denominator without separate masking.
+  diag_mask = torch.eye(logits.shape[0], device=device, dtype=torch.bool)
+  logits.masked_fill_(diag_mask, -1e9)
 
-  # For numerical stability, subtract the row-wise max.
-  logits_max, _ = logits.max(dim=1, keepdim=True)
-  logits = logits - logits_max.detach()
+  # log-prob = logit - logsumexp; logsumexp is numerically stable internally.
+  log_prob = logits - torch.logsumexp(logits, dim=1, keepdim=True)
 
-  # exp(logits) with diagonal masked to zero.
-  exp_logits = torch.exp(logits) * logits_mask
-
-  # Log-sum-exp over all non-diagonal entries.
-  log_prob = logits - torch.log(exp_logits.sum(dim=1, keepdim=True))
+  # Mask out self-pairs from the positive mask as well.
+  mask = mask * (~diag_mask).float()
 
   # Mean of log-prob over positive pairs for each anchor.
   n_positives = mask.sum(dim=1)
@@ -50,7 +48,7 @@ def supcon_loss(features, labels, temperature=0.07):
   mean_log_prob = (mask * log_prob).sum(dim=1) / n_positives.clamp(min=1)
 
   if valid.sum() == 0:
-    # No positive pairs exist — return zero loss (gradients still flow).
+    # No positive pairs exist — return zero loss (backward graph intact).
     return (logits * 0.0).sum()
   loss = -mean_log_prob[valid].mean()
   return loss

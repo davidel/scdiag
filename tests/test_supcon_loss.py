@@ -1,5 +1,6 @@
 """Tests for supervised contrastive loss."""
 
+import pytest
 import torch
 
 from scdiag.losses.contrastive import supcon_loss
@@ -82,3 +83,52 @@ class TestSupConLoss:
     labels = torch.tensor([0, 1, 2, 3])
     loss = supcon_loss(features, labels, temperature=0.07)
     assert loss.item() == 0.0
+
+  def test_small_temperature_is_finite(self):
+    """Very small temperature must not produce NaN or Inf."""
+    torch.manual_seed(0)
+    features = torch.nn.functional.normalize(torch.randn(8, 32), dim=1)
+    labels = torch.tensor([0, 0, 1, 1, 2, 2, 3, 3])
+    loss = supcon_loss(features, labels, temperature=0.001)
+    assert torch.isfinite(loss)
+
+  def test_orthogonal_features_are_finite(self):
+    """Nearly-orthogonal features (small off-diagonal logits) must not
+    underflow to -inf in the logsumexp denominator."""
+    torch.manual_seed(42)
+    d = 128
+    n = 6
+    # Build near-orthogonal features via QR so off-diagonal sims ≈ 0.
+    q, _ = torch.linalg.qr(torch.randn(d, n))
+    features = q.T.float()  # (6, 128), rows are orthonormal.
+    labels = torch.tensor([0, 0, 1, 1, 2, 2])
+    loss = supcon_loss(features, labels, temperature=0.07)
+    assert torch.isfinite(loss)
+
+  def test_gradient_flows_through_loss(self):
+    """The loss must be differentiable w.r.t. the input features."""
+    torch.manual_seed(7)
+    raw = torch.randn(4, 16, requires_grad=True)
+    features = torch.nn.functional.normalize(raw, dim=1)
+    labels = torch.tensor([0, 0, 1, 1])
+    loss = supcon_loss(features, labels, temperature=0.07)
+    loss.backward()
+    assert raw.grad is not None
+    assert torch.isfinite(raw.grad).all()
+
+  def test_logsumexp_matches_manual(self):
+    """Numerically verify that logsumexp-based loss matches the
+    mathematically equivalent closed-form for a small controlled input."""
+    torch.manual_seed(99)
+    features = torch.nn.functional.normalize(torch.tensor([
+        [1.0, 0.0],
+        [1.0, 0.0],
+    ]),
+                                             dim=1)
+    labels = torch.tensor([0, 0])
+    loss = supcon_loss(features, labels, temperature=1.0)
+    # logits = [[0, 1], [1, 0]], diagonal masked to -1e9.
+    # For row 0: log_prob[0,1] = 1 - log(exp(1) + exp(-1e9)) ≈ 1 - 1 = 0.
+    # loss = -(0 + 0) / 2 = 0.
+    assert torch.isfinite(loss)
+    assert loss.item() == pytest.approx(0.0, abs=1e-6)
