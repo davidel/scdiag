@@ -4,6 +4,8 @@ import logging
 import torch
 from torch.utils.data import WeightedRandomSampler
 
+from scdiag.logging_utils import fatal
+
 
 def build_weighted_sampler(dataset,
                            num_labels,
@@ -43,14 +45,14 @@ def build_weighted_sampler(dataset,
     class_weights = inv_freq
   elif weight_mode == "multipliers":
     if multipliers is None:
-      raise ValueError("multipliers must be provided when weight_mode='multipliers'")
+      fatal("multipliers must be provided when weight_mode='multipliers'", ValueError)
     class_weights = multipliers.float()
   elif weight_mode == "combined":
     if multipliers is None:
-      raise ValueError("multipliers must be provided when weight_mode='combined'")
+      fatal("multipliers must be provided when weight_mode='combined'", ValueError)
     class_weights = inv_freq * multipliers.float()
   else:
-    raise ValueError(f"Unknown weight_mode: {weight_mode!r}")
+    fatal(f"Unknown weight_mode: {weight_mode!r}", ValueError)
 
   sample_weights = [class_weights[label].item() for label in labels]
 

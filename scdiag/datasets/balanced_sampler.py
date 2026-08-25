@@ -5,6 +5,8 @@ import logging
 import numpy as np
 from torch.utils.data import Sampler
 
+from scdiag.logging_utils import fatal
+
 
 class BalancedBatchSampler(Sampler):
   """Yields mini-batches with a guaranteed number of samples per class.
@@ -27,8 +29,9 @@ class BalancedBatchSampler(Sampler):
   def __init__(self, labels, batch_size, samples_per_class):
     labels = np.asarray(labels)
     if batch_size % samples_per_class != 0:
-      raise ValueError(f"batch_size ({batch_size}) must be divisible by "
-                       f"samples_per_class ({samples_per_class})")
+      fatal(
+          f"batch_size ({batch_size}) must be divisible by "
+          f"samples_per_class ({samples_per_class})", ValueError)
 
     self._batch_size = batch_size
     self._samples_per_class = samples_per_class

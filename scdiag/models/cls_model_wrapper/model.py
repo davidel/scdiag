@@ -7,6 +7,7 @@ import torch.nn as nn
 from transformers import AutoModel
 
 from scdiag.classifiers import build_classifier
+from scdiag.logging_utils import fatal
 from scdiag.models.registry import ModelOutput
 
 
@@ -67,9 +68,10 @@ class ClsModelWrapper(nn.Module):
       return raw.last_hidden_state
     if isinstance(raw, dict) and "last_hidden_state" in raw:
       return raw["last_hidden_state"]
-    raise ValueError(f"Cannot extract hidden states from {type(raw).__name__}. "
-                     "Expected a tensor, a BaseModelOutput, or a dict with "
-                     "'last_hidden_state' key.")
+    fatal(
+        f"Cannot extract hidden states from {type(raw).__name__}. "
+        "Expected a tensor, a BaseModelOutput, or a dict with "
+        "'last_hidden_state' key.", ValueError)
 
   def forward(self, pixel_values):
     raw = self.backbone(pixel_values)

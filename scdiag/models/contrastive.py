@@ -9,6 +9,8 @@ import logging
 
 import torch.nn as nn
 
+from scdiag.logging_utils import fatal
+
 
 class ProjectionHead(nn.Module):
   """Two-layer MLP projection head.
@@ -51,16 +53,13 @@ class ContrastiveEncoder(nn.Module):
       / ``classifier.feat_dim``.
   """
 
-  def __init__(self, encoder, proj_dim=256, proj_hidden=2048,
-               backbone_dim=None):
+  def __init__(self, encoder, proj_dim=256, proj_hidden=2048, backbone_dim=None):
     super().__init__()
     self.encoder = encoder
     self._proj_dim = proj_dim
     self._proj_hidden = proj_hidden
-    self._backbone_dim = (
-        backbone_dim if backbone_dim is not None
-        else self._detect_backbone_dim()
-    )
+    self._backbone_dim = (backbone_dim
+                          if backbone_dim is not None else self._detect_backbone_dim())
     self.projection = ProjectionHead(
         self._backbone_dim,
         proj_hidden,
@@ -83,9 +82,10 @@ class ContrastiveEncoder(nn.Module):
       feat_dim = getattr(classifier, "feat_dim", None)
       if feat_dim is not None:
         return feat_dim
-    raise ValueError(
+    fatal(
         "Cannot infer backbone output dimension.  "
-        "Pass backbone_dim explicitly."
+        "Pass backbone_dim explicitly.",
+        ValueError,
     )
 
   def encode(self, images):
@@ -95,8 +95,7 @@ class ContrastiveEncoder(nn.Module):
       from scdiag.model_utils import extract_backbone_features
       return extract_backbone_features(self.encoder, images)
     except (ValueError, AttributeError):
-      logging.debug(
-          "extract_backbone_features failed, using direct forward")
+      logging.debug("extract_backbone_features failed, using direct forward")
     # Fallback: plain forward pass through the encoder.
     raw = self.encoder(images)
     if hasattr(raw, "logits"):
