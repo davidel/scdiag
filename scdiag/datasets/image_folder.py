@@ -10,52 +10,36 @@ from scdiag.datasets.retry import getitem_retry
 from scdiag.logging_utils import fatal
 
 _IMAGE_EXTS = {
-    # JPEG family
     ".jpg",
     ".jpeg",
     ".jpe",
     ".jfif",
-    # PNG family
     ".png",
     ".apng",
-    # GIF
     ".gif",
-    # BMP / DIB
     ".bmp",
     ".dib",
-    # TIFF
     ".tiff",
     ".tif",
-    # WebP
     ".webp",
-    # AVIF
     ".avif",
     ".avifs",
-    # JPEG 2000
     ".jp2",
     ".j2k",
-    # Multi-Picture Object (stereo / 3D)
     ".mpo",
-    # PPM family (common in CV research)
     ".pbm",
     ".pgm",
     ".ppm",
     ".pnm",
-    # TGA / Targa
     ".tga",
     ".icb",
     ".vda",
     ".vst",
-    # DDS (DirectDraw Surface)
     ".dds",
-    # PCX
     ".pcx",
-    # ICO / Windows icons
     ".ico",
-    # X11 bitmaps
     ".xbm",
     ".xpm",
-    # Photoshop (flattened layers on load)
     ".psd",
 }
 
@@ -63,114 +47,81 @@ _IMAGE_EXTS = {
 class ImageFolderDataset:
   """Fast local-image dataset backed by ``Path.rglob()``.
 
-  When ``with_labels=True`` and the root directory contains class
-  subdirectories (e.g. ``train/AK/``, ``train/BCC/``), labels are
-  extracted from the parent folder name and ``__getitem__`` returns
-  ``(image, label)`` tuples.  Otherwise, returns bare images only.
+  Labels are auto-detected from relative paths.  Each image's path
+  relative to *root_dir* is split into components:
 
-  Parameters
-  ----------
-  root_dir : str | Path
-      Root directory containing images (recursively scanned).
-  with_labels : bool
-      If ``True``, treat immediate subdirectories as class folders and
-      expose labels via the standard dataset interface (``has_labels``,
-      ``label_names``, ``labels_array``).
+  - 3 components (``split/label/file``) → labels present
+  - 2 components (``split/file``) → no labels
+  - A mix of both → fatal error
+
+  ``__getitem__`` always returns a dict:
+
+  - With labels: ``{"image": PIL.Image, "label": int}``
+  - Without labels: ``{"image": PIL.Image}``
   """
 
-  def __init__(self, root_dir, with_labels=False):
+  def __init__(self, root_dir):
     self.name = str(root_dir)
     self._root_dir = Path(root_dir)
-    self._with_labels = with_labels
     self._label_names = []
     self._label2id = {}
-    self._labels = None  # np.ndarray or None
+    self._labels = None
     self._paths = []
 
     if not self._root_dir.is_dir():
       logging.warning(f"ImageFolderDataset: '{self._root_dir}' is not a directory")
       return
 
-    if self._with_labels:
-      self._scan_with_labels()
-    else:
-      self._scan_flat()
+    self._scan()
 
-  # ------------------------------------------------------------------
-  # Label-free scan (original behaviour)
-  # ------------------------------------------------------------------
-  def _scan_flat(self):
-    self._paths = sorted(p for p in self._root_dir.rglob("*")
-                         if p.is_file() and p.suffix.lower() in _IMAGE_EXTS)
-    logging.info(f"ImageFolderDataset: found {len(self._paths):,} images "
-                 f"in '{self._root_dir}'")
+  def _scan(self):
+    all_paths = sorted(p for p in self._root_dir.rglob("*")
+                       if p.is_file() and p.suffix.lower() in _IMAGE_EXTS)
 
-  # ------------------------------------------------------------------
-  # Label-aware scan — class subdirectories
-  # ------------------------------------------------------------------
-  def _looks_like_class_dirs(self, dirs):
-    """Check whether directories contain images directly (class folders)
-    vs subdirectories (split folders like train/, test/)."""
-    for d in dirs[:3]:
-      for child in d.iterdir():
-        if child.is_file() and child.suffix.lower() in _IMAGE_EXTS:
-          return True
-    return False
-
-  def _scan_with_labels(self):
-    # Collect class subdirectories (only immediate children that are dirs)
-    class_dirs = sorted(d for d in self._root_dir.iterdir()
-                        if d.is_dir() and not d.name.startswith("."))
-    if not class_dirs:
-      fatal(
-          f"with_labels=True but no class subdirectories found in "
-          f"'{self._root_dir}'",
-          ValueError,
-      )
-
-    # Auto-detect split-folder layout (train/, test/) vs flat class layout.
-    # If immediate children are split folders rather than class folders,
-    # recurse one level deeper and merge all class dirs across splits.
-    if not self._looks_like_class_dirs(class_dirs):
-      split_dirs = class_dirs
-      class_dirs = []
-      for split_dir in split_dirs:
-        for d in sorted(split_dir.iterdir()):
-          if d.is_dir() and not d.name.startswith("."):
-            class_dirs.append(d)
-      if not class_dirs:
+    has_labels = []
+    no_labels = []
+    for p in all_paths:
+      rel = p.relative_to(self._root_dir)
+      parts = rel.parts
+      if len(parts) == 3:
+        has_labels.append(p)
+      elif len(parts) in (1, 2):
+        no_labels.append(p)
+      else:
         fatal(
-            f"with_labels=True but no class subdirectories found in "
-            f"'{self._root_dir}' or its subfolders",
+            f"Unexpected path depth {len(parts)} for '{rel}' "
+            f"(expected 1, 2, or 3 components)",
             ValueError,
         )
 
-    self._label_names = [d.name for d in class_dirs]
-    self._label2id = {name: i for i, name in enumerate(self._label_names)}
+    if has_labels and no_labels:
+      fatal(
+          f"Mixed layout: {len(has_labels)} images in split/label/file "
+          f"but {len(no_labels)} images in split/file format",
+          ValueError,
+      )
 
-    paths = []
-    labels = []
-    for label_id, class_dir in enumerate(class_dirs):
-      class_paths = sorted(p for p in class_dir.rglob("*")
-                           if p.is_file() and p.suffix.lower() in _IMAGE_EXTS)
-      paths.extend(class_paths)
-      labels.extend([label_id] * len(class_paths))
+    self._paths = has_labels if has_labels else no_labels
 
-    self._paths = paths
-    self._labels = np.array(labels, dtype=np.int64)
+    if has_labels:
+      label_set = sorted({p.relative_to(self._root_dir).parts[1] for p in has_labels})
+      self._label_names = label_set
+      self._label2id = {name: i for i, name in enumerate(label_set)}
+      self._labels = np.array(
+          [self._label2id[p.relative_to(self._root_dir).parts[1]] for p in self._paths],
+          dtype=np.int64,
+      )
 
-    logging.info(f"ImageFolderDataset: found {len(self._paths):,} images, "
-                 f"{len(self._label_names)} classes in '{self._root_dir}'")
-    for i, name in enumerate(self._label_names):
-      count = int((self._labels == i).sum())
+    logging.info(f"ImageFolderDataset: found {len(self._paths):,} images " +
+                 (f", {len(self._label_names)} classes " if self._label_names else "") +
+                 f"in '{self._root_dir}'")
+    for name in self._label_names:
+      count = int((self._labels == self._label2id[name]).sum())
       logging.info(f"  class {name}: {count:,} images")
 
-  # ------------------------------------------------------------------
-  # Label interface (used by DatasetEnsemble)
-  # ------------------------------------------------------------------
   @property
   def has_labels(self):
-    return self._with_labels and self._labels is not None
+    return self._labels is not None
 
   @property
   def num_labels(self):
@@ -181,12 +132,8 @@ class ImageFolderDataset:
     return list(self._label_names)
 
   def labels_array(self):
-    """Return a numpy array of integer labels for all samples."""
     return self._labels
 
-  # ------------------------------------------------------------------
-  # Core dataset protocol
-  # ------------------------------------------------------------------
   def __len__(self):
     return len(self._paths)
 
@@ -195,10 +142,9 @@ class ImageFolderDataset:
       fatal(f"Index {idx} out of range for '{self.name}'", IndexError)
 
     def load(i):
-      path = self._paths[i]
-      return Image.open(path).convert("RGB")
+      return Image.open(self._paths[i]).convert("RGB")
 
-    image = getitem_retry(idx, load, len(self._paths))
-    if self._with_labels:
-      return image, int(self._labels[idx])
-    return image
+    image, _ = getitem_retry(idx, load, len(self._paths))
+    if self._labels is not None:
+      return {"image": image, "label": int(self._labels[idx])}
+    return {"image": image}

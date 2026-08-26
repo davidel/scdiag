@@ -20,7 +20,9 @@ def getitem_retry(idx, fn, size, max_retry=5):
 
   Returns
   -------
-  The value returned by *fn*.
+  tuple[Any, int]
+      ``(item, actual_index)`` — the loaded item and the index that was
+      ultimately used (may differ from *idx* after retries).
 
   Raises
   ------
@@ -29,7 +31,7 @@ def getitem_retry(idx, fn, size, max_retry=5):
   """
   for attempt in range(max_retry + 1):
     try:
-      return fn(idx)
+      return fn(idx), idx
     except Exception:
       if attempt < max_retry:
         old_idx = idx

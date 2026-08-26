@@ -68,25 +68,19 @@ def build_pretrain_transform(image_size=448):
 
 
 class _TransformWrapper:
-  """Apply a transform to items returned by DatasetEnsemble.
+  """Apply a transform to the image field of a dict-returning dataset."""
 
-  Handles both images-only mode (returns transformed tensor) and
-  label mode (returns ``(tensor, label)`` tuple).
-  """
-
-  def __init__(self, dataset, transform):
+  def __init__(self, dataset, transform, image_field="image"):
     self._dataset = dataset
     self._transform = transform
+    self._image_field = image_field
 
   def __len__(self):
     return len(self._dataset)
 
   def __getitem__(self, idx):
     item = self._dataset[idx]
-    if isinstance(item, tuple):
-      image, label = item
-      return self._transform(image), label
-    return self._transform(item)
+    return {**item, self._image_field: self._transform(item[self._image_field])}
 
 
 def build_pretrain_dataset(args, needs_labels=False):
@@ -121,10 +115,12 @@ def build_pretrain_dataset(args, needs_labels=False):
       cache_dir=args.cache_dir,
       hf_token=args.hf_token,
       strict=args.strict_datasets,
-      with_labels=needs_labels,
   )
+  if needs_labels:
+    ensemble._validate_labels()
+    ensemble._build_global_label_space()
   transform = build_pretrain_transform(args.image_size)
-  dataset = _TransformWrapper(ensemble, transform)
+  dataset = _TransformWrapper(ensemble, transform, image_field=ensemble.image_column)
   logging.info(ensemble.summary())
   return dataset, ensemble
 
@@ -158,6 +154,7 @@ def train_one_epoch(
     method,
     model,
     loader,
+    ensemble,
     optimizer,
     device,
     amp_dtype,
@@ -193,13 +190,10 @@ def train_one_epoch(
   needs_labels = method.needs_labels
 
   for step, batch in enumerate(loader):
+    images = batch[ensemble.image_column].to(device, non_blocking=True)
+    labels = None
     if needs_labels:
-      images, labels = batch
-      images = images.to(device, non_blocking=True)
-      labels = labels.to(device, non_blocking=True)
-    else:
-      images = batch.to(device, non_blocking=True)
-      labels = None
+      labels = batch[ensemble.label_column].to(device, non_blocking=True)
 
     with torch.amp.autocast(
         "cuda",
@@ -757,6 +751,7 @@ def main(argv=None):
           method,
           model,
           loader,
+          ensemble,
           optimizer,
           device,
           args.amp_dtype,

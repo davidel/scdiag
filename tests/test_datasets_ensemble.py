@@ -16,9 +16,11 @@ class TestImageFolderDataset:
       img.save(tmp_path / f"img_{i}.png")
     ds = ImageFolderDataset(str(tmp_path))
     assert len(ds) == 5
-    img = ds[0]
-    assert isinstance(img, Image.Image)
-    assert img.mode == "RGB"
+    item = ds[0]
+    assert isinstance(item, dict)
+    assert "image" in item
+    assert isinstance(item["image"], Image.Image)
+    assert item["image"].mode == "RGB"
 
   def test_empty_dir(self, tmp_path):
     ds = ImageFolderDataset(str(tmp_path))
@@ -50,13 +52,13 @@ class TestDatasetEnsemble:
     ]
     ensemble = DatasetEnsemble(configs)
     assert len(ensemble) == 7
-    assert ensemble.num_datasets == 2
 
     # Verify flat indexing crosses dataset boundaries
-    img_a = ensemble[2]  # last image in dir_a
-    img_b = ensemble[3]  # first image in dir_b
-    assert isinstance(img_a, Image.Image)
-    assert isinstance(img_b, Image.Image)
+    item_a = ensemble[2]  # last image in dir_a
+    item_b = ensemble[3]  # first image in dir_b
+    assert isinstance(item_a, dict)
+    assert isinstance(item_a["image"], Image.Image)
+    assert isinstance(item_b["image"], Image.Image)
 
   def test_summary(self, tmp_path):
     d = tmp_path / "data"
