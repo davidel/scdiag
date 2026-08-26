@@ -28,8 +28,10 @@ class UVito(nn.Module):
       dim_feedforward=2048,
       dropout=0.1,
       drop_path_rate=0.1,
+      use_grad_checkpoint=False,
   ):
     super().__init__()
+    self.use_grad_checkpoint = use_grad_checkpoint
     self.num_cls_tokens = num_cls_tokens
 
     # Step 1: Load the pretrained SMP segmentation encoder
@@ -113,7 +115,14 @@ class UVito(nn.Module):
 
     # Transformer blocks
     for layer in self.transformer_layers:
-      tokens = layer(tokens)
+      if self.use_grad_checkpoint and self.training:
+        tokens = torch.utils.checkpoint.checkpoint(
+            layer,
+            tokens,
+            use_reentrant=False,
+        )
+      else:
+        tokens = layer(tokens)
     transformer_output = self.transformer_norm(tokens)
 
     # Extract CLS tokens and flatten

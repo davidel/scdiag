@@ -42,7 +42,7 @@ from scdiag.datasets.ensemble import DatasetEnsemble
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.grad_monitor import GradMonitor
 from scdiag.logging_utils import fatal, setup_logging
-from scdiag.model_utils import set_train_mode
+from scdiag.model_utils import enable_grad_checkpointing, set_train_mode
 from scdiag.models.registry import load_model
 from scdiag.optim_factory import (
     build_param_groups,
@@ -555,7 +555,17 @@ def parse_args(argv=None):
       "Each pattern is 'SEARCH;REPLACE' where SEARCH is a Python regex "
       "and REPLACE may use $1, $2, … for capture groups. "
       "Applied before shape-based alignment. "
-      "Example: 'encoder\\\\.(.*);model\\\\.$1'.",
+      "Example: 'encoder\\\\\\\\.(.*);model\\\\\\\\.$1'.",
+  )
+
+  parser.add_argument(
+      "--grad_checkpoint",
+      action=argparse.BooleanOptionalAction,
+      default=False,
+      help="Enable gradient checkpointing to reduce VRAM usage "
+      "(~40-50% less activation memory, ~25-35% more compute per step). "
+      "Enables larger batch sizes. Net throughput gain depends on "
+      "whether the GPU is memory-bound or compute-saturated.",
   )
 
   # Two-pass parse: first to get --method, then add its args.
@@ -639,6 +649,9 @@ def main(argv=None):
       device=device,
       **args.model_arg,
   )
+
+  if args.grad_checkpoint:
+    enable_grad_checkpointing(base_model)
 
   model = method.build(args, base_model, device)
   method.load_checkpoint_state(model, {}, args)  # initialize method state

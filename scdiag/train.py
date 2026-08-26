@@ -34,6 +34,7 @@ from scdiag.logging_utils import fatal, setup_logging
 from scdiag.metrics import confusion_row_strings
 from scdiag.model_utils import (
     apply_lora,
+    enable_grad_checkpointing,
     extract_lora_params,
     freeze_model,
     set_train_mode,
@@ -799,6 +800,16 @@ def parse_args(argv=None):
       "Example: --sched_arg T_max=50 eta_min=1e-6",
   )
 
+  parser.add_argument(
+      "--grad_checkpoint",
+      action=argparse.BooleanOptionalAction,
+      default=False,
+      help="Enable gradient checkpointing to reduce VRAM usage "
+      "(~40-50% less activation memory, ~25-35% more compute per step). "
+      "Enables larger batch sizes. Net throughput gain depends on "
+      "whether the GPU is memory-bound or compute-saturated.",
+  )
+
   return parser.parse_args(argv)
 
 
@@ -1229,6 +1240,9 @@ def main():
       classifier_args=args.classifier_args,
       **args.model_arg,
   )
+
+  if args.grad_checkpoint:
+    enable_grad_checkpointing(model)
 
   # Optionally load weights from a source checkpoint
   if args.source_checkpoint:

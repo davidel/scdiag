@@ -88,8 +88,10 @@ class CustomPatchTransformer(nn.Module):
       dropout=0.1,
       drop_path_rate=0.1,
       num_conv_layers=4,
+      use_grad_checkpoint=False,
   ):
     super().__init__()
+    self.use_grad_checkpoint = use_grad_checkpoint
     self.patch_embed = ConvPatchEmbedding(img_channels=3,
                                           embed_dim=embed_dim,
                                           num_blocks=num_conv_layers,
@@ -152,7 +154,14 @@ class CustomPatchTransformer(nn.Module):
 
     # Transformer encoder (all layers, all tokens)
     for layer in self.transformer_layers:
-      x = layer(x)
+      if self.use_grad_checkpoint and self.training:
+        x = torch.utils.checkpoint.checkpoint(
+            layer,
+            x,
+            use_reentrant=False,
+        )
+      else:
+        x = layer(x)
     x = self.ln_norm(x)
 
     return x[:, :1, :], x[:, 1:, :]  # CLS, spatial

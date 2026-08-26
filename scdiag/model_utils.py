@@ -404,3 +404,55 @@ def collect_features(model, dataset, device, batch_size=128):
       labels_list.append(batch_labels.numpy())
 
   return np.concatenate(features_list), np.concatenate(labels_list)
+
+
+def enable_grad_checkpointing(model):
+  """Enable gradient checkpointing on *model* (in-place).
+
+  Dispatches to the backend's native API when available, otherwise sets
+  a flag that custom models (ConvViT / UVito) pick up in their
+  transformer loops.
+
+  Detection order (first match wins):
+
+  1. timm unwrapped — ``model.set_grad_checkpointing(enable=True)``
+  2. timm via wrapper — ``model.model.set_grad_checkpointing(enable=True)``
+  3. HuggingFace via wrapper — ``model.backbone.gradient_checkpointing_enable()``
+  4. HuggingFace unwrapped — ``model.gradient_checkpointing_enable()``
+  5. ConvViT / UVito unwrapped — ``model.use_grad_checkpoint = True``
+  6. ConvViT / UVito via wrapper — ``model.model.use_grad_checkpoint = True``
+
+  Logs a warning if no known checkpointing mechanism is found.
+  """
+  from scdiag.attr_utils import MISSING, maybe_call, maybe_setattr
+
+  # --- timm native API (unwrapped or via wrapper) ---
+  if maybe_call(model, 'set_grad_checkpointing', enable=True) is not MISSING:
+    logging.info("Gradient checkpointing enabled (timm native API).")
+    return
+  if maybe_call(model, 'model.set_grad_checkpointing', enable=True) is not MISSING:
+    logging.info("Gradient checkpointing enabled (timm native API via wrapper).")
+    return
+
+  # --- HuggingFace native API (via wrapper or unwrapped) ---
+  if maybe_call(model, 'backbone.gradient_checkpointing_enable') is not MISSING:
+    logging.info("Gradient checkpointing enabled (HuggingFace API via wrapper).")
+    return
+  if maybe_call(model, 'gradient_checkpointing_enable') is not MISSING:
+    logging.info("Gradient checkpointing enabled (HuggingFace native API).")
+    return
+
+  # --- Custom model per-block flag (unwrapped or via wrapper) ---
+  if maybe_setattr(model, 'use_grad_checkpoint', True) is not MISSING:
+    logging.info("Gradient checkpointing enabled (per-block, transformer loop).")
+    return
+  if maybe_setattr(model, 'model.use_grad_checkpoint', True) is not MISSING:
+    logging.info(
+        "Gradient checkpointing enabled (per-block, transformer loop via wrapper).")
+    return
+
+  logging.warning(
+      "Gradient checkpointing requested but no known mechanism found "
+      "for model type %s. Checkpointing will NOT be active.",
+      type(model).__name__,
+  )
