@@ -247,6 +247,7 @@ scdiag-pretrain --method supcon \
 | `--sched_arg` | `{}` | Extra scheduler kwargs (repeatable). |
 | `--source_checkpoint` | `None` | Path to source checkpoint to absorb parameters from. |
 | `--param_rename` | `None` | Regex-based key rename patterns (`SEARCH;REPLACE`). |
+| `--grad_checkpoint` | `False` | Enable gradient checkpointing. Reduces activation memory by ~40-50% at the cost of ~25-35% more compute per step. Enables larger batch sizes. See [Gradient Checkpointing](#gradient-checkpointing). |
 
 **SupCon-specific arguments:**
 
@@ -442,6 +443,7 @@ carrying over old optimizer/scheduler states.
 | `--model_arg` | `{}` | Override model configuration (repeatable). |
 | `--proc_arg` | `{}` | Override processor configuration (repeatable). |
 | `--train_augmentation_script` | `None` | Custom augmentation script. Must define `create_train_transform()`. |
+| `--grad_checkpoint` | `False` | Enable gradient checkpointing. Reduces activation memory by ~40-50% at the cost of ~25-35% more compute per step. Enables larger batch sizes. See [Gradient Checkpointing](#gradient-checkpointing). |
 | `--tta` | `None` | Test-Time Augmentation. `default` uses built-in 4-view transform (identity + flips). A path/URL loads an external script defining `create_tta_transform()`. Omit to disable. |
 
 Training automatically resumes from an existing `_latest.pt` or `_best.pt`
@@ -492,6 +494,42 @@ scdiag-train --model facebook/convnextv2-base-22k-224 \
 Backbone weights load via `strict=False`; the classifier head (different
 `num_classes`) is reinitialised. `--state_load none` prevents carrying over
 old optimizer/scheduler states.
+
+### Gradient Checkpointing
+
+Training deep vision transformers is memory-intensive: the attention maps for
+EVA02-base at 448×448 resolution consume ~4.6 GB across 12 layers, which
+limits the maximum batch size even on a 24 GB GPU. Gradient checkpointing
+trades compute for memory by discarding intermediate activations during the
+forward pass and recomputing them during the backward pass.
+
+```bash
+scdiag-train \
+    --model timm:eva02_base_patch14_448.mim_in22k_ft_in22k_in1k \
+    --batch_size 32 \
+    --grad_accum_steps 2 \
+    --grad_checkpoint \
+    --amp_dtype bfloat16 \
+    ...
+```
+
+**What it does:** Each transformer block stores only its input and output.
+The intra-block activations (attention maps, FFN intermediates) are
+recomputed on-demand during the backward pass. This reduces peak activation
+memory by ~40-50%.
+
+**What it costs:** The recomputation adds ~25-35% more compute per training
+step. Whether this translates to a net throughput gain or loss depends on
+your GPU:
+- **Memory-bound GPU** (VRAM-limited, compute underutilized): larger batches
+  fill the GPU's compute capacity → net throughput **increase** of ~50-60%.
+- **Compute-saturated GPU** (TFLOPS at 100%): every extra FLOP adds to step
+  time → net throughput **decrease** of ~20-25%, though the larger batch can
+  still improve training stability and final accuracy.
+
+**Backend support:** Enabled automatically for all model backends — timm,
+HuggingFace, ConvViT, and UVito — via native APIs or per-block
+`torch.utils.checkpoint` in the transformer loops.
 
 ---
 
