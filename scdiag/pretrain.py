@@ -240,8 +240,7 @@ def train_one_epoch(
     window_loss += loss.item() * bs * grad_accum_steps
 
     elapsed = time.time() - last_log_time
-    if (step +
-        1) % grad_accum_steps == 0 and global_step > 0 and global_step % log_every == 0:
+    if global_step > 0 and global_step % log_every == 0:
       throughput = window_samples / elapsed if elapsed > 0 else 0
       w_loss = window_loss / window_samples if window_samples > 0 else 0.0
       avg_loss_so_far = total_loss / total_samples
