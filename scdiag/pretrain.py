@@ -616,11 +616,9 @@ def main(argv=None):
     )
     loader = DataLoader(
         dataset,
-        batch_size=args.batch_size,
-        sampler=sampler,
+        batch_sampler=sampler,
         num_workers=args.num_workers,
         pin_memory=(device.type == "cuda"),
-        drop_last=True,
     )
   else:
     loader = DataLoader(
