@@ -14,7 +14,7 @@ class TestGetitemRetry:
     assert item == "item_3"
     assert idx == 3
 
-  def test_retries_on_failure(self):
+  def test_retries_on_failure(self, monkeypatch):
     """First call fails; retry picks a new random index."""
     call_count = 0
 
@@ -25,10 +25,13 @@ class TestGetitemRetry:
         raise OSError("simulated corruption")
       return f"ok_{i}"
 
+    # Pin the random fallback to index 42 so the assertion is deterministic.
+    monkeypatch.setattr("scdiag.datasets.retry.random.randrange", lambda size: 42)
+
     item, idx = getitem_retry(0, fn, size=100, max_retry=5)
     assert item.startswith("ok_")
     assert call_count == 2
-    assert idx != 0
+    assert idx == 42
 
   def test_all_retries_exhausted(self):
     """Every call fails — exception propagates after max_retry attempts."""
