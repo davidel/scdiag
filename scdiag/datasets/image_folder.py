@@ -108,6 +108,15 @@ class ImageFolderDataset:
   # ------------------------------------------------------------------
   # Label-aware scan — class subdirectories
   # ------------------------------------------------------------------
+  def _looks_like_class_dirs(self, dirs):
+    """Check whether directories contain images directly (class folders)
+    vs subdirectories (split folders like train/, test/)."""
+    for d in dirs[:3]:
+      for child in d.iterdir():
+        if child.is_file() and child.suffix.lower() in _IMAGE_EXTS:
+          return True
+    return False
+
   def _scan_with_labels(self):
     # Collect class subdirectories (only immediate children that are dirs)
     class_dirs = sorted(d for d in self._root_dir.iterdir()
@@ -118,6 +127,23 @@ class ImageFolderDataset:
           f"'{self._root_dir}'",
           ValueError,
       )
+
+    # Auto-detect split-folder layout (train/, test/) vs flat class layout.
+    # If immediate children are split folders rather than class folders,
+    # recurse one level deeper and merge all class dirs across splits.
+    if not self._looks_like_class_dirs(class_dirs):
+      split_dirs = class_dirs
+      class_dirs = []
+      for split_dir in split_dirs:
+        for d in sorted(split_dir.iterdir()):
+          if d.is_dir() and not d.name.startswith("."):
+            class_dirs.append(d)
+      if not class_dirs:
+        fatal(
+            f"with_labels=True but no class subdirectories found in "
+            f"'{self._root_dir}' or its subfolders",
+            ValueError,
+        )
 
     self._label_names = [d.name for d in class_dirs]
     self._label2id = {name: i for i, name in enumerate(self._label_names)}
@@ -145,6 +171,10 @@ class ImageFolderDataset:
   @property
   def has_labels(self):
     return self._with_labels and self._labels is not None
+
+  @property
+  def num_labels(self):
+    return len(self._label_names)
 
   @property
   def label_names(self):
