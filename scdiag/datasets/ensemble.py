@@ -165,7 +165,7 @@ class DatasetEnsemble:
               hf_token=hf_token,
           )
         elif source == "imagefolder":
-          ds = ImageFolderDataset(root_dir=name)
+          ds = ImageFolderDataset(root_dir=name, with_labels=with_labels)
         else:
           logging.warning(f"Unknown source '{source}' for dataset '{name}', skipping")
           continue

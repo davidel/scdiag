@@ -144,7 +144,9 @@ class TestDatasetEnsembleLabels:
     with tempfile.TemporaryDirectory() as tmpdir:
       img = Image.new("RGB", (64, 64), "red")
       img.save(os.path.join(tmpdir, "test.jpg"))
-      with pytest.raises(ValueError, match="does not provide labels"):
+      # with_labels=True but directory has no class subdirectories
+      # → ImageFolderDataset raises, ensemble catches and re-raises
+      with pytest.raises(RuntimeError, match="No datasets loaded"):
         DatasetEnsemble(
             [{
                 "name": tmpdir,
