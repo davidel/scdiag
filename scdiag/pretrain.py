@@ -477,6 +477,20 @@ def parse_args(argv=None):
       "-1 (default) = disabled.",
   )
   parser.add_argument(
+      "--norm_history",
+      type=int,
+      default=0,
+      help="Keep last N norm snapshots per param for trend analysis. "
+      "0 (default) = disabled. Requires --grad_monitor.",
+  )
+  parser.add_argument(
+      "--trend_top_n",
+      type=int,
+      default=10,
+      help="Show top N params in trend table by abs change %. "
+      "0 = show all. Requires --norm_history.",
+  )
+  parser.add_argument(
       "--vis_every",
       type=int,
       default=0,
@@ -737,8 +751,15 @@ def main(argv=None):
   del ckpt_extra
   grad_monitor = None
   if args.grad_monitor >= 0:
-    grad_monitor = GradMonitor(model, log_every=args.grad_monitor)
+    grad_monitor = GradMonitor(
+        model,
+        log_every=args.grad_monitor,
+        norm_history=args.norm_history,
+        trend_top_n=args.trend_top_n,
+    )
     logging.info(f"Gradient monitoring enabled (every {args.grad_monitor} steps).")
+    if args.norm_history > 0:
+      logging.info(f"  Norm trend history: last {args.norm_history} snapshots")
 
   # Report the final model state after checkpoint restoration and all training
   # initialization, immediately before pre-training begins.
