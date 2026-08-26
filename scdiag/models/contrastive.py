@@ -9,6 +9,7 @@ import logging
 
 import torch.nn as nn
 
+from scdiag.attr_utils import MISSING, get_attribute
 from scdiag.logging_utils import fatal
 
 
@@ -68,20 +69,19 @@ class ContrastiveEncoder(nn.Module):
 
   def _detect_backbone_dim(self):
     """Infer the backbone output feature dimension."""
-    # Try common attribute names used by scdiag models.
-    for attr in ("config", "classifier"):
-      obj = getattr(self.encoder, attr, None)
-      if obj is not None:
-        for key in ("hidden_size", "d_model", "num_features"):
-          val = getattr(obj, key, None)
-          if val is not None:
-            return val
-    # Try classifiers that expose extract_features.
-    classifier = getattr(self.encoder, "classifier", None)
-    if classifier is not None:
-      feat_dim = getattr(classifier, "feat_dim", None)
-      if feat_dim is not None:
-        return feat_dim
+    enc = self.encoder
+    # Probe known attribute paths; first non-MISSING wins.
+    for path in (
+        "config.hidden_size",
+        "config.d_model",
+        "config.num_features",
+        "num_features",
+        "head.in_features",
+        "classifier.feat_dim",
+    ):
+      val = get_attribute(enc, path)
+      if val is not MISSING:
+        return val
     fatal(
         "Cannot infer backbone output dimension.  "
         "Pass backbone_dim explicitly.",
