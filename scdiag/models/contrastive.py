@@ -75,8 +75,11 @@ class ContrastiveEncoder(nn.Module):
         "config.hidden_size",
         "config.d_model",
         "config.num_features",
+        "model.num_features",
         "num_features",
         "head.in_features",
+        "model.head.in_features",
+        "classifier.in_features",
         "classifier.feat_dim",
     ):
       val = get_attribute(enc, path)
