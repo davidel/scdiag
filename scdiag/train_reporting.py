@@ -65,10 +65,6 @@ class TrainReporting:
     self.window_preds = []
     self.window_labels = []
 
-  # ------------------------------------------------------------------
-  # Public API
-  # ------------------------------------------------------------------
-
   def step(
       self,
       batch_idx,
@@ -136,10 +132,6 @@ class TrainReporting:
                  f" | top1: {top1:.2f}%"
                  f" | time: {elapsed:.1f}s")
     return avg_loss, top1
-
-  # ------------------------------------------------------------------
-  # Internals
-  # ------------------------------------------------------------------
 
   def _log_step(self, batch_idx, global_step):
     """Compute windowed & cumulative metrics and emit a log line."""
