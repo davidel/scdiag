@@ -69,8 +69,8 @@ class ImageFolderDataset:
     self._paths = []
 
     if not self._root_dir.is_dir():
-      logging.warning(f"ImageFolderDataset: '{self._root_dir}' is not a directory")
-      return
+      fatal(f"ImageFolderDataset: '{self._root_dir}' is not a directory",
+           ValueError)
 
     self._scan()
 
@@ -91,14 +91,14 @@ class ImageFolderDataset:
         fatal(
             f"Unexpected path depth {len(parts)} for '{rel}' "
             f"(expected 1, 2, or 3 components)",
-            ValueError,
+            ValueError
         )
 
     if has_labels and no_labels:
       fatal(
           f"Mixed layout: {len(has_labels)} images in split/label/file "
           f"but {len(no_labels)} images in split/file format",
-          ValueError,
+          ValueError
       )
 
     self._paths = has_labels if has_labels else no_labels
