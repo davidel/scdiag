@@ -291,7 +291,7 @@ def train_one_epoch(
 
   avg_loss = total_loss / max(total_samples, 1)
   elapsed = time.time() - start_time
-  logging.info(f"  Train stats -> loss: {avg_loss:.4f}"
+  logging.info(f"  Epoch {epoch + 1} Train stats -> loss: {avg_loss:.4f}"
                f" | time: {elapsed:.1f}s")
   return avg_loss, global_step
 
@@ -781,6 +781,7 @@ def main(argv=None):
 
   try:
     for epoch in range(start_epoch, args.epochs):
+      logging.info(f"=== Epoch {epoch + 1}/{args.epochs} ===")
       avg_loss, global_step = train_one_epoch(
           method,
           model,
