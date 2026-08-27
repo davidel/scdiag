@@ -1,6 +1,5 @@
 """CLS-guided attention pooling classifier head."""
 
-import torch
 import torch.nn as nn
 
 from scdiag.classifiers import register_classifier

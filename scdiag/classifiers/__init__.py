@@ -74,5 +74,6 @@ def build_classifier(spec, num_labels, hidden_size, **kwargs):
 
 # Import built-in classifiers so @register_classifier fires.
 from scdiag.classifiers import (  # noqa: F401
-    cls_attention, mlp,
+  cls_attention,
+  mlp,
 )

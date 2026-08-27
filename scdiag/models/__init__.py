@@ -1,4 +1,3 @@
-# ruff: noqa
 """Custom model registry.
 
 Each custom model registers itself via the ``@register_model`` decorator.
@@ -7,6 +6,14 @@ The registry maps model name strings to loader functions that return
 common protocol expected by ``train.py`` and ``infer.py``.
 """
 
+# Import bundled custom models so their @register_model /
+# @register_processor decorators run.  The imports are intentionally
+# unused as names; importing the modules performs the registration side
+# effects required by model loading.
+import scdiag.models.cls_model_wrapper
+import scdiag.models.convvit
+import scdiag.models.timm
+import scdiag.models.uvito  # noqa: F401
 from scdiag.models.registry import (
     ModelOutput,
     ParsedModelName,
@@ -17,15 +24,6 @@ from scdiag.models.registry import (
     register_model,
     register_processor,
 )
-
-# Import bundled custom models so their @register_model /
-# @register_processor decorators run.  The imports are intentionally
-# unused as names; importing the modules performs the registration side
-# effects required by model loading.
-import scdiag.models.cls_model_wrapper  # noqa: F401
-import scdiag.models.convvit  # noqa: F401
-import scdiag.models.timm  # noqa: F401
-import scdiag.models.uvito  # noqa: F401
 
 __all__ = [
     "ModelOutput",
