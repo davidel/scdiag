@@ -14,6 +14,9 @@ class TestRegistry:
     methods = list_methods()
     assert "simmim" in methods
     assert "ijepa" in methods
+    assert "byol" in methods
+    assert "dino" in methods
+    assert "supcon" in methods
 
   def test_get_method(self):
     cls = get_method("simmim")

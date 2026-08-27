@@ -69,6 +69,16 @@ class PretrainMethod(ABC):
     """Restore method-specific state from a checkpoint."""
     ...
 
+  def build_transform(self, image_size):
+    """Return the augmentation transform for the training data.
+
+        Override in subclasses that need custom augmentations (e.g.
+        dual-view for BYOL, multi-crop for DINO).  The default wraps
+        ``build_pretrain_transform`` from ``pretrain.py``.
+        """
+    from scdiag.pretrain import build_pretrain_transform
+    return build_pretrain_transform(image_size)
+
   def validate(self, model, images, num_samples):
     """Generate validation visualizations.
 

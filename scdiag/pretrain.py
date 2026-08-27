@@ -67,6 +67,16 @@ def build_pretrain_transform(image_size=448):
   ])
 
 
+class DualViewTransform:
+  """Apply the same transform twice to produce two augmented views."""
+
+  def __init__(self, transform):
+    self._transform = transform
+
+  def __call__(self, image):
+    return self._transform(image), self._transform(image)
+
+
 class _TransformWrapper:
   """Apply a transform to the image field of a dict-returning dataset."""
 
@@ -83,8 +93,11 @@ class _TransformWrapper:
     return {**item, self._image_field: self._transform(item[self._image_field])}
 
 
-def build_pretrain_dataset(args, needs_labels=False):
-  """Build the DatasetEnsemble + transform pipeline."""
+def build_pretrain_dataset(args, needs_labels=False, transform=None):
+  """Build the DatasetEnsemble + transform pipeline.
+
+      If *transform* is ``None``, the default pretrain transform is used.
+  """
   configs = []
   label_column = getattr(args, "label_column", None)
   for name in args.datasets:
@@ -119,7 +132,8 @@ def build_pretrain_dataset(args, needs_labels=False):
   if needs_labels:
     ensemble._validate_labels()
     ensemble._build_global_label_space()
-  transform = build_pretrain_transform(args.image_size)
+  if transform is None:
+    transform = build_pretrain_transform(args.image_size)
   dataset = _TransformWrapper(ensemble, transform, image_field=ensemble.image_column)
   logging.info(ensemble.summary())
   return dataset, ensemble
@@ -139,7 +153,11 @@ def log_validation_images(method,
   logged.
   """
   model.eval()
-  images = next(iter(loader))[:num_samples].to(device)
+  raw = next(iter(loader))
+  if isinstance(raw, (tuple, list)):
+    images = type(raw)(v[:num_samples].to(device) for v in raw)
+  else:
+    images = raw[:num_samples].to(device)
   with torch.no_grad():
     recon = method.validate(model, images, num_samples)
   if recon is None:
@@ -190,7 +208,11 @@ def train_one_epoch(
   needs_labels = method.needs_labels
 
   for step, batch in enumerate(loader):
-    images = batch[ensemble.image_column].to(device, non_blocking=True)
+    raw = batch[ensemble.image_column]
+    if isinstance(raw, (tuple, list)):
+      images = type(raw)(v.to(device, non_blocking=True) for v in raw)
+    else:
+      images = raw.to(device, non_blocking=True)
     labels = None
     if needs_labels:
       labels = batch[ensemble.label_column].to(device, non_blocking=True)
@@ -614,9 +636,11 @@ def main(argv=None):
     logging.info(gpu_stats_str(device))
 
   logging.info("Building dataset ...")
+  transform = method.build_transform(args.image_size)
   dataset, ensemble = build_pretrain_dataset(
       args,
       needs_labels=method.needs_labels,
+      transform=transform,
   )
   logging.info(f"Total images: {len(dataset):,}")
   if len(dataset) == 0:
