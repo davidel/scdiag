@@ -67,16 +67,6 @@ def build_pretrain_transform(image_size=448):
   ])
 
 
-class DualViewTransform:
-  """Apply the same transform twice to produce two augmented views."""
-
-  def __init__(self, transform):
-    self._transform = transform
-
-  def __call__(self, image):
-    return self._transform(image), self._transform(image)
-
-
 class _TransformWrapper:
   """Apply a transform to the image field of a dict-returning dataset."""
 

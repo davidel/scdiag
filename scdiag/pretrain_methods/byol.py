@@ -3,9 +3,9 @@
 import torch
 from torchvision.transforms import v2
 
+from scdiag.augmentations.dual_view import DualViewTransform
 from scdiag.model_utils import set_train_mode
 from scdiag.models.byol import BYOL
-from scdiag.pretrain import DualViewTransform
 from scdiag.pretrain_methods.base import PretrainMethod
 from scdiag.pretrain_methods.registry import register_method
 
