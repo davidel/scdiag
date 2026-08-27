@@ -23,8 +23,8 @@ class TestImageFolderDataset:
     assert item["image"].mode == "RGB"
 
   def test_empty_dir(self, tmp_path):
-    ds = ImageFolderDataset(str(tmp_path))
-    assert len(ds) == 0
+    with pytest.raises(FileNotFoundError, match="No images found"):
+      ImageFolderDataset(str(tmp_path))
 
 
 class TestDatasetEnsemble:
