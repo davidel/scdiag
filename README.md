@@ -1,5 +1,7 @@
 # scdiag
 
+[![CI](https://github.com/davidel/scdiag/actions/workflows/ci.yml/badge.svg)](https://github.com/davidel/scdiag/actions/workflows/ci.yml)
+
 A training and inference toolkit for skin-lesion image classification. Supports
 self-supervised pre-training, supervised fine-tuning, and XGBoost ensemble
 inference — all from the command line.

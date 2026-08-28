@@ -106,7 +106,7 @@ def predict_single(model, transform, image, device):
   pixel_values = transform(image).unsqueeze(0).to(device)
   with torch.no_grad():
     logits = model(pixel_values).logits
-  probs = torch.softmax(logits, dim=-1).squeeze()
+  probs = torch.softmax(logits, dim=-1)[0]
   return probs, pixel_values
 
 

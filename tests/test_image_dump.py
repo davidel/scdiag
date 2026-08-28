@@ -1,9 +1,7 @@
 """Tests for scdiag.image_dump.ImageDump."""
 
 import os
-import tempfile
 
-import pytest
 import torch
 from PIL import Image
 

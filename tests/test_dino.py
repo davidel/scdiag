@@ -2,7 +2,6 @@
 
 import argparse
 
-import pytest
 import torch
 
 from scdiag.augmentations.multicrop import MultiCropTransform
