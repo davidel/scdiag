@@ -14,8 +14,10 @@ This class wraps the resolved data config so that:
 
 import timm.data
 
+from scdiag.models.processors.base import BaseImageProcessor
 
-class TimmProcessor:
+
+class TimmProcessor(BaseImageProcessor):
   """Thin adapter that exposes timm preprocessing as a processor object."""
 
   def __init__(self, data_config, image_size):
@@ -29,31 +31,19 @@ class TimmProcessor:
     image_size : int
       Target resolution (pixels) after resize / crop.
     """
-    self._mean = data_config["mean"]
-    self._std = data_config["std"]
     self._data_config = data_config
-    self.image_size = image_size
+    super().__init__(
+        image_size,
+        data_config["mean"],
+        data_config["std"],
+    )
 
-    # Build a timm-native transform so __call__ respects the model's
-    # own interpolation and crop_pct settings.
-    cfg = dict(data_config)
-    cfg["input_size"] = (3, image_size, image_size)
-    self._transform = timm.data.create_transform(**cfg)
-
-  @property
-  def image_mean(self):
-    """HF-compatible normalization mean."""
-    return list(self._mean)
-
-  @property
-  def image_std(self):
-    """HF-compatible normalization std."""
-    return list(self._std)
-
-  @property
-  def size(self):
-    """Return processor resolution as a dict (HF compatibility)."""
-    return {"height": self.image_size, "width": self.image_size}
+  def _build_transform(self):
+    """Build a timm-native transform respecting the model's own
+    interpolation and crop_pct settings."""
+    cfg = dict(self._data_config)
+    cfg["input_size"] = (3, self.image_size, self.image_size)
+    return timm.data.create_transform(**cfg)
 
   def __call__(self, image):
     """Apply the full model-specific transform pipeline.
@@ -69,7 +59,3 @@ class TimmProcessor:
       Shape ``(C, H, W)`` — normalized and resized to ``image_size``.
     """
     return self._transform(image)
-
-  def __repr__(self):
-    return (f"TimmProcessor(image_size={self.image_size}, "
-            f"mean={self._mean}, std={self._std})")

@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 
 from scdiag.models.contrastive import ProjectionHead
+from scdiag.models.encoder_utils import detect_backbone_dim, encode_with_backbone
 
 
 class BYOL(nn.Module):
@@ -71,40 +72,11 @@ class _EncoderWithProjection(nn.Module):
     super().__init__()
     self.encoder = encoder
     if backbone_dim is None:
-      backbone_dim = self._detect_dim()
+      backbone_dim = detect_backbone_dim(encoder)
     self.projection = ProjectionHead(backbone_dim, proj_hidden, proj_dim)
 
-  def _detect_dim(self):
-    enc = self.encoder
-    from scdiag.attr_utils import MISSING, get_attribute
-    for path in (
-        "config.hidden_size",
-        "config.d_model",
-        "config.num_features",
-        "model.num_features",
-        "num_features",
-        "head.in_features",
-        "model.head.in_features",
-        "classifier.in_features",
-        "classifier.feat_dim",
-    ):
-      val = get_attribute(enc, path)
-      if val is not MISSING:
-        return val
-    raise ValueError("Cannot infer backbone output dimension.")
-
   def encode(self, images):
-    from scdiag.model_utils import extract_backbone_features
-    try:
-      return extract_backbone_features(self.encoder, images)
-    except (ValueError, AttributeError, RuntimeError):
-      pass
-    raw = self.encoder(images)
-    if hasattr(raw, "logits"):
-      if raw.pooler_output is not None:
-        return raw.pooler_output
-      return raw.last_hidden_state.mean(dim=1)
-    return raw
+    return encode_with_backbone(self.encoder, images)
 
   def forward(self, images):
     return self.projection(self.encode(images))

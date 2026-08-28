@@ -9,10 +9,8 @@ import re
 import datasets
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from datasets import load_dataset
-from sklearn.metrics import confusion_matrix, f1_score, precision_recall_fscore_support
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import v2
@@ -29,8 +27,10 @@ from scdiag.checkpointing import (
 from scdiag.cli_utils import KVPairAction
 from scdiag.datasets.hf_proxy import HFDatasetProxy
 from scdiag.datasets.weighted_sampler import build_weighted_sampler
+from scdiag.eval import evaluate_performance
 from scdiag.grad_monitor import GradMonitor
 from scdiag.logging_utils import fatal, setup_logging
+from scdiag.losses.focal import CombinedFocalLoss
 from scdiag.metrics import confusion_row_strings
 from scdiag.model_utils import (
     apply_lora,
@@ -50,6 +50,13 @@ from scdiag.script_utils import load_extern
 from scdiag.storage_utils import save_checkpoint
 from scdiag.train_reporting import TrainReporting
 from scdiag.tta import create_default_tta_transform, load_tta_transform
+from scdiag.xgb_pipeline import train_xgboost_on_backbone
+
+__all__ = [
+    "CombinedFocalLoss",
+    "evaluate_performance",
+    "train_xgboost_on_backbone",
+]
 
 
 def parse_class_multipliers(s, num_labels, label2id):
@@ -90,75 +97,6 @@ def parse_class_multipliers(s, num_labels, label2id):
       fatal(f"Label index {idx} out of range [0, {num_labels})", ValueError)
     m[idx] = float(val)
   return m
-
-
-class CombinedFocalLoss(nn.Module):
-  """Mathematically rigorous cost-sensitive focal loss for soft targets.
-
-    Aligns with Lin et al. (2017) by computing a unified p_t as the
-    expected probability under the true distribution vector.  Supports
-    both integer labels and continuous soft-target vectors (Mixup).
-    """
-
-  def __init__(
-      self,
-      weights,
-      gamma=2.0,
-      label_smoothing=0.0,
-      reduction="mean",
-  ):
-    super().__init__()
-    self.register_buffer("weights", weights)
-    self.gamma = gamma
-    self.label_smoothing = label_smoothing
-    self.reduction = reduction
-
-  def forward(self, logits, targets):
-    """Compute cost-sensitive focal loss.
-
-        Args:
-            logits: [B, C] raw model outputs (before softmax).
-            targets: [B] integer class indices, or [B, C] soft-target
-                probability distributions (e.g. from Mixup).
-
-        Returns:
-            Scalar loss (or per-sample losses if reduction='none').
-        """
-    num_classes = logits.size(-1)
-
-    # 1. Build the target distribution vector.
-    if targets.dim() == 1:
-      # Integer targets → one-hot with optional label smoothing.
-      target_dist = torch.zeros_like(logits)
-      if self.label_smoothing > 0:
-        target_dist.fill_(self.label_smoothing / (num_classes - 1))
-      target_dist.scatter_(1, targets.unsqueeze(1), 1.0)
-    else:
-      # Soft targets already supplied (e.g. from Mixup).
-      target_dist = targets
-
-    # 2. Apply class weights.
-    weighted_targets = target_dist * self.weights.unsqueeze(0)
-
-    # 3. Base cross-entropy via log_softmax (numerically stable).
-    log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
-    probs = log_probs.exp()
-
-    # Weighted CE: sum_k  -t_k * log(p_k)
-    base_ce_loss = -(weighted_targets * log_probs).sum(dim=-1)
-
-    # 4. Compute unified expected true probability p_t.
-    p_t = torch.sum(target_dist * probs, dim=-1)
-
-    # 5. Modulate the entire loss once per sample.
-    focal_weight = (1.0 - p_t)**self.gamma
-    loss = focal_weight * base_ce_loss
-
-    if self.reduction == "mean":
-      return loss.mean()
-    elif self.reduction == "sum":
-      return loss.sum()
-    return loss
 
 
 def load_augmentation_script(path_or_url):
@@ -819,107 +757,6 @@ def parse_args(argv=None):
   return parser.parse_args(argv)
 
 
-def train_xgboost_on_backbone(args,
-                              train_ds,
-                              val_ds,
-                              device,
-                              num_labels=None,
-                              batch_size=32):
-  """Train XGBoost on backbone features after PyTorch training completes.
-
-    Args:
-        args: Parsed CLI args (contains xgb_* hyperparameters, checkpoint paths, etc.)
-        train_ds: Training HF Dataset (raw, before proxy wrapping).
-        val_ds: Validation HF Dataset (raw, before proxy wrapping).
-        device: torch device.
-        num_labels: Number of output classes (forwarded to model loader).
-        batch_size: Feature-extraction batch size.
-    """
-  from scdiag.model_utils import (
-      build_val_transform,
-      collect_features,
-      load_model_for_inference,
-  )
-  from scdiag.xgb_utils import eval_xgboost, train_xgboost
-
-  logging.info("=" * 60)
-  logging.info("XGBoost training on backbone features")
-  logging.info("=" * 60)
-
-  # 1. Load the best checkpoint into a fresh model
-  from scdiag.checkpointing import select_best_checkpoint
-
-  ckpt_path = select_best_checkpoint(args.checkpoint)
-  if ckpt_path is not None:
-    logging.info(f"Loading checkpoint: {ckpt_path}")
-    model_best, xgb_processor = load_model_for_inference(
-        args.model,
-        ckpt_path,
-        device="cpu",
-        cache_dir=args.cache_dir,
-        num_labels=num_labels,
-        image_size=args.image_size,
-        proc_kwargs=args.proc_arg,
-    )
-    model_best = model_best.to(device)
-
-    # 2. Rebuild train and val datasets with val transforms (not train augs)
-    val_transform = build_val_transform(xgb_processor, args.image_size)
-    train_proxy = HFDatasetProxy(train_ds, transform=val_transform)
-    val_proxy = HFDatasetProxy(val_ds, transform=val_transform)
-
-    # 3. Collect features
-    logging.info("Extracting train features...")
-    train_features, train_labels = collect_features(model_best,
-                                                    train_proxy,
-                                                    device,
-                                                    batch_size=batch_size)
-    logging.info(f"  Train features shape: {train_features.shape}")
-
-    logging.info("Extracting val features...")
-    val_features, val_labels = collect_features(model_best,
-                                                val_proxy,
-                                                device,
-                                                batch_size=batch_size)
-    logging.info(f"  Val features shape: {val_features.shape}")
-
-    # 4. Free the model — XGBoost doesn't need it anymore
-    del model_best
-    gc.collect()
-    torch.cuda.empty_cache()
-
-    # 5. Train XGBoost
-    xgb_model = train_xgboost(
-        train_features,
-        train_labels,
-        max_depth=args.xgb_max_depth,
-        n_estimators=args.xgb_n_estimators,
-        learning_rate=args.xgb_learning_rate,
-        subsample=args.xgb_subsample,
-        colsample_bytree=args.xgb_colsample_bytree,
-        min_child_weight=args.xgb_min_child_weight,
-        gamma=args.xgb_gamma,
-        reg_alpha=args.xgb_reg_alpha,
-        use_gpu=args.xgb_use_gpu,
-    )
-
-    # 6. Evaluate on val set
-    val_metrics = eval_xgboost(xgb_model,
-                               val_features,
-                               val_labels,
-                               id2label=train_proxy.id2label)
-    logging.info(f"XGBoost val accuracy: {val_metrics['accuracy']:.2%}")
-    for cls, acc in val_metrics["per_class_accuracy"].items():
-      logging.info(f"  {cls}: {acc:.2%}")
-    logging.info(f"Classification report:\n"
-                 f"{val_metrics['classification_report']}")
-    logging.info(f"Confusion matrix:\n{val_metrics['confusion_matrix']}")
-
-    # 7. Save the XGBoost model
-    xgb_model.save_model(args.xgboost_model)
-    logging.info(f"XGBoost model saved: {args.xgboost_model}")
-
-
 def mixup_data(x, y, alpha=0.2):
   """Apply Mixup to a batch: returns mixed images, and two label sets + lambda.
 
@@ -1038,124 +875,6 @@ def train_one_epoch(
 
   avg_loss, top1 = reporter.summary()
   return avg_loss, top1, global_step
-
-
-def _compute_classification_metrics(all_labels, all_preds, num_labels, id2label):
-  """Compute aggregate and per-class classification metrics."""
-  labels = list(range(num_labels))
-  precisions, recalls, f1s, supports = precision_recall_fscore_support(
-      all_labels,
-      all_preds,
-      labels=labels,
-      average=None,
-      zero_division=0,
-  )
-  per_class_metrics = {}
-  for idx, (precision, recall, f1,
-            support) in enumerate(zip(precisions, recalls, f1s, supports)):
-    name = (id2label.get(str(idx), id2label.get(idx, f"Class {idx}"))
-            if id2label else f"Class {idx}")
-    per_class_metrics[name] = {
-        "precision": precision * 100.0,
-        "recall": recall * 100.0,
-        "f1": f1 * 100.0,
-        "support": int(support),
-    }
-
-  return {
-      "balanced_accuracy":
-          recalls.mean() * 100.0,
-      "macro_f1":
-          f1_score(
-              all_labels,
-              all_preds,
-              labels=labels,
-              average="macro",
-              zero_division=0,
-          ) * 100.0,
-      "weighted_f1":
-          f1_score(
-              all_labels,
-              all_preds,
-              labels=labels,
-              average="weighted",
-              zero_division=0,
-          ) * 100.0,
-      "per_class_metrics":
-          per_class_metrics,
-      "cm":
-          confusion_matrix(all_labels, all_preds, labels=labels),
-  }
-
-
-def evaluate_performance(model,
-                         dataloader,
-                         criterion,
-                         device,
-                         amp_dtype,
-                         id2label=None,
-                         tta_transform=None):
-  """Evaluate on a validation/test set.
-
-    Returns ``(eval_loss, top1_acc_pct, balanced_accuracy, macro_f1,
-    weighted_f1, per_class_metrics, cm, original_metrics)``. The first seven
-    values describe the predictions used for evaluation (TTA predictions when
-    enabled). *original_metrics* is ``None`` without TTA; otherwise it contains
-    the corresponding metrics for original-view predictions.
-
-    When *tta_transform* is provided predictions are averaged over N views
-    (including the original) while the loss is always computed on the
-    original image only.
-    """
-  set_train_mode(model, "eval")
-  amp_enabled = (amp_dtype is not None and device.type == "cuda")
-  eval_loss, correct_top1, total_samples = 0.0, 0, 0
-  all_preds = []
-  all_orig_preds = []
-  all_labels = []
-  with torch.no_grad():
-    for images, targets in dataloader:
-      images, targets = images.to(device), targets.to(device)
-      with torch.amp.autocast("cuda", dtype=amp_dtype, enabled=amp_enabled):
-        logits_orig = model(pixel_values=images).logits
-        loss = criterion(logits_orig, targets)
-
-        if tta_transform is not None:
-          views = tta_transform(images)
-          B, N = views.shape[:2]
-          logits_aug = model(pixel_values=views.flatten(0, 1)).logits
-          probs = (logits_orig.softmax(-1) +
-                   logits_aug.softmax(-1).unflatten(0, (B, N)).sum(1)) / (N + 1)
-          preds = probs.argmax(dim=1)
-        else:
-          preds = logits_orig.argmax(dim=1)
-
-      eval_loss += loss.item() * images.size(0)
-      total_samples += targets.size(0)
-      correct_top1 += (preds == targets).sum().item()
-      all_preds.extend(preds.cpu().tolist())
-      all_orig_preds.extend(logits_orig.argmax(dim=1).cpu().tolist())
-      all_labels.extend(targets.cpu().tolist())
-
-  avg_loss = eval_loss / total_samples
-  top1 = (correct_top1 / total_samples) * 100.0
-
-  num_labels = getattr(getattr(model, "config", None), "num_labels", None)
-  if num_labels is None:
-    num_labels = max(all_labels + all_preds) + 1
-
-  metrics = _compute_classification_metrics(all_labels, all_preds, num_labels, id2label)
-  original_metrics = None
-  if tta_transform is not None:
-    original_metrics = _compute_classification_metrics(all_labels, all_orig_preds,
-                                                       num_labels, id2label)
-    original_metrics["top1"] = (
-        sum(pred == target for pred, target in zip(all_orig_preds, all_labels)) /
-        total_samples * 100.0)
-
-  return (avg_loss, top1, metrics["balanced_accuracy"], metrics["macro_f1"],
-          metrics["weighted_f1"], metrics["per_class_metrics"], metrics["cm"],
-          original_metrics)
 
 
 def main():

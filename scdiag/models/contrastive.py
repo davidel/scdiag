@@ -5,12 +5,9 @@ is discarded after pre-training; the backbone is kept for downstream
 fine-tuning.
 """
 
-import logging
-
 import torch.nn as nn
 
-from scdiag.attr_utils import MISSING, get_attribute
-from scdiag.logging_utils import fatal
+from scdiag.models.encoder_utils import detect_backbone_dim, encode_with_backbone
 
 
 class ProjectionHead(nn.Module):
@@ -60,53 +57,16 @@ class ContrastiveEncoder(nn.Module):
     self._proj_dim = proj_dim
     self._proj_hidden = proj_hidden
     self._backbone_dim = (backbone_dim
-                          if backbone_dim is not None else self._detect_backbone_dim())
+                          if backbone_dim is not None else detect_backbone_dim(encoder))
     self.projection = ProjectionHead(
         self._backbone_dim,
         proj_hidden,
         proj_dim,
     )
 
-  def _detect_backbone_dim(self):
-    """Infer the backbone output feature dimension."""
-    enc = self.encoder
-    # Probe known attribute paths; first non-MISSING wins.
-    for path in (
-        "config.hidden_size",
-        "config.d_model",
-        "config.num_features",
-        "model.num_features",
-        "num_features",
-        "head.in_features",
-        "model.head.in_features",
-        "classifier.in_features",
-        "classifier.feat_dim",
-    ):
-      val = get_attribute(enc, path)
-      if val is not MISSING:
-        return val
-    fatal(
-        "Cannot infer backbone output dimension.  "
-        "Pass backbone_dim explicitly.",
-        ValueError,
-    )
-
   def encode(self, images):
     """Extract raw backbone features ``(B, D)``."""
-    # Try scdiag's protocol first (hooks into classifier, etc.).
-    try:
-      from scdiag.model_utils import extract_backbone_features
-      return extract_backbone_features(self.encoder, images)
-    except (ValueError, AttributeError):
-      logging.debug("extract_backbone_features failed, using direct forward")
-    # Fallback: plain forward pass through the encoder.
-    raw = self.encoder(images)
-    if hasattr(raw, "logits"):
-      # HF model output — take the CLS / pooler.
-      if raw.pooler_output is not None:
-        return raw.pooler_output
-      return raw.last_hidden_state.mean(dim=1)
-    return raw
+    return encode_with_backbone(self.encoder, images)
 
   def forward(self, images):
     """Project backbone features through the MLP head ``(B, proj_dim)``."""
