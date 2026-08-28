@@ -41,11 +41,6 @@ def _dummy_batch(batch_size=4, num_classes=3, num_correct=4):
   return logits, targets
 
 
-# ------------------------------------------------------------------
-# Initialization
-# ------------------------------------------------------------------
-
-
 def test_init_counters_are_zero():
   r = _make_reporter()
   assert r.total_loss == 0.0
@@ -70,11 +65,6 @@ def test_init_stores_references():
   assert r.log_every == 5
 
 
-# ------------------------------------------------------------------
-# Cumulative counter accumulation
-# ------------------------------------------------------------------
-
-
 def test_step_accumulates_loss():
   r = _make_reporter(log_every=100)  # large log_every to suppress logging
   logits, targets = _dummy_batch(batch_size=4)
@@ -94,11 +84,6 @@ def test_step_accumulates_top1():
   assert r.total_samples == 4
 
 
-# ------------------------------------------------------------------
-# Window accumulation
-# ------------------------------------------------------------------
-
-
 def test_step_accumulates_window():
   r = _make_reporter(log_every=100)
   logits, targets = _dummy_batch(batch_size=4, num_correct=2)
@@ -109,11 +94,6 @@ def test_step_accumulates_window():
   assert len(r.window_preds) == 4
   assert len(r.window_labels) == 4
   assert r.window_labels == targets.tolist()
-
-
-# ------------------------------------------------------------------
-# Periodic logging trigger
-# ------------------------------------------------------------------
 
 
 def test_log_triggered_on_log_every_boundary(caplog):
@@ -136,11 +116,6 @@ def test_no_log_when_not_on_boundary(caplog):
   assert "[Step" not in caplog.text
 
 
-# ------------------------------------------------------------------
-# report_now flag (last-batch edge case)
-# ------------------------------------------------------------------
-
-
 def test_report_now_forces_log(caplog):
   r = _make_reporter(log_every=100)  # would NOT normally log
   logits, targets = _dummy_batch()
@@ -148,11 +123,6 @@ def test_report_now_forces_log(caplog):
     r.step(0, 4, 1.0, logits, targets, 0, report_now=True)
   assert "[Step 1/10]" in caplog.text
   assert "loss=" in caplog.text
-
-
-# ------------------------------------------------------------------
-# Window reset after logging
-# ------------------------------------------------------------------
 
 
 def test_window_resets_after_log():
@@ -183,11 +153,6 @@ def test_window_accumulates_between_logs():
   assert r.window_samples == 0  # reset
 
 
-# ------------------------------------------------------------------
-# Log message content
-# ------------------------------------------------------------------
-
-
 def test_log_contains_key_fields(caplog):
   r = _make_reporter(log_every=1, total_batches=5)
   logits, targets = _dummy_batch(batch_size=4, num_classes=3, num_correct=3)
@@ -214,11 +179,6 @@ def test_log_metrics_are_correct(caplog):
   # Cumulative also 0.75 so (0.7500) should appear.
   assert "0.7500" in caplog.text
   assert "100.00%" in caplog.text
-
-
-# ------------------------------------------------------------------
-# Summary
-# ------------------------------------------------------------------
 
 
 def test_summary_returns_correct_values():
@@ -252,11 +212,6 @@ def test_summary_zero_samples():
   assert top1 == 0.0
 
 
-# ------------------------------------------------------------------
-# Macro F1 in window log
-# ------------------------------------------------------------------
-
-
 def test_macro_f1_in_log(caplog):
   """All-correct single-class window should produce macro F1 = 100%."""
   r = _make_reporter(log_every=1)
@@ -278,11 +233,6 @@ def test_macro_f1_zero_when_no_correct(caplog):
   with caplog.at_level(logging.INFO):
     r.step(0, 4, 1.0, logits, targets, 0)
   assert "macro_f1=0.00%" in caplog.text
-
-
-# ------------------------------------------------------------------
-# TensorBoard integration
-# ------------------------------------------------------------------
 
 
 def test_tensorboard_scalars_written():
