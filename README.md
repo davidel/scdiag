@@ -55,6 +55,35 @@ benign nevus). **Ensemble inference** (optional) trains a tree-based model on
 the same features, which sometimes generalises better than a linear head for
 small datasets.
 
+### A useful mental model
+
+The encoder turns an image into a vector of features. During pre-training, we
+choose an artificial task whose answer can be obtained from the images
+(or, for SupCon, from their labels). The encoder learns parameters theta that
+make this task easy. During fine-tuning, a classifier is attached to the
+encoder and the whole model, or a selected part of it, is adapted to the real
+labels:
+
+```text
+image x  ──► encoder f_theta(x)  ──► classifier g_phi  ──► class probabilities
+                    │                         │
+             reusable features          task-specific boundary
+```
+
+Pre-training and fine-tuning are not two names for the same job. Pre-training
+shapes a useful representation; fine-tuning decides how that representation
+should be used for the target labels. If the pre-training data is visually
+related to the target data, this gives the classifier a much better starting
+point than random initialization. If the domains are very different, use a
+smaller learning rate for the backbone and validate carefully.
+
+For further reading, see the original [SimMIM paper](https://arxiv.org/abs/2111.09886),
+[I-JEPA paper](https://arxiv.org/abs/2301.08243), and
+[Supervised Contrastive Learning paper](https://arxiv.org/abs/2004.11362).
+The [timm documentation](https://huggingface.co/docs/timm/index) and the
+[Hugging Face image classification guide](https://huggingface.co/docs/transformers/tasks/image_classification)
+are useful references when selecting a backbone or processor.
+
 ## Installation
 
 ```bash
@@ -113,11 +142,31 @@ scdiag supports three pre-training methods, each with different strengths:
 
 ### How Each Method Works
 
+The three methods differ mainly in what they call a correct answer. SimMIM
+asks for pixels, I-JEPA asks for features, and SupCon asks for relative
+positions in feature space. That distinction matters: pixel reconstruction can
+spend effort reproducing colour and high-frequency detail, while contrastive
+learning spends effort making classes separable.
+
 **SimMIM** (Masked Image Modelling): Randomly masks ~60% of image patches and
 trains a lightweight decoder to reconstruct the original pixels. The encoder
 must learn to understand textures, boundaries, and spatial context from just
 40% of the image. Think of it as a "fill in the blanks" exercise for vision
 models. Good default choice when you have lots of unlabeled images.
+
+For an image split into patches x_1, ..., x_N, let M be the set of masked
+patch indices and x_hat_i the decoder prediction. SimMIM minimizes mean
+squared error over masked patches:
+
+```text
+L_MIM = (1 / |M|) sum_{i in M} ||x_hat_i - x_i||_2^2
+```
+
+Here x_i is the original patch, x_hat_i is the predicted patch, and |M| is
+the number of masked patches. Only masked patches contribute to the loss;
+otherwise copying visible pixels would make the task too easy. A higher
+`--mask_ratio` supplies less context and creates a harder task, but an
+excessively high ratio can make reconstruction ambiguous.
 
 **I-JEPA** (Joint-Embedding Predictive Architecture): Also masks patches, but
 instead of reconstructing pixels, it predicts the *latent representation* of
@@ -125,12 +174,58 @@ the masked region from the visible context. This avoids wasting capacity on
 pixel-level noise (e.g. exact JPEG compression artifacts) and learns more
 transferable features. Uses a teacher–student setup with EMA momentum ramping.
 
+Let f_theta be the student encoder and f_xi the teacher encoder. The predictor
+q_theta receives visible context and predicts a target representation
+z_j = f_xi(x_j) for a masked region. The objective is representation-space
+regression:
+
+```text
+L_IJEPA = (1 / |M|) sum_{i in M} ||q_theta(f_theta(context))_i
+          - stopgrad(f_xi(x_i))||_2^2
+```
+
+`stopgrad` means that the teacher target is treated as fixed while updating
+the student. The teacher is not optimized by backpropagation; it follows the
+student with an exponential moving average:
+
+```text
+xi <- m * xi + (1 - m) * theta
+```
+
+Here m is `--teacher_momentum`. A high m changes the teacher slowly and gives
+more stable targets. The asymmetric teacher update and masking are important:
+two networks simply trained to copy each other could collapse to a constant
+vector.
+
 **SupCon** (Supervised Contrastive Learning): Uses labels to define "positive"
 pairs (same class) and "negative" pairs (different classes). The loss pulls
 features of same-class images together and pushes different-class features
 apart. Produces a feature space where similar lesions naturally cluster.
 Requires a `ContrastiveEncoder` (backbone + projection head) and balanced
 batch sampling to ensure each batch has enough same-class pairs.
+
+For normalized projections z_i = f_theta(x_i) / ||f_theta(x_i)||_2, the
+similarity of examples i and j is their dot product divided by temperature tau:
+
+```text
+s_ij = z_i^T z_j / tau
+```
+
+The positive set for anchor i is P(i) = {j: j != i and y_j = y_i}, where y_i
+is the class label. SupCon averages the log-softmax probability assigned to
+those positives:
+
+```text
+L_i = -(1 / |P(i)|) sum_{p in P(i)}
+      log( exp(s_ip) / sum_{a != i} exp(s_ia) )
+L = (1 / B) sum_i L_i
+```
+
+B is the batch size. Lower temperature makes the distribution sharper: this
+can help separate hard negatives but can also make optimization less stable.
+`--samples_per_class` matters because an anchor needs another example of its
+class to have a positive. A class represented once contributes no useful
+SupCon term for that anchor.
 
 ### Typical Hyperparameters for Dermoscopy
 
@@ -314,6 +409,37 @@ HAM10000 dataset with lesion-id-grouped splits.
 After pre-training (or directly, if you skip pre-training), fine-tune a
 classifier on your labeled dataset.
 
+### What fine-tuning is changing
+
+Suppose the encoder produces h = f_theta(x). A linear classification head
+computes logits a = W h + b, and softmax turns them into probabilities:
+
+```text
+p(y=c | x) = exp(a_c) / sum_k exp(a_k)
+```
+
+Training minimizes cross-entropy, -log p(y | x), over labeled examples. The
+new classifier head is normally initialized from scratch because its output
+size depends on the target classes. When loading a pre-training checkpoint,
+the useful part to transfer is the encoder; an unused SupCon projection head
+should not be copied into the classifier.
+
+The practical choice is how much of theta to update:
+
+- **Full fine-tuning** updates encoder and head. It gives the model the most
+  freedom, but needs enough data and a conservative learning rate.
+- **Frozen-backbone training** updates only the head. It is a useful baseline
+  for small datasets and shows how much information the representation holds.
+- **LLRD** updates all layers but gives early layers smaller learning rates.
+  This is often a good compromise for a domain shift such as ImageNet to
+  dermoscopy.
+- **LoRA** freezes the original matrices and learns small low-rank updates.
+  It is useful when GPU memory or labeled data is limited.
+
+Compare these strategies on the same validation split. The lowest training
+loss is not necessarily the best medical model: monitor macro-F1, balanced
+accuracy, ROC-AUC, and per-class recall, especially for minority classes.
+
 ### Basic Fine-Tuning
 
 ```bash
@@ -369,6 +495,41 @@ scdiag-train --model convvit \
 The backbone weights are loaded automatically; the classifier head is
 reinitialised (different `num_classes`). Use `--state_load none` to avoid
 carrying over old optimizer/scheduler states.
+
+### Layer-wise Learning Rate Decay (LLRD)
+
+LLRD is a compromise between freezing the backbone and updating every layer at
+the same speed. If layers are indexed from shallow 0 to deep L, a common
+schedule is:
+
+```text
+lr(layer) = lr_base * d^(L - layer)
+```
+
+where d is `--llrd_decay`, usually between 0.8 and 1.0. The deepest layer
+receives the base rate while earlier layers receive smaller updates. Early
+layers tend to represent general edges and textures; later layers are more
+task-specific. This is a useful heuristic, not a law, so validate it on your
+dataset. A very small decay factor can effectively freeze the shallow network.
+
+### Mixup, label smoothing, and imbalance
+
+Mixup forms a virtual example from two training examples:
+
+```text
+x_tilde = lambda * x_i + (1 - lambda) * x_j
+y_tilde = lambda * y_i + (1 - lambda) * y_j
+```
+
+where lambda ~ Beta(alpha, alpha). The labels are probability vectors, not
+class indices. Mixup smooths the decision boundary and can help on small
+datasets, but strong Mixup can obscure fine-grained lesion details. Label
+smoothing similarly replaces a one-hot label with a mostly-correct
+distribution. Focal loss instead changes the emphasis: with predicted
+probability p_t for the correct class, its basic form is
+`L = -(1-p_t)^gamma log(p_t)`, so easy examples receive less weight. Use
+these tools deliberately; combining every regularizer is not automatically
+better.
 
 ### Hyperparameter Guidance
 
@@ -555,6 +716,28 @@ Output is JSON with per-class probabilities:
 }
 ```
 
+### XGBoost and test-time augmentation
+
+The neural classifier makes decisions through its head. The XGBoost option
+takes the encoder representation h = f_theta(x) instead and fits an ensemble
+of decision trees to those vectors. A tree partitions feature space with rules
+such as h_37 < t; boosting adds trees sequentially so each new tree focuses on
+errors left by previous trees. This can work well when the dataset is small
+and the representation is already useful, but it is not guaranteed to beat the
+neural head. Use validation data to choose tree depth, number of rounds, and
+ensemble weight.
+
+Test-time augmentation (TTA) runs the same image through several plausible
+views and averages the probability vectors:
+
+```text
+p_bar(y | x) = (1 / K) sum_k p(y | T_k(x))
+```
+
+The transformations T_k should preserve the diagnosis. Horizontal flips are
+usually safer than arbitrary crops for dermoscopy; verify that an augmentation
+does not remove the lesion or alter a clinically relevant cue.
+
 ### Inference CLI Reference
 
 | Flag | Default | Description |
@@ -585,6 +768,56 @@ When `--xgboost_model` is provided, the output includes both predictions:
   ]
 }
 ```
+
+---
+
+## Tips & Pitfalls
+
+### `--checkpoint` and `--source_checkpoint` are different
+
+`--checkpoint` names the output prefix used for saving and resuming the current
+training run. `--source_checkpoint` imports weights from another run before
+the new optimizer is created. When moving a SupCon encoder into classification,
+use:
+
+```bash
+scdiag-train \
+    --checkpoint /content/eva02_finetune \
+    --source_checkpoint /content/eva02_supcon_latest.pt \
+    --param_rename 'encoder\\.model\\.(.*);model.$1' \
+    ...
+```
+
+The rename is needed because the pre-training wrapper stores backbone keys
+under `encoder.model.*`, whereas the fine-tuning model stores them under
+`model.*`. The SupCon `projection.*` keys are expected to remain unused, and
+new classifier-head keys are expected to be missing from the source checkpoint.
+Those messages indicate a successful partial transfer if the backbone keys
+are matched.
+
+### Interpreting a SupCon plateau
+
+SupCon loss is not expected to approach zero. If an anchor has k-1 positives and
+positives become much more similar than negatives, a useful reference value is
+approximately `-log(k-1)`. This is only a diagnostic approximation: class
+counts may vary, the sampler may repeat examples, and temperature affects
+optimization. Judge the loss together with embedding quality and downstream
+validation metrics. A plateau near this reference can mean convergence; a
+plateau well above it can mean too few positives, a learning-rate problem, or
+labels that are not being passed correctly.
+
+### A practical debugging order
+
+1. Confirm that images and labels are valid and that each SupCon batch has
+   repeated classes.
+2. Confirm that the loss changes when the learning rate changes and inspect
+   `--grad_monitor` for zero or exploding gradients.
+3. Check whether pre-trained weights loaded by reading the alignment report,
+   not just the final epoch number.
+4. Compare against a simple head-only or full-fine-tuning baseline before
+   adding LLRD, LoRA, Mixup, focal loss, and class multipliers together.
+5. Select the checkpoint using a validation metric appropriate to the medical
+   objective, rather than training loss alone.
 
 ---
 
@@ -686,6 +919,25 @@ The `extract_features` method is used by `--xgboost_model` for XGBoost
 training on backbone features.
 
 ---
+
+## References and Further Reading
+
+- He et al., [Masked Autoencoders Are Scalable Vision Learners](https://arxiv.org/abs/2111.06377).
+  A useful comparison for masked-image pre-training.
+- Peng et al., [Masked Image Modeling with Vision Transformers](https://arxiv.org/abs/2111.09886).
+  The SimMIM paper.
+- Assran et al., [Self-Supervised Learning from Images with a Joint-Embedding Predictive Architecture](https://arxiv.org/abs/2301.08243).
+  The I-JEPA paper.
+- Khosla et al., [Supervised Contrastive Learning](https://arxiv.org/abs/2004.11362).
+  The SupCon objective and experiments.
+- Hu et al., [LoRA: Low-Rank Adaptation of Large Language Models](https://arxiv.org/abs/2106.09685).
+  The low-rank adaptation idea used by scdiag.
+- Zhang et al., [mixup: Beyond Empirical Risk Minimization](https://arxiv.org/abs/1710.09412).
+  The Mixup augmentation strategy.
+- The [PyTorch optimization documentation](https://pytorch.org/docs/stable/optim.html)
+  explains AdamW, schedulers, and gradient clipping.
+- The [scikit-learn metrics documentation](https://scikit-learn.org/stable/modules/model_evaluation.html)
+  is useful when choosing metrics for imbalanced classification.
 
 ## Development
 
