@@ -18,10 +18,6 @@ from scdiag.logging_utils import fatal
 _MODEL_REGISTRY = {}
 _PROCESSOR_REGISTRY = {}
 
-# ---------------------------------------------------------------------------
-# Name parsing
-# ---------------------------------------------------------------------------
-
 ParsedModelName = namedtuple(
     "ParsedModelName",
     ["model", "backbone", "processor"],
@@ -64,11 +60,6 @@ def parse_model_name(name):
   return ParsedModelName(model=name, backbone=None, processor=name)
 
 
-# ---------------------------------------------------------------------------
-# Model output container
-# ---------------------------------------------------------------------------
-
-
 class ModelOutput:
   """Lightweight container matching the ``.logits`` interface of
     HuggingFace model outputs.
@@ -81,11 +72,6 @@ class ModelOutput:
 
   def __init__(self, logits):
     self.logits = logits
-
-
-# ---------------------------------------------------------------------------
-# Registration decorators
-# ---------------------------------------------------------------------------
 
 
 def register_model(name):
@@ -131,11 +117,6 @@ def register_processor(name):
     return fn
 
   return wrapper
-
-
-# ---------------------------------------------------------------------------
-# Public helpers
-# ---------------------------------------------------------------------------
 
 
 def is_custom_model(model_name):
