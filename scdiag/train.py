@@ -19,12 +19,12 @@ from torchvision.transforms import v2
 from torchvision.transforms.v2 import InterpolationMode
 
 from scdiag.checkpointing import (
-  checkpoint_dict,
-  create_model_report,
-  parse_state_flags,
-  restore_training_state,
-  resume_checkpoint,
-  serialize_lora_state,
+    checkpoint_dict,
+    create_model_report,
+    parse_state_flags,
+    restore_training_state,
+    resume_checkpoint,
+    serialize_lora_state,
 )
 from scdiag.cli_utils import KVPairAction
 from scdiag.datasets.hf_proxy import HFDatasetProxy
@@ -33,18 +33,18 @@ from scdiag.grad_monitor import GradMonitor
 from scdiag.logging_utils import fatal, setup_logging
 from scdiag.metrics import confusion_row_strings
 from scdiag.model_utils import (
-  apply_lora,
-  enable_grad_checkpointing,
-  extract_lora_params,
-  freeze_model,
-  set_train_mode,
+    apply_lora,
+    enable_grad_checkpointing,
+    extract_lora_params,
+    freeze_model,
+    set_train_mode,
 )
 from scdiag.models import load_model, load_processor
 from scdiag.optim_factory import (
-  build_param_groups,
-  build_param_groups_llrd,
-  create_optimizer,
-  create_scheduler,
+    build_param_groups,
+    build_param_groups_llrd,
+    create_optimizer,
+    create_scheduler,
 )
 from scdiag.script_utils import load_extern
 from scdiag.storage_utils import save_checkpoint
@@ -1034,6 +1034,54 @@ def train_one_epoch(
   return avg_loss, top1, global_step
 
 
+def _compute_classification_metrics(all_labels, all_preds, num_labels, id2label):
+  """Compute aggregate and per-class classification metrics."""
+  labels = list(range(num_labels))
+  precisions, recalls, f1s, supports = precision_recall_fscore_support(
+      all_labels,
+      all_preds,
+      labels=labels,
+      average=None,
+      zero_division=0,
+  )
+  per_class_metrics = {}
+  for idx, (precision, recall, f1,
+            support) in enumerate(zip(precisions, recalls, f1s, supports)):
+    name = (id2label.get(str(idx), id2label.get(idx, f"Class {idx}"))
+            if id2label else f"Class {idx}")
+    per_class_metrics[name] = {
+        "precision": precision * 100.0,
+        "recall": recall * 100.0,
+        "f1": f1 * 100.0,
+        "support": int(support),
+    }
+
+  return {
+      "balanced_accuracy":
+          recalls.mean() * 100.0,
+      "macro_f1":
+          f1_score(
+              all_labels,
+              all_preds,
+              labels=labels,
+              average="macro",
+              zero_division=0,
+          ) * 100.0,
+      "weighted_f1":
+          f1_score(
+              all_labels,
+              all_preds,
+              labels=labels,
+              average="weighted",
+              zero_division=0,
+          ) * 100.0,
+      "per_class_metrics":
+          per_class_metrics,
+      "cm":
+          confusion_matrix(all_labels, all_preds, labels=labels),
+  }
+
+
 def evaluate_performance(model,
                          dataloader,
                          criterion,
@@ -1044,10 +1092,10 @@ def evaluate_performance(model,
   """Evaluate on a validation/test set.
 
     Returns ``(eval_loss, top1_acc_pct, balanced_accuracy, macro_f1,
-    weighted_f1, per_class_metrics, cm)``. *per_class_metrics* maps each
-    class name to precision, recall, F1, and support. *cm* is the confusion
-    matrix as a 2-D ``numpy.ndarray`` (rows = true labels, cols = predicted
-    labels).
+    weighted_f1, per_class_metrics, cm, original_metrics)``. The first seven
+    values describe the predictions used for evaluation (TTA predictions when
+    enabled). *original_metrics* is ``None`` without TTA; otherwise it contains
+    the corresponding metrics for original-view predictions.
 
     When *tta_transform* is provided predictions are averaged over N views
     (including the original) while the loss is always computed on the
@@ -1057,6 +1105,7 @@ def evaluate_performance(model,
   amp_enabled = (amp_dtype is not None and device.type == "cuda")
   eval_loss, correct_top1, total_samples = 0.0, 0, 0
   all_preds = []
+  all_orig_preds = []
   all_labels = []
   with torch.no_grad():
     for images, targets in dataloader:
@@ -1079,6 +1128,7 @@ def evaluate_performance(model,
       total_samples += targets.size(0)
       correct_top1 += (preds == targets).sum().item()
       all_preds.extend(preds.cpu().tolist())
+      all_orig_preds.extend(logits_orig.argmax(dim=1).cpu().tolist())
       all_labels.extend(targets.cpu().tolist())
 
   avg_loss = eval_loss / total_samples
@@ -1087,46 +1137,19 @@ def evaluate_performance(model,
   num_labels = getattr(getattr(model, "config", None), "num_labels", None)
   if num_labels is None:
     num_labels = max(all_labels + all_preds) + 1
-  labels = list(range(num_labels))
 
-  # Use an explicit class order so absent classes cannot shift metrics.
-  precisions, recalls, f1s, supports = precision_recall_fscore_support(
-      all_labels,
-      all_preds,
-      labels=labels,
-      average=None,
-      zero_division=0,
-  )
-  balanced_accuracy = recalls.mean() * 100.0
-  macro_f1 = f1_score(all_labels,
-                      all_preds,
-                      labels=labels,
-                      average="macro",
-                      zero_division=0)
-  macro_f1 *= 100.0
-  weighted_f1 = f1_score(all_labels,
-                         all_preds,
-                         labels=labels,
-                         average="weighted",
-                         zero_division=0)
-  weighted_f1 *= 100.0
+  metrics = _compute_classification_metrics(all_labels, all_preds, num_labels, id2label)
+  original_metrics = None
+  if tta_transform is not None:
+    original_metrics = _compute_classification_metrics(all_labels, all_orig_preds,
+                                                       num_labels, id2label)
+    original_metrics["top1"] = (
+        sum(pred == target for pred, target in zip(all_orig_preds, all_labels)) /
+        total_samples * 100.0)
 
-  per_class_metrics = {}
-  for idx, (precision, recall, f1,
-            support) in enumerate(zip(precisions, recalls, f1s, supports)):
-    name = (id2label.get(str(idx), id2label.get(idx, f"Class {idx}"))
-            if id2label else f"Class {idx}")
-    per_class_metrics[name] = {
-        "precision": precision * 100.0,
-        "recall": recall * 100.0,
-        "f1": f1 * 100.0,
-        "support": int(support),
-    }
-
-  cm = confusion_matrix(all_labels, all_preds, labels=labels)
-
-  return (avg_loss, top1, balanced_accuracy, macro_f1, weighted_f1, per_class_metrics,
-          cm)
+  return (avg_loss, top1, metrics["balanced_accuracy"], metrics["macro_f1"],
+          metrics["weighted_f1"], metrics["per_class_metrics"], metrics["cm"],
+          original_metrics)
 
 
 def main():
@@ -1415,7 +1438,7 @@ def main():
       writer.add_scalar("Epoch/Accuracy_Train_Top1", train_t1, epoch)
 
       (v_loss, v_t1, v_balanced_acc, v_macro_f1, v_weighted_f1, v_per_class_metrics,
-       v_cm) = evaluate_performance(
+       v_cm, v_original_metrics) = evaluate_performance(
            model,
            val_loader,
            criterion,
@@ -1434,6 +1457,23 @@ def main():
                    f" | Balanced Acc: {v_balanced_acc:.2f}%"
                    f" | Macro F1: {v_macro_f1:.2f}%"
                    f" | Weighted F1: {v_weighted_f1:.2f}%")
+      if v_original_metrics is not None:
+        orig = v_original_metrics
+        logging.info(
+            f"  Original-view metrics (TTA comparison): Top1={orig['top1']:.2f}% "
+            f"| Balanced Acc={orig['balanced_accuracy']:.2f}% "
+            f"| Macro F1={orig['macro_f1']:.2f}% "
+            f"| Weighted F1={orig['weighted_f1']:.2f}%")
+        logging.info(
+            f"  TTA delta: Top1={v_t1 - orig['top1']:+.2f}% "
+            f"| Balanced Acc={v_balanced_acc - orig['balanced_accuracy']:+.2f}% "
+            f"| Macro F1={v_macro_f1 - orig['macro_f1']:+.2f}% "
+            f"| Weighted F1={v_weighted_f1 - orig['weighted_f1']:+.2f}%")
+        writer.add_scalar("Epoch/Accuracy_Val_Original_Top1", orig["top1"], epoch)
+        writer.add_scalar("Epoch/Balanced_Accuracy_Val_Original",
+                          orig["balanced_accuracy"], epoch)
+        writer.add_scalar("Epoch/Macro_F1_Val_Original", orig["macro_f1"], epoch)
+        writer.add_scalar("Epoch/Weighted_F1_Val_Original", orig["weighted_f1"], epoch)
       logging.info("Confusion matrix:")
       for line in confusion_row_strings(v_cm, id2label=train_proxy.id2label):
         logging.info(f"  {line}")

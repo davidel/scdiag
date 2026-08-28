@@ -97,16 +97,23 @@ def eval_xgboost(xgb_model, features, labels, id2label=None):
       name = f"CLASS_{cls}"
     per_class[name] = float(cls_acc)
 
-  # Build target names for classification report
-  target_names = None
+  # Use a stable, explicit class order for reports and confusion matrices.
   if id2label:
-    target_names = [get_label(id2label, i) for i in sorted(set(labels))]
+    metric_labels = list(range(len(id2label)))
+    target_names = [get_label(id2label, i) for i in metric_labels]
+  else:
+    metric_labels = sorted(set(labels) | set(predictions))
+    target_names = None
 
   report = classification_report(labels,
                                  predictions,
+                                 labels=metric_labels,
                                  target_names=target_names,
                                  zero_division=0)
-  cm = confusion_matrix(labels, predictions)
+  if len(metric_labels) == 1:
+    cm = np.array([[len(labels)]], dtype=np.int64)
+  else:
+    cm = confusion_matrix(labels, predictions, labels=metric_labels)
 
   return {
       "accuracy": float(accuracy),

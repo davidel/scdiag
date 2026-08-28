@@ -43,7 +43,8 @@ def test_evaluate_performance_preserves_metrics_for_absent_class():
       },
   )
 
-  _, top1, balanced_accuracy, macro_f1, weighted_f1, per_class, cm = result
+  (_, top1, balanced_accuracy, macro_f1, weighted_f1, per_class, cm,
+   original_metrics) = result
   assert top1 == 66.66666666666666
   assert balanced_accuracy == 50.0
   assert macro_f1 == (4.0 / 9.0) * 100.0
@@ -61,3 +62,4 @@ def test_evaluate_performance_preserves_metrics_for_absent_class():
       "support": 0,
   }
   assert cm.tolist() == [[1, 1, 0], [0, 1, 0], [0, 0, 0]]
+  assert original_metrics is None

@@ -121,6 +121,18 @@ class TestEvalXGBoost:
     for key in result["per_class_accuracy"]:
       assert key.startswith("CLASS_")
 
+  def test_single_class_evaluation_has_no_class_warning(self):
+    """A single-class evaluation uses an explicit confusion-matrix label."""
+    rng = np.random.RandomState(42)
+    features = rng.randn(20, 8).astype(np.float32)
+    labels = np.zeros(20, dtype=np.int64)
+
+    clf = train_xgboost(features, labels, max_depth=3, n_estimators=10)
+    result = eval_xgboost(clf, features, labels, id2label={"0": "only"})
+
+    assert result["confusion_matrix"].shape == (1, 1)
+    assert result["confusion_matrix"].tolist() == [[20]]
+
   def test_confusion_matrix_sums_to_samples(self):
     """Confusion matrix row sums should equal true label counts."""
     rng = np.random.RandomState(42)
@@ -131,5 +143,4 @@ class TestEvalXGBoost:
     result = eval_xgboost(clf, features, labels)
 
     cm = result["confusion_matrix"]
-    np.testing.assert_array_equal(cm.sum(axis=1),
-                                  np.bincount(labels, minlength=3))
+    np.testing.assert_array_equal(cm.sum(axis=1), np.bincount(labels, minlength=3))
