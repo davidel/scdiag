@@ -21,8 +21,8 @@ class TestImageDump:
     assert result is img
     files = list(tmp_path.glob("test_*.jpg"))
     assert len(files) == 1
-    saved = Image.open(files[0])
-    assert saved.size == (64, 64)
+    with Image.open(files[0]) as saved:
+      assert saved.size == (64, 64)
 
   def test_saves_uint8_tensor(self, tmp_path):
     dump = ImageDump(save_dir=str(tmp_path), p=1.0, prefix="uint8")

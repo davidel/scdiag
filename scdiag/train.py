@@ -417,6 +417,12 @@ def parse_args(argv=None):
   )
   parser.add_argument("--batch_size", type=int, default=32, help="Batch size.")
   parser.add_argument(
+      "--val_split",
+      type=float,
+      default=0.2,
+      help="Fraction of data to hold out for validation.",
+  )
+  parser.add_argument(
       "--lr",
       type=float,
       default=3e-5,
@@ -1204,6 +1210,7 @@ def main():
   train_proxy, val_proxy = load_and_split_dataset(
       args.dataset,
       cache_dir=args.cache_dir,
+      test_size=args.val_split,
       train_transform=train_transforms,
       val_transform=val_transforms,
       image_column=args.image_column,

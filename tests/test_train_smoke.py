@@ -121,12 +121,12 @@ def test_sampler_skips_freq_in_loss_weights(tmp_path):
   weights even when the sampler already balanced class representation,
   causing the model to collapse to the majority class.
   """
-  # Imbalanced dataset: 10 class_0, 1 class_1.
+  # Imbalanced dataset: 16 class_0, 4 class_1 (20 total).
   imgs = [
       Image.fromarray(np.random.randint(0, 256, (64, 64, 3), dtype=np.uint8))
-      for _ in range(11)
+      for _ in range(20)
   ]
-  labels = [0] * 10 + [1] * 1
+  labels = [0] * 16 + [1] * 4
   ds = Dataset.from_dict({"image": imgs, "label": labels})
   ckpt_base = str(tmp_path / "ckpts" / "model")
 
@@ -140,6 +140,8 @@ def test_sampler_skips_freq_in_loss_weights(tmp_path):
       "1",
       "--batch_size",
       "4",
+      "--val_split",
+      "0.3",
       "--image_size",
       "64",
       "--checkpoint",
