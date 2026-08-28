@@ -13,6 +13,7 @@ import tempfile
 
 import torch
 
+from scdiag.attr_utils import MISSING, get_attribute
 from scdiag.logging_utils import fatal
 from scdiag.param_align import AlignConfig, align_state_dicts, report_to_str
 
@@ -225,14 +226,14 @@ def _format_model_param_table(model):
   headers = ["Parameter", "Shape", "Params", "Size", "Trainable"]
   aligns = ["left", "right", "right", "right", "right"]
   footer = [
-      "TOTAL", "",
+      "TOTAL",
+      "",
       _format_count(total_params),
       _format_bytes(total_bytes),
       _format_count(trainable_params),
   ]
   lines = ["Model parameter details:"]
-  lines.extend(
-      format_table(headers, data_rows, align=aligns, footer=footer))
+  lines.extend(format_table(headers, data_rows, align=aligns, footer=footer))
   return "\n".join(lines)
 
 
@@ -291,11 +292,12 @@ def checkpoint_dict(model,
       "epoch": epoch,
   }
   # Persist num_labels so downstream loaders never need to guess.
-  if hasattr(model, "config"):
-    if hasattr(model.config, "num_labels"):
-      d["num_labels"] = model.config.num_labels
-    if hasattr(model.config, "id2label"):
-      d["id2label"] = model.config.id2label
+  num_labels = get_attribute(model, "config.num_labels")
+  if num_labels is not MISSING:
+    d["num_labels"] = num_labels
+  id2label = get_attribute(model, "config.id2label")
+  if id2label is not MISSING:
+    d["id2label"] = id2label
   if states_to_save is None or "opt" in states_to_save:
     d["optimizer_state_dict"] = optimizer.state_dict()
   if states_to_save is None or "sched" in states_to_save:

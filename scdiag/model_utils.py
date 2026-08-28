@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 from torchvision.transforms.functional import InterpolationMode
 
+from scdiag.attr_utils import MISSING, maybe_call
 from scdiag.checkpointing import _format_count
 from scdiag.logging_utils import fatal
 from scdiag.models import load_model, load_processor
@@ -328,9 +329,8 @@ def _extract_backbone_features_impl(model, pixel_values):
        model is already in eval mode.
     """
   # 1. Scdiag protocol
-  if hasattr(model, "extract_backbone_features") and callable(
-      model.extract_backbone_features):
-    out = model.extract_backbone_features(pixel_values)
+  out = maybe_call(model, "extract_backbone_features", pixel_values)
+  if out is not MISSING:
     if isinstance(out, torch.Tensor):
       return out.mean(dim=(2, 3)) if out.ndim == 4 else out
     if isinstance(out, list):
