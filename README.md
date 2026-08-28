@@ -440,7 +440,45 @@ The practical choice is how much of theta to update:
 
 Compare these strategies on the same validation split. The lowest training
 loss is not necessarily the best medical model: monitor macro-F1, balanced
-accuracy, ROC-AUC, and per-class recall, especially for minority classes.
+accuracy, weighted F1, and per-class precision and recall, especially for
+minority classes.
+
+### Evaluation Metrics
+
+Validation reports include:
+
+- **Top-1 accuracy:** the percentage of validation images assigned the correct
+  class by the highest-probability prediction.
+- **Precision:** for a class, the fraction of images predicted as that class
+  that truly belong to it: `TP / (TP + FP)`.
+- **Recall:** for a class, the fraction of images belonging to that class that
+  are predicted correctly: `TP / (TP + FN)`.
+- **F1:** the harmonic mean of precision and recall:
+  `2 * precision * recall / (precision + recall)`. When the denominator is
+  zero, scikit-learn's `zero_division=0` behavior reports zero.
+- **Macro F1:** the arithmetic mean of the per-class F1 scores. Every class
+  contributes equally, regardless of its validation-set size. This is the
+  metric used for best-checkpoint selection.
+- **Weighted F1:** the mean of per-class F1 scores weighted by each class's
+  validation support. It is therefore more influenced by common classes.
+- **Balanced accuracy:** the arithmetic mean of per-class recall. It gives
+  each class equal weight and is useful for imbalanced datasets.
+- **Support:** the number of true validation examples for a class.
+
+The confusion matrix uses rows for true classes and columns for predicted
+classes. Diagonal entries are correct predictions. The compact confusion
+summary reports each class's recall and its largest confusion destinations.
+
+
+When TTA is enabled, validation loss is computed from the original image only,
+while Top-1 accuracy, balanced accuracy, macro F1, weighted F1, and per-class
+metrics use probabilities averaged over the original image and augmented
+views. The log also reports original-view metrics and the change produced by
+TTA.
+
+Training metrics may be measured on an augmented or weighted-sampler stream.
+They should not be compared directly with validation metrics unless they use
+the same sampling and preprocessing scheme.
 
 ### Basic Fine-Tuning
 
