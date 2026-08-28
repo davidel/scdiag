@@ -13,9 +13,6 @@ from scdiag.models import (
 from scdiag.models.timm.model import TimmForClassification
 from scdiag.models.timm.processor import TimmProcessor
 
-# ---------------------------------------------------------------------------
-# Small models for fast testing (no downloads needed)
-# ---------------------------------------------------------------------------
 _TINY_MODEL = "resnet18"
 
 
@@ -44,9 +41,6 @@ def _make_timm_processor(image_size=224):
   return TimmProcessor(data_config, image_size=image_size)
 
 
-# ---------------------------------------------------------------------------
-# Registry tests
-# ---------------------------------------------------------------------------
 class TestRegistry:
   """Verify timm is discoverable via the model registry."""
 
@@ -85,9 +79,6 @@ class TestRegistry:
     assert isinstance(proc, TimmProcessor)
 
 
-# ---------------------------------------------------------------------------
-# TimmForClassification tests
-# ---------------------------------------------------------------------------
 class TestTimmForClassification:
   """Tests for the wrapper module."""
 
@@ -129,9 +120,6 @@ class TestTimmForClassification:
     assert features.shape[1] == 512
 
 
-# ---------------------------------------------------------------------------
-# Integration with extract_backbone_features from model_utils
-# ---------------------------------------------------------------------------
 class TestExtractBackboneFeatures:
   """Verify the scdiag extract_backbone_features hook works."""
 
@@ -155,9 +143,6 @@ class TestExtractBackboneFeatures:
     torch.testing.assert_close(method_feats, hook_feats)
 
 
-# ---------------------------------------------------------------------------
-# TimmProcessor tests
-# ---------------------------------------------------------------------------
 class TestTimmProcessor:
   """Tests for the processor shim."""
 
@@ -187,9 +172,6 @@ class TestTimmProcessor:
     assert "mean=" in r
 
 
-# ---------------------------------------------------------------------------
-# End-to-end: processor → model → logits
-# ---------------------------------------------------------------------------
 class TestEndToEnd:
   """Full pipeline: image → processor → model → logits."""
 
