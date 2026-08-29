@@ -24,9 +24,15 @@ class BalancedBatchSampler(Sampler):
       Total batch size (must be divisible by *samples_per_class*).
   samples_per_class : int
       Number of examples drawn from each class within a batch.
+  seed : int, optional
+      Seed for the class/index RNG.  When None (default) each epoch's
+      batch composition is drawn from fresh OS entropy; pass a seed for
+      reproducible batches (a fresh generator is created per ``__iter__``,
+      so epoch-to-epoch variation is preserved while runs remain
+      repeatable).
   """
 
-  def __init__(self, labels, batch_size, samples_per_class):
+  def __init__(self, labels, batch_size, samples_per_class, seed=None):
     labels = np.asarray(labels)
     if batch_size % samples_per_class != 0:
       fatal(
@@ -50,6 +56,7 @@ class BalancedBatchSampler(Sampler):
 
     self._all_classes = np.array(list(self._class_indices.keys()))
     self._n_batches = len(labels) // batch_size
+    self._seed = seed
     logging.info(f"BalancedBatchSampler: {len(labels):,} samples, "
                  f"{n_classes} classes, batch_size={batch_size}, "
                  f"samples_per_class={samples_per_class}, "
@@ -59,7 +66,7 @@ class BalancedBatchSampler(Sampler):
     return self._n_batches
 
   def __iter__(self):
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(self._seed)
     for _ in range(self._n_batches):
       # Pick which classes appear in this batch.
       chosen = rng.choice(self._all_classes, size=self._n_groups, replace=True)

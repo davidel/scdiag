@@ -320,6 +320,8 @@ scdiag-pretrain --method supcon \
 | `--strict_datasets` | `False` | Abort on first dataset-loading failure instead of skipping. |
 | `--image_size` | `448` | Input image size (square). |
 | `--batch_size` | `32` | Per-GPU batch size. |
+| `--seed` | `42` | RNG seed for data shuffling, batch sampling, and dropout. Pass the same value to reproduce a run. See [Reproducibility](#reproducibility). |
+| `--deterministic` | `False` | Enable deterministic algorithms (cuDNN deterministic mode, benchmark off). Costs throughput; ops without a deterministic CUDA kernel warn instead of failing. |
 | `--epochs` | `200` | Total pre-training epochs. |
 | `--lr` | `1e-4` | Peak learning rate for AdamW. |
 | `--amp_dtype` | `None` | Mixed precision: `float16` or `bfloat16`. Omit to disable. |
@@ -588,6 +590,35 @@ better.
 - `--class_multipliers "melanoma=3.0"` increases the loss weight for
   clinically critical classes.
 
+### Reproducibility
+
+Every run is seeded by default: `--seed 42` drives the train/val split,
+DataLoader shuffling, per-worker augmentation randomness, mixup, dropout,
+`BalancedBatchSampler` batch composition, and the XGBoost stage.  Two
+runs with identical arguments follow identical RNG streams.  To compare
+hyperparameters under a different random draw, pass a different seed.
+
+For bit-exact reproducibility (e.g. debugging a numerically divergent
+run), add `--deterministic`.  This enables cuDNN deterministic mode and
+PyTorch's deterministic-algorithms mode:
+
+```bash
+scdiag-train --model convvit --deterministic ...
+```
+
+Two caveats:
+
+- Some CUDA ops have no deterministic kernel.  Instead of aborting a
+  long-running job, scdiag logs a warning and proceeds (the op falls
+  back to a non-deterministic kernel).
+- `float16` AMP with `GradScaler` involves non-associative reductions
+  that can still differ run-to-run; use `bfloat16` (default on
+  Ampere+) or disable AMP for strictly repeatable arithmetic.
+
+Checkpointing is atomic: `_latest.pt` is written to a temporary file
+and renamed into place, so an interrupted run never leaves a truncated
+resume point.
+
 ### Fine-Tuning CLI Reference
 
 | Argument | Default | Description |
@@ -607,6 +638,8 @@ better.
 | `--sampler` | `none` | Training sampler: `none` (shuffle) or `weighted` (WeightedRandomSampler for class imbalance). |
 | `--sampler_weights` | `frequency` | Weight mode for `--sampler weighted`: `frequency` (inverse-freq), `multipliers` (--class_multipliers), or `combined` (freq × multipliers). |
 | `--mixup_alpha` | `0.0` | Mixup alpha (`0` = disabled; recommended: `0.2`). |
+| `--seed` | `42` | RNG seed for data shuffling, the train/val split, mixup, dropout, and the XGBoost stage. Pass the same value to reproduce a run. See [Reproducibility](#reproducibility). |
+| `--deterministic` | `False` | Enable deterministic algorithms (cuDNN deterministic mode, benchmark off). Costs throughput; ops without a deterministic CUDA kernel warn instead of failing. |
 | `--grad_accum_steps` | `1` | Gradient accumulation steps (effective batch = batch_size × steps). |
 | `--amp_dtype` | `None` | Mixed precision: `float16` or `bfloat16`. |
 | `--lr_group` | `None` | Per-parameter-group learning rates (repeatable). Format: `"REGEX=LR"`. |

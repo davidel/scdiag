@@ -1,5 +1,6 @@
 """Unified cloud storage helpers for GCS and Cloudflare R2."""
 
+import contextlib
 import logging
 import os
 
@@ -107,7 +108,19 @@ def save_checkpoint(save_dict, path, remote_uri=None):
   dirname = os.path.dirname(path)
   if dirname:
     os.makedirs(dirname, exist_ok=True)
-  torch.save(save_dict, path)
+  # Write to a temporary file first, then atomically rename so a crash
+  # mid-write can never leave a truncated checkpoint at *path* (which is
+  # also the resume source for ``_latest.pt``).
+  tmp_path = path + ".tmp"
+  try:
+    torch.save(save_dict, tmp_path)
+    os.replace(tmp_path, path)
+  except BaseException:
+    # Best-effort cleanup of the partial temp file; the original
+    # exception propagates.
+    with contextlib.suppress(OSError):
+      os.remove(tmp_path)
+    raise
   if remote_uri:
     scheme, bucket, prefix = parse_storage_uri(remote_uri)
     remote = storage_upload(bucket, path, prefix, scheme=scheme)

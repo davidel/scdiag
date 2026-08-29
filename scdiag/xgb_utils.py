@@ -18,7 +18,8 @@ def train_xgboost(train_features,
                   min_child_weight=1,
                   gamma=0.0,
                   reg_alpha=0.0,
-                  use_gpu=False):
+                  use_gpu=False,
+                  random_state=42):
   """Train an XGBoost classifier on backbone features.
 
   Args:
@@ -33,6 +34,7 @@ def train_xgboost(train_features,
       gamma: Minimum loss reduction for a split.
       reg_alpha: L1 regularization term.
       use_gpu: If True, train on GPU with tree_method='hist' and device='cuda'.
+      random_state: Seed for XGBoost's row/column sampling.
 
   Returns:
       Fitted XGBClassifier.
@@ -51,7 +53,7 @@ def train_xgboost(train_features,
       "min_child_weight": min_child_weight,
       "gamma": gamma,
       "reg_alpha": reg_alpha,
-      "random_state": 42,
+      "random_state": random_state,
       "verbosity": 0,
   }
   if use_gpu:
@@ -81,6 +83,13 @@ def eval_xgboost(xgb_model, features, labels, id2label=None):
   """
   from sklearn.metrics import classification_report, confusion_matrix
 
+  if id2label is not None and hasattr(xgb_model, "n_classes_") and \
+      xgb_model.n_classes_ != len(id2label):
+    logging.warning(
+        "XGBoost model was trained on %d classes but id2label has %d "
+        "entries; report rows may not match the label space.", xgb_model.n_classes_,
+        len(id2label))
+
   # XGBoost 2.x predict() with multi:softprob returns probabilities (2D),
   # not class labels. Use predict_proba + argmax to get class predictions.
   proba = xgb_model.predict_proba(features)
@@ -100,7 +109,19 @@ def eval_xgboost(xgb_model, features, labels, id2label=None):
   # Use a stable, explicit class order for reports and confusion matrices.
   if id2label:
     metric_labels = list(range(len(id2label)))
-    target_names = [get_label(id2label, i) for i in metric_labels]
+    # Keyed per-class lookup with the same fallback as per_class above,
+    # instead of a positional construction that raises a confusing
+    # sklearn length error when id2label has no entry for a class in
+    # the label space.
+    target_names = []
+    for cls in metric_labels:
+      try:
+        target_names.append(get_label(id2label, cls))
+      except KeyError:
+        target_names.append(f"CLASS_{cls}")
+        logging.warning(
+            "id2label has no entry for class %d; using placeholder "
+            "'CLASS_%d' in the classification report.", cls, cls)
   else:
     metric_labels = sorted(set(labels) | set(predictions))
     target_names = None

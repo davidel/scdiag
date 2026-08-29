@@ -53,6 +53,7 @@ from scdiag.optim_factory import (
     create_scheduler,
 )
 from scdiag.script_utils import load_extern
+from scdiag.seed_utils import seed_everything, seed_worker
 from scdiag.storage_utils import save_checkpoint
 from scdiag.train_reporting import TrainReporting
 from scdiag.tta import create_default_tta_transform, load_tta_transform
@@ -469,6 +470,22 @@ def parse_args(argv=None):
   add_checkpoint_args(parser, checkpoint_default="scdiag")
 
   parser.add_argument(
+      "--seed",
+      type=int,
+      default=42,
+      help="RNG seed for data shuffling, split, mixup, dropout, and "
+      "the XGBoost stage. 42 by default; pass the same value to "
+      "reproduce a run.",
+  )
+  parser.add_argument(
+      "--deterministic",
+      action="store_true",
+      help="Enable deterministic algorithms (cuDNN deterministic mode, "
+      "benchmark off). Costs throughput; ops without a deterministic "
+      "CUDA kernel log a warning instead of failing.",
+  )
+
+  parser.add_argument(
       "--log_dir",
       type=str,
       help="TensorBoard log directory. Defaults to "
@@ -828,6 +845,7 @@ def train_one_epoch(
 def main():
   args = parse_args()
   setup_logging(args.log_level)
+  seed_everything(args.seed, args.deterministic)
 
   # Convert string amp_dtype to torch.dtype.
   args.amp_dtype = getattr(torch, args.amp_dtype, None) if args.amp_dtype else None
@@ -882,6 +900,7 @@ def main():
       val_transform=val_transforms,
       image_column=args.image_column,
       label_column=args.label_column,
+      seed=args.seed,
   )
 
   num_labels = train_proxy.num_labels
@@ -913,6 +932,10 @@ def main():
     class_weights = (w_freq * clinical_m).to(device)
     logging.info(f"Final class weights (W_freq x M_c): {fmt_weights(class_weights)}")
 
+  # Seeded generator for DataLoader shuffling; shared with the val loader
+  # (which never shuffles) so worker ordering is reproducible too.
+  data_generator = torch.Generator().manual_seed(args.seed)
+
   if len(train_proxy) < args.batch_size:
     fatal(
         f"Training set ({len(train_proxy)} samples) is smaller than "
@@ -932,6 +955,8 @@ def main():
         batch_size=args.batch_size,
         sampler=sampler,
         num_workers=args.num_workers,
+        worker_init_fn=seed_worker,
+        generator=data_generator,
         pin_memory=(device.type == "cuda"),
         drop_last=True,
     )
@@ -941,6 +966,8 @@ def main():
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.num_workers,
+        worker_init_fn=seed_worker,
+        generator=data_generator,
         pin_memory=(device.type == "cuda"),
         drop_last=True,
     )
@@ -949,6 +976,8 @@ def main():
       batch_size=args.batch_size,
       shuffle=False,
       num_workers=args.num_workers,
+      worker_init_fn=seed_worker,
+      generator=data_generator,
       pin_memory=(device.type == "cuda"),
   )
 
@@ -1235,6 +1264,7 @@ def main():
           min_child_weight=args.xgb_min_child_weight,
           gamma=args.xgb_gamma,
           reg_alpha=args.xgb_reg_alpha,
+          random_state=args.seed,
       )
 
 

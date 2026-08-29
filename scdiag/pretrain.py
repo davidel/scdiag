@@ -58,6 +58,7 @@ from scdiag.optim_factory import (
     report_lr,
 )
 from scdiag.pretrain_methods import get_method, list_methods
+from scdiag.seed_utils import seed_everything, seed_worker
 from scdiag.storage_utils import save_checkpoint
 
 
@@ -372,13 +373,6 @@ def parse_args(argv=None):
       "consumer GPUs at 448px.",
   )
   parser.add_argument(
-      "--grad_accum_steps",
-      type=int,
-      default=1,
-      help="Gradient accumulation steps. Effective batch "
-      "size = batch_size * grad_accum_steps.",
-  )
-  parser.add_argument(
       "--samples_per_class",
       type=int,
       default=4,
@@ -540,6 +534,20 @@ def parse_args(argv=None):
   method_cls = get_method(known.method)
   method_cls().add_args(parser)
 
+  parser.add_argument(
+      "--seed",
+      type=int,
+      default=42,
+      help="RNG seed for data shuffling, batch sampling, and dropout. "
+      "42 by default; pass the same value to reproduce a run.",
+  )
+  parser.add_argument(
+      "--deterministic",
+      action="store_true",
+      help="Enable deterministic algorithms (cuDNN deterministic mode, "
+      "benchmark off). Costs throughput; ops without a deterministic "
+      "CUDA kernel log a warning instead of failing.",
+  )
   args = parser.parse_args(argv)
 
   if args.log_dir is None:
@@ -555,6 +563,7 @@ def parse_args(argv=None):
 def main(argv=None):
   args = parse_args(argv)
   setup_logging(args.log_level)
+  seed_everything(args.seed, args.deterministic)
 
   args.amp_dtype = getattr(torch, args.amp_dtype, None) if args.amp_dtype else None
 
@@ -570,6 +579,9 @@ def main(argv=None):
   logging.info(f"Using device: {device}")
   if torch.cuda.is_available():
     logging.info(gpu_stats_str(device))
+
+  # Seeded generator for DataLoader shuffling.
+  data_generator = torch.Generator().manual_seed(args.seed)
 
   logging.info("Building dataset ...")
   transform = method.build_transform(args.image_size)
@@ -588,11 +600,14 @@ def main(argv=None):
         labels=ensemble.labels_array,
         batch_size=args.batch_size,
         samples_per_class=args.samples_per_class,
+        seed=args.seed,
     )
     loader = DataLoader(
         dataset,
         batch_sampler=sampler,
         num_workers=args.num_workers,
+        worker_init_fn=seed_worker,
+        generator=data_generator,
         pin_memory=(device.type == "cuda"),
     )
   else:
@@ -601,6 +616,8 @@ def main(argv=None):
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.num_workers,
+        worker_init_fn=seed_worker,
+        generator=data_generator,
         pin_memory=(device.type == "cuda"),
         drop_last=True,
     )

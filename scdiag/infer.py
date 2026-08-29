@@ -10,7 +10,7 @@ from PIL import Image
 
 from scdiag.cli_utils import KVPairAction
 from scdiag.label_utils import get_label
-from scdiag.logging_utils import setup_logging
+from scdiag.logging_utils import fatal, setup_logging
 from scdiag.model_utils import build_val_transform, load_model_for_inference
 
 
@@ -101,6 +101,18 @@ def open_image(source):
   return Image.open(source).convert("RGB")
 
 
+def rank_indices(probs):
+  """Return class indices ordered by descending probability.
+
+  Ties break by class index (stable sort) so equal-probability classes
+  always appear in the same, deterministic order — both for the
+  torch tensor and numpy array code paths.
+  """
+  if isinstance(probs, torch.Tensor):
+    return torch.sort(probs, descending=True, stable=True).indices
+  return np.argsort(-np.asarray(probs), kind="stable")
+
+
 def predict_single(model, transform, image, device):
   """Run inference on one image. Returns (logits, pixel_values) tensor."""
   pixel_values = transform(image).unsqueeze(0).to(device)
@@ -108,6 +120,29 @@ def predict_single(model, transform, image, device):
     logits = model(pixel_values).logits
   probs = torch.softmax(logits, dim=-1)[0]
   return probs, pixel_values
+
+
+def check_xgb_label_alignment(xgb_model, id2label):
+  """Fail fast if an XGBoost model's class space mismatches the backbone.
+
+  XGBoost class indices must align with the backbone model's label
+  space; a mismatch would silently print wrong class names in the
+  prediction output.
+
+  Args:
+      xgb_model: A fitted XGBClassifier (exposes ``n_classes_``).
+      id2label: The backbone model's label mapping.
+
+  Raises:
+      ValueError: Via ``fatal`` when the class counts differ.
+  """
+  if getattr(xgb_model, "n_classes_", None) != len(id2label):
+    fatal(
+        f"XGBoost model has {getattr(xgb_model, 'n_classes_', '?')} classes "
+        f"but the model config defines {len(id2label)} labels; the XGBoost "
+        f"model does not match this checkpoint.",
+        ValueError,
+    )
 
 
 def main(argv=None):
@@ -133,6 +168,9 @@ def main(argv=None):
     from xgboost import XGBClassifier
     xgb_model = XGBClassifier()
     xgb_model.load_model(args.xgboost_model)
+    # XGBoost class indices must align with the backbone model's label
+    # space; a mismatch would silently print wrong class names.
+    check_xgb_label_alignment(xgb_model, model.config.id2label)
     logging.info(f"Loaded XGBoost model: {args.xgboost_model}")
 
   results = []
@@ -141,7 +179,7 @@ def main(argv=None):
     probs, pixel_values = predict_single(model, transform, image, device)
 
     predictions = []
-    for idx in probs.argsort(descending=True).tolist():
+    for idx in rank_indices(probs).tolist():
       predictions.append({
           "label": get_label(model.config.id2label, idx),
           "probability": round(probs[idx].item(), 4),
@@ -164,7 +202,7 @@ def main(argv=None):
         features = extract_backbone_features(model, pixel_values)
       xgb_probs = xgb_model.predict_proba(features.cpu().numpy())[0]
       xgb_predictions = []
-      for idx in np.argsort(xgb_probs)[::-1].tolist():
+      for idx in rank_indices(xgb_probs).tolist():
         xgb_predictions.append({
             "label": get_label(model.config.id2label, idx),
             "probability": round(float(xgb_probs[idx]), 4),

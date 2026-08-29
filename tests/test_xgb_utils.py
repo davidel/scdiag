@@ -144,3 +144,86 @@ class TestEvalXGBoost:
 
     cm = result["confusion_matrix"]
     np.testing.assert_array_equal(cm.sum(axis=1), np.bincount(labels, minlength=3))
+
+
+class TestRandomStatePassthrough:
+
+  def test_default_seed_is_42(self):
+    rng = np.random.RandomState(42)
+    features = rng.randn(30, 16).astype(np.float32)
+    labels = rng.randint(0, 3, size=30)
+
+    clf = train_xgboost(features, labels, max_depth=3, n_estimators=10)
+    assert clf.random_state == 42
+
+  def test_explicit_seed_propagates(self):
+    rng = np.random.RandomState(42)
+    features = rng.randn(30, 16).astype(np.float32)
+    labels = rng.randint(0, 3, size=30)
+
+    clf = train_xgboost(features, labels, max_depth=3, n_estimators=10, random_state=7)
+    assert clf.random_state == 7
+
+
+class TestEvalLabelSpace:
+
+  def test_id2label_larger_than_seen_labels(self):
+    """id2label covering classes absent from the eval split must not crash."""
+    rng = np.random.RandomState(42)
+    features = rng.randn(30, 16).astype(np.float32)
+    labels = rng.randint(0, 2, size=30)  # only classes 0 and 1 present
+
+    clf = train_xgboost(features, labels, max_depth=3, n_estimators=10)
+    id2label = {"0": "a", "1": "b", "2": "c", "3": "d"}
+    result = eval_xgboost(clf, features, labels, id2label=id2label)
+
+    # Present classes get per-class accuracy; absent ones still appear
+    # in the 4x4 confusion matrix and the classification report.
+    assert result["confusion_matrix"].shape == (4, 4)
+    assert "a" in result["per_class_accuracy"]
+    assert "b" in result["per_class_accuracy"]
+    assert "CLASS_2" not in result["per_class_accuracy"]
+    assert "d" in result["classification_report"]
+
+  def test_id2label_integer_keys(self):
+    """Integer-keyed id2label (custom models) resolves via get_label."""
+    rng = np.random.RandomState(42)
+    features = rng.randn(30, 16).astype(np.float32)
+    labels = rng.randint(0, 3, size=30)
+
+    clf = train_xgboost(features, labels, max_depth=3, n_estimators=10)
+    id2label = {0: "x", 1: "y", 2: "z"}
+    result = eval_xgboost(clf, features, labels, id2label=id2label)
+
+    assert "x" in result["per_class_accuracy"]
+    assert "y" in result["per_class_accuracy"]
+    assert "z" in result["per_class_accuracy"]
+
+  def test_missing_id2label_entry_uses_placeholder(self, caplog):
+    """A gap in id2label falls back to CLASS_N and warns instead of raising."""
+    rng = np.random.RandomState(42)
+    features = rng.randn(30, 16).astype(np.float32)
+    labels = rng.randint(0, 3, size=30)
+
+    clf = train_xgboost(features, labels, max_depth=3, n_estimators=10)
+    id2label = {"0": "a", "1": "b", "3": "d"}  # class 2 missing
+    with caplog.at_level("WARNING"):
+      result = eval_xgboost(clf, features, labels, id2label=id2label)
+
+    assert "CLASS_2" in result["per_class_accuracy"]
+    assert "a" in result["per_class_accuracy"]
+    assert any("no entry for class 2" in r.message for r in caplog.records)
+
+  def test_n_classes_mismatch_warns(self, caplog):
+    """Model trained on a different class count than id2label warns."""
+    rng = np.random.RandomState(42)
+    features = rng.randn(30, 16).astype(np.float32)
+    labels = rng.randint(0, 2, size=30)
+
+    clf = train_xgboost(features, labels, max_depth=3, n_estimators=10)
+    id2label = {str(i): f"c{i}" for i in range(5)}  # 5 vs 2 classes
+    with caplog.at_level("WARNING"):
+      eval_xgboost(clf, features, labels, id2label=id2label)
+
+    assert any(
+        "trained on 2 classes but id2label has 5" in r.message for r in caplog.records)
