@@ -24,7 +24,7 @@ gcs = ["google-cloud-storage"]
 lora = ["peft>=0.7.0"]
 timm = ["timm>=1.0"]
 uvito = ["segmentation_models_pytorch>=0.3.0"]
-dev = ["pytest", "ruff", "tensorboard"]
+dev = ["pytest", "ruff", "yapf", "tensorboard"]
 
 [project.scripts]
 scdiag-train = "scdiag.train:main"

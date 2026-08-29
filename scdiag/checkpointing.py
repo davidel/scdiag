@@ -354,6 +354,10 @@ def resume_checkpoint(ckpt_latest, ckpt_best, model, device):
     return model, 0, 0.0, {}
 
   logging.info(f"Resuming from checkpoint: {resume_path}")
+  # weights_only=False is intentional: resume checkpoints contain
+  # optimizer/scheduler/AMP state objects that the restricted unpickler
+  # cannot reconstruct. These files are produced by this toolkit itself,
+  # not fetched from untrusted sources.
   ckpt = torch.load(resume_path, map_location=device, weights_only=False)
   logging.info(f"  Checkpoint keys: {list(ckpt.keys())}")
 
@@ -480,6 +484,10 @@ def load_checkpoint_weights(path,
         "Ensure the checkpoint exists before calling load_checkpoint_weights().",
         FileNotFoundError)
 
+  # weights_only=False is intentional: checkpoints written by older
+  # versions of this toolkit may carry non-tensor payload objects
+  # (e.g. numpy scalars in custom keys). Files are user-produced, not
+  # fetched from untrusted sources.
   ckpt = torch.load(path, map_location=device, weights_only=False)
 
   state = ckpt.get("model_state_dict")
