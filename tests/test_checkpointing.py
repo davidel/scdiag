@@ -6,9 +6,25 @@ import torch
 
 from scdiag.checkpointing import (
     filter_state_dict,
+    format_count,
     load_checkpoint_weights,
 )
 from scdiag.storage_utils import save_checkpoint
+
+
+class TestFormatCount:
+
+  def test_below_1k(self):
+    assert format_count(999) == "999"
+
+  def test_kilobytes(self):
+    assert format_count(1024) == "1.00K"
+
+  def test_millions(self):
+    assert format_count(25_600_000) == "24.41M"
+
+  def test_gigabytes(self):
+    assert format_count(3_221_225_472) == "3.00G"
 
 
 class TestFilterStateDict:

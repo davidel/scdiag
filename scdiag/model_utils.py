@@ -11,7 +11,7 @@ from torchvision.transforms import v2
 from torchvision.transforms.functional import InterpolationMode
 
 from scdiag.attr_utils import MISSING, maybe_call
-from scdiag.checkpointing import _format_count
+from scdiag.checkpointing import format_count
 from scdiag.logging_utils import fatal
 from scdiag.models import load_model, load_processor
 
@@ -169,8 +169,8 @@ def apply_lora(model, *, r=8, alpha=16, dropout=0.0, target_modules=None):
   pct = 100.0 * trainable / total if total else 0.0
   logging.info(
       "LoRA trainable params: %s || all params: %s || trainable%%: %.4f",
-      _format_count(trainable),
-      _format_count(total),
+      format_count(trainable),
+      format_count(total),
       pct,
   )
   return model

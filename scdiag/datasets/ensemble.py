@@ -214,12 +214,27 @@ class DatasetEnsemble:
         )
 
   def _build_global_label_space(self):
-    """Map per-dataset label names to a shared integer space."""
-    all_names = set()
-    for ds in self._datasets:
-      all_names.update(ds.label_names)
-    self._global_label_names = sorted(all_names)
-    self._global_label2id = {name: i for i, name in enumerate(self._global_label_names)}
+    """Map per-dataset label names to a shared integer space.
+
+        Idempotent: rebuilding is a no-op once the global space exists.
+        """
+    if not self._global_label_names:
+      all_names = set()
+      for ds in self._datasets:
+        all_names.update(ds.label_names)
+      self._global_label_names = sorted(all_names)
+      self._global_label2id = {name: i for i, name in enumerate(self._global_label_names)}
+
+  def ensure_label_space(self):
+    """Validate per-dataset labels and build the global label space.
+
+        Public entry point for callers that iterate a label-requiring
+        dataset outside :meth:`__init__`.  Idempotent, so it is cheap to
+        call defensively.
+        """
+    if self.has_labels:
+      self._validate_labels()
+      self._build_global_label_space()
 
   def _remap_label(self, ds, local_label):
     """Convert a dataset-local label to the global integer id."""

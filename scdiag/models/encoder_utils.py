@@ -12,6 +12,8 @@ share two pieces of logic:
 Extracted here to avoid triplicated code across model modules.
 """
 
+import torch
+
 from scdiag.attr_utils import MISSING, get_attribute
 
 # Attribute paths probed (in order) to infer the backbone output dimension.
@@ -65,7 +67,13 @@ def encode_with_backbone(encoder, images):
   from scdiag.model_utils import extract_backbone_features
   try:
     return extract_backbone_features(encoder, images)
-  except (ValueError, AttributeError, RuntimeError):
+  except torch.cuda.OutOfMemoryError:
+    # A genuine OOM must propagate: silently retrying a direct forward
+    # pass would OOM again anyway and mask the real problem.
+    raise
+  except (ValueError, AttributeError, TypeError):
+    # The hook-based extraction does not support this encoder; fall back
+    # to a plain forward pass.
     pass
   raw = encoder(images)
   if hasattr(raw, "logits"):

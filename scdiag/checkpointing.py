@@ -147,7 +147,7 @@ def select_best_checkpoint(root_path):
 _VALID_STATE_FLAGS = {"opt", "sched", "amp", "none"}
 
 
-def _format_count(num, suffixes=("K", "M", "G", "T")):
+def format_count(num, suffixes=("K", "M", "G", "T")):
   """Format an integer count into a human-readable string with a suffix.
 
     *suffixes* should have entries for 1024¹, 1024², 1024³, and 1024⁴
@@ -166,7 +166,7 @@ def _format_bytes(num_bytes):
   """Convert a byte count into a human-readable string (B, KB, MB, GB)."""
   if num_bytes < 1024:
     return f"{num_bytes} B"
-  return _format_count(num_bytes, suffixes=(" KB", " MB", " GB", " TB"))
+  return format_count(num_bytes, suffixes=(" KB", " MB", " GB", " TB"))
 
 
 def create_model_report(model):
@@ -183,8 +183,8 @@ def create_model_report(model):
 
   total = sum(p.numel() for p in model.parameters())
   trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-  parts.append(f"Model params: {_format_count(total)} total, "
-               f"{_format_count(trainable)} trainable")
+  parts.append(f"Model params: {format_count(total)} total, "
+               f"{format_count(trainable)} trainable")
 
   parts.append(_format_model_param_table(model))
   return "\n".join(parts)
@@ -218,7 +218,7 @@ def _format_model_param_table(model):
     data_rows.append([
         name,
         str(tuple(param.shape)),
-        _format_count(numel),
+        format_count(numel),
         _format_bytes(param_bytes),
         "yes" if param.requires_grad else "no",
     ])
@@ -228,9 +228,9 @@ def _format_model_param_table(model):
   footer = [
       "TOTAL",
       "",
-      _format_count(total_params),
+      format_count(total_params),
       _format_bytes(total_bytes),
-      _format_count(trainable_params),
+      format_count(trainable_params),
   ]
   lines = ["Model parameter details:"]
   lines.extend(format_table(headers, data_rows, align=aligns, footer=footer))

@@ -1,5 +1,7 @@
 """Bridge HuggingFace datasets to PyTorch DataLoader format."""
 
+import logging
+
 import datasets
 
 from scdiag.logging_utils import fatal
@@ -180,6 +182,13 @@ class HFDatasetProxy:
           2. Any column with ``ClassLabel`` feature (prefer known names).
           3. Column matching a known label name with string/int feature.
           4. First string/int column that is not an ignored name.
+
+        .. note::
+
+           Priority 4 is a heuristic fallback: when no known label name
+           matches, the first non-ignored string/int64 column wins, which
+           can silently pick a metadata column (e.g. ``patient_id``).  A
+           warning is logged whenever this fallback triggers.
         """
     cols = dataset.column_names
     features = dataset.features
@@ -194,6 +203,12 @@ class HFDatasetProxy:
       for name in classlabel_cols:
         if name in HFDatasetProxy.KNOWN_LABEL_NAMES:
           return name
+      logging.warning(
+          "No known label column name found; using first ClassLabel "
+          "column '%s' of %s. Pass label_column explicitly to override.",
+          classlabel_cols[0],
+          classlabel_cols,
+      )
       return classlabel_cols[0]
 
     for name in cols:
@@ -206,9 +221,21 @@ class HFDatasetProxy:
         ):
           return name
 
+    fallback = None
     for name in cols:
       if name in HFDatasetProxy.IGNORE_LABEL_NAMES:
         continue
       feat = features[name]
       if isinstance(feat, datasets.Value) and feat.dtype in ("string", "int64"):
-        return name
+        fallback = name
+        break
+    if fallback is not None:
+      logging.warning(
+          "No known label column detected in dataset with columns %s; "
+          "falling back to first string/int64 column '%s'. If this is "
+          "not the label (e.g. an ID or patient column), pass "
+          "--label_column explicitly.",
+          cols,
+          fallback,
+      )
+    return fallback

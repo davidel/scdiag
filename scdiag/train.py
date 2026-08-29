@@ -24,6 +24,12 @@ from scdiag.checkpointing import (
     resume_checkpoint,
     serialize_lora_state,
 )
+from scdiag.cli_args import (
+    add_checkpoint_args,
+    add_optimization_args,
+    add_source_checkpoint_args,
+    add_training_state_args,
+)
 from scdiag.cli_utils import KVPairAction
 from scdiag.datasets.hf_proxy import HFDatasetProxy
 from scdiag.datasets.weighted_sampler import build_weighted_sampler
@@ -429,26 +435,7 @@ def parse_args(argv=None):
       "or 'combined' (freq x multipliers).",
   )
 
-  parser.add_argument(
-      "--grad_accum_steps",
-      type=int,
-      default=1,
-      help="Gradient accumulation steps.",
-  )
-  parser.add_argument(
-      "--amp_dtype",
-      type=str,
-      choices=["float16", "bfloat16"],
-      help="AMP dtype for mixed precision. Omit to disable AMP. "
-      "float16 requires GradScaler; bfloat16 is recommended for "
-      "Ampere+ GPUs.",
-  )
-  parser.add_argument(
-      "--grad_clip",
-      type=float,
-      default=1.0,
-      help="Maximum gradient norm for clipping.  0 disables clipping.",
-  )
+  add_optimization_args(parser)
 
   parser.add_argument(
       "--classifier",
@@ -479,13 +466,7 @@ def parse_args(argv=None):
       "classifier.pool). If omitted, all parameters are trainable.",
   )
 
-  parser.add_argument(
-      "--checkpoint",
-      type=str,
-      default="scdiag",
-      help="Base path for checkpoints. '_latest.pt' and "
-      "'_best.pt' are appended automatically.",
-  )
+  add_checkpoint_args(parser, checkpoint_default="scdiag")
 
   parser.add_argument(
       "--log_dir",
@@ -539,20 +520,9 @@ def parse_args(argv=None):
       help="Minimum logging level.",
   )
 
-  parser.add_argument(
-      "--state_save",
-      type=str,
-      default="opt,sched,amp",
-      help="Comma-separated list of states to save in "
-      "checkpoints. One or more of: opt, sched, amp, none.",
-  )
-  parser.add_argument(
-      "--state_load",
-      type=str,
-      default="opt,sched,amp",
-      help="Comma-separated list of states to restore from checkpoint "
-      "on resume. One or more of: opt, sched, amp, none.",
-  )
+  add_training_state_args(parser,
+                          state_save="opt,sched,amp",
+                          state_load="opt,sched,amp")
   parser.add_argument(
       "--save_frozen",
       action=argparse.BooleanOptionalAction,
@@ -607,29 +577,7 @@ def parse_args(argv=None):
       type=str,
       help="Cache directory for downloaded datasets.",
   )
-  parser.add_argument(
-      "--source_checkpoint",
-      type=str,
-      help="Path to a source checkpoint to absorb parameters from. "
-      "Keys are aligned by shape and name before loading. "
-      "Typically produced by scdiag-pretrain.",
-  )
-  parser.add_argument(
-      "--param_rename",
-      nargs="+",
-      help="Regex-based key rename patterns for --source_checkpoint. "
-      "Each pattern is 'SEARCH;REPLACE' where SEARCH is a Python regex "
-      "and REPLACE may use $1, $2, … for capture groups. "
-      "Applied before shape-based alignment. "
-      "Example: 'encoder\\\\.(.*);model\\\\.$1'.",
-  )
-
-  parser.add_argument(
-      "--remote_checkpoint",
-      type=str,
-      help="Remote URI to sync checkpoints to "
-      "(format: gs://BUCKET/PREFIX or r2://BUCKET/PREFIX).",
-  )
+  add_source_checkpoint_args(parser)
 
   xgb_group = parser.add_argument_group("xgboost")
   xgb_group.add_argument(

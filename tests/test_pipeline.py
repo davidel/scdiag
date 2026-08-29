@@ -233,6 +233,56 @@ class TestDetectLabelColumn:
     )
     assert train_mod.HFDatasetProxy.detect_label_column(ds) is None
 
+  def test_unknown_classlabel_column_warns(self, caplog):
+    train_mod = _import_train()
+    ds = _make_synthetic_dataset(label_col="lesion_type", image_col="image")
+    with caplog.at_level("WARNING"):
+      assert train_mod.HFDatasetProxy.detect_label_column(ds) == "lesion_type"
+    assert any("No known label column name found" in r.message for r in caplog.records)
+
+  def test_known_label_name_does_not_warn(self, caplog):
+    train_mod = _import_train()
+    ds = _make_synthetic_dataset(label_col="dx", image_col="image")
+    with caplog.at_level("WARNING"):
+      assert train_mod.HFDatasetProxy.detect_label_column(ds) == "dx"
+    assert not any("No known label" in r.message for r in caplog.records)
+
+  def test_last_resort_fallback_warns(self, caplog):
+    """Priority 4: the first non-ignored string/int column wins, loudly."""
+    train_mod = _import_train()
+    raw = datasets.Dataset.from_dict(
+        {
+            "image": [
+                Image.fromarray(np.zeros((32, 32, 3), dtype=np.uint8)) for _ in range(4)
+            ],
+            "patient_id": ["P1", "P2", "P3", "P4"],
+        },
+        features=datasets.Features({
+            "image": datasets.Image(),
+            "patient_id": datasets.Value("string"),
+        }),
+    )
+    with caplog.at_level("WARNING"):
+      assert train_mod.HFDatasetProxy.detect_label_column(raw) == "patient_id"
+    assert any("falling back to first string/int64 column 'patient_id'" in r.message
+               for r in caplog.records)
+
+  def test_no_label_produces_no_warning(self, caplog):
+    train_mod = _import_train()
+    ds = datasets.Dataset.from_dict(
+        {
+            "image": [
+                Image.fromarray(np.zeros((32, 32, 3), dtype=np.uint8)) for _ in range(2)
+            ],
+        },
+        features=datasets.Features({
+            "image": datasets.Image(),
+        }),
+    )
+    with caplog.at_level("WARNING"):
+      assert train_mod.HFDatasetProxy.detect_label_column(ds) is None
+    assert not any("falling back" in r.message for r in caplog.records)
+
 
 # Load and split dataset
 

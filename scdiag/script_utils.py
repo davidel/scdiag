@@ -1,8 +1,6 @@
 """Utilities for loading and executing user-supplied Python scripts."""
 
 import logging
-import os
-import tempfile
 import urllib.request
 
 from scdiag.logging_utils import fatal
@@ -11,29 +9,19 @@ from scdiag.logging_utils import fatal
 def _load_script(path_or_url):
   """Fetch, compile and execute a Python script, returning its namespace.
 
-    Handles both local files and HTTP/HTTPS URLs.  For URLs the code is
-    written to a named temporary file so that tracebacks show a meaningful
-    filename.
+    Handles both local files and HTTP/HTTPS URLs.  The fetched code is
+    compiled with the source path/URL, so tracebacks show where the
+    code came from.
   """
   namespace = {}
 
   if path_or_url.startswith(("http://", "https://")):
     with urllib.request.urlopen(path_or_url) as resp:
       code = resp.read().decode("utf-8")
-    with tempfile.NamedTemporaryFile(mode="w",
-                                     suffix=".py",
-                                     delete=False,
-                                     prefix="ext_") as tmp:
-      tmp.write(code)
-      tmp_path = tmp.name
-    try:
-      exec(compile(code, path_or_url, "exec"), namespace)  # noqa: S102
-    finally:
-      os.unlink(tmp_path)
   else:
     with open(path_or_url) as f:
       code = f.read()
-    exec(compile(code, path_or_url, "exec"), namespace)  # noqa: S102
+  exec(compile(code, path_or_url, "exec"), namespace)  # noqa: S102
 
   return namespace
 
@@ -42,9 +30,7 @@ def _extract_fn(namespace, path_or_url, fn_name):
   """Extract a callable *fn_name* from a script namespace."""
   fn = namespace.get(fn_name)
   if fn is None or not callable(fn):
-    fatal(
-        f"Script {path_or_url!r} does not define a callable '{fn_name}'.",
-        ValueError)
+    fatal(f"Script {path_or_url!r} does not define a callable '{fn_name}'.", ValueError)
   return fn
 
 

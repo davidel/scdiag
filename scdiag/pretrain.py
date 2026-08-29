@@ -36,6 +36,12 @@ from scdiag.checkpointing import (
     restore_training_state,
     resume_checkpoint,
 )
+from scdiag.cli_args import (
+    add_checkpoint_args,
+    add_optimization_args,
+    add_source_checkpoint_args,
+    add_training_state_args,
+)
 from scdiag.cli_utils import KVPairAction
 from scdiag.datasets.balanced_sampler import BalancedBatchSampler
 from scdiag.datasets.ensemble import DatasetEnsemble
@@ -120,8 +126,7 @@ def build_pretrain_dataset(args, needs_labels=False, transform=None):
       strict=args.strict_datasets,
   )
   if needs_labels:
-    ensemble._validate_labels()
-    ensemble._build_global_label_space()
+    ensemble.ensure_label_space()
   if transform is None:
     transform = build_pretrain_transform(args.image_size)
   dataset = _TransformWrapper(ensemble, transform, image_field=ensemble.image_column)
@@ -413,54 +418,11 @@ def parse_args(argv=None):
       "When set, learning rates decay by this factor per depth level "
       "(shallow layers get lower LR). E.g. --llrd_decay 0.85.",
   )
-  parser.add_argument("--grad_clip",
-                      type=float,
-                      default=1.0,
-                      help="Max gradient norm for clipping.")
-  parser.add_argument(
-      "--amp_dtype",
-      type=str,
-      choices=["float16", "bfloat16"],
-      help="AMP dtype for mixed precision. Omit or use --amp_dtype "
-      "without a value to disable AMP. float16 requires GradScaler; "
-      "bfloat16 is recommended for Ampere+ GPUs.",
-  )
-
-  parser.add_argument(
-      "--checkpoint",
-      type=str,
-      default="./checkpoints/convvit_simmim",
-      help="Checkpoint path prefix (without extension). "
-      "_latest.pt and _best.pt suffixes are appended "
-      "automatically.",
-  )
-  parser.add_argument(
-      "--remote_checkpoint",
-      type=str,
-      help="Remote URI to sync checkpoints to "
-      "(format: gs://BUCKET/PREFIX or r2://BUCKET/PREFIX).",
-  )
-  parser.add_argument(
-      "--resume",
-      action=argparse.BooleanOptionalAction,
-      default=True,
-      help="Resume training from latest checkpoint if one "
-      "exists.",
-  )
-  parser.add_argument(
-      "--state_save",
-      type=str,
-      default="opt,sched",
-      help="Comma-separated states to save in checkpoints. "
-      "Allowed: opt, sched, amp, none.",
-  )
-  parser.add_argument(
-      "--state_load",
-      type=str,
-      default="opt,sched",
-      help="Comma-separated states to restore from checkpoints. "
-      "Allowed: opt, sched, amp, none.",
-  )
+  add_optimization_args(parser)
+  add_checkpoint_args(parser,
+                      checkpoint_default="./checkpoints/convvit_simmim",
+                      resume_default=True)
+  add_training_state_args(parser, state_save="opt,sched", state_load="opt,sched")
 
   parser.add_argument(
       "--log_level",
@@ -561,23 +523,7 @@ def parse_args(argv=None):
       help="Extra scheduler kwargs (repeatable). "
       "Example: --sched_arg T_max=50 eta_min=1e-6",
   )
-  parser.add_argument(
-      "--source_checkpoint",
-      type=str,
-      help="Path to a source checkpoint to absorb parameters from. "
-      "Keys are aligned by shape and name before loading. "
-      "Useful for continuing from a prior pre-training run "
-      "or loading weights from a different architecture.",
-  )
-  parser.add_argument(
-      "--param_rename",
-      nargs="+",
-      help="Regex-based key rename patterns for --source_checkpoint. "
-      "Each pattern is 'SEARCH;REPLACE' where SEARCH is a Python regex "
-      "and REPLACE may use $1, $2, … for capture groups. "
-      "Applied before shape-based alignment. "
-      "Example: 'encoder\\\\\\\\.(.*);model\\\\\\\\.$1'.",
-  )
+  add_source_checkpoint_args(parser)
 
   parser.add_argument(
       "--grad_checkpoint",
@@ -758,6 +704,10 @@ def main(argv=None):
   writer = SummaryWriter(log_dir=args.log_dir)
 
   completed_epoch = start_epoch - 1  # last fully completed (-1 = none yet)
+  # Loss of the last *completed* epoch (0.0 before the first epoch
+  # finishes).  The finally-block below checkpoints it as-is, so on an
+  # interrupt mid-epoch this value is intentionally the previous epoch's.
+  avg_loss = 0.0
   global_step = ckpt_extra.get(
       "global_step",
       start_epoch * (len(loader) // args.grad_accum_steps),
@@ -832,7 +782,7 @@ def main(argv=None):
             scheduler,
             completed_epoch,
             states_to_save=states_to_save,
-            loss=avg_loss if "avg_loss" in dir() else 0.0,
+            loss=avg_loss,
             global_step=global_step,
             method_state=method_state,
         ),
