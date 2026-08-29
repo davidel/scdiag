@@ -326,6 +326,7 @@ scdiag-pretrain --method supcon \
 | `--lr` | `1e-4` | Peak learning rate for AdamW. |
 | `--amp_dtype` | `None` | Mixed precision: `float16` or `bfloat16`. Omit to disable. |
 | `--num_workers` | `4` | DataLoader worker processes. |
+| `--device` | auto-detect | Device: `cpu`, `cuda`, or `cuda:INDEX`. |
 | `--resume` | `True` | Auto-resume from latest checkpoint. Use `--no-resume` to disable. |
 | `--state_save` | `opt,sched` | States to save: `opt`, `sched`, `amp`, `none`. |
 | `--state_load` | `opt,sched` | States to restore on resume: `opt`, `sched`, `amp`, `none`. |
@@ -642,6 +643,7 @@ resume point.
 | `--deterministic` | `False` | Enable deterministic algorithms (cuDNN deterministic mode, benchmark off). Costs throughput; ops without a deterministic CUDA kernel warn instead of failing. |
 | `--grad_accum_steps` | `1` | Gradient accumulation steps (effective batch = batch_size × steps). |
 | `--amp_dtype` | `None` | Mixed precision: `float16` or `bfloat16`. |
+| `--device` | auto-detect | Device: `cpu`, `cuda`, or `cuda:INDEX`. |
 | `--lr_group` | `None` | Per-parameter-group learning rates (repeatable). Format: `"REGEX=LR"`. |
 | `--llrd_decay` | `None` | Layer-wise LR decay factor per depth level. Example: `--llrd_decay 0.85`. |
 | `--checkpoint` | `scdiag` | Checkpoint base path (`_latest.pt` / `_best.pt` appended). |

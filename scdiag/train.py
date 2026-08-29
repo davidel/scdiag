@@ -484,6 +484,11 @@ def parse_args(argv=None):
       "benchmark off). Costs throughput; ops without a deterministic "
       "CUDA kernel log a warning instead of failing.",
   )
+  parser.add_argument(
+      "--device",
+      type=str,
+      help="Device: cpu, cuda, or cuda:INDEX (default: auto-detect).",
+  )
 
   parser.add_argument(
       "--log_dir",
@@ -853,7 +858,10 @@ def main():
   states_to_save = parse_state_flags(args.state_save)
   states_to_load = parse_state_flags(args.state_load)
 
-  device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+  if args.device:
+    device = torch.device(args.device)
+  else:
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
   logging.info(f"Using device: {device}")
 
   log_dir = args.log_dir or os.path.join(
@@ -1027,7 +1035,7 @@ def main():
       label_smoothing=args.label_smoothing,
   )
 
-  scaler = (torch.amp.GradScaler("cuda")
+  scaler = (torch.amp.GradScaler(device)
             if args.amp_dtype == torch.float16 and device.type == "cuda" else None)
 
   if args.lora:

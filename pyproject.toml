@@ -40,3 +40,14 @@ target-version = "py39"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "SIM", "UP"]
 ignore = ["LOG015", "PLC0415", "RUF012", "PLR0402"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+filterwarnings = [
+  "error",
+  # Known sandbox limitation: joblib falls back to serial mode when a
+  # shared-memory segment cannot be created. Fires at test collection.
+  "ignore:\\[Errno 13\\] Permission denied.*joblib:UserWarning",
+]

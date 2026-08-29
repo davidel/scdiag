@@ -548,6 +548,11 @@ def parse_args(argv=None):
       "benchmark off). Costs throughput; ops without a deterministic "
       "CUDA kernel log a warning instead of failing.",
   )
+  parser.add_argument(
+      "--device",
+      type=str,
+      help="Device: cpu, cuda, or cuda:INDEX (default: auto-detect).",
+  )
   args = parser.parse_args(argv)
 
   if args.log_dir is None:
@@ -575,9 +580,12 @@ def main(argv=None):
   logging.info("=" * 60)
   logging.info(f"Args: {vars(args)}")
 
-  device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+  if args.device:
+    device = torch.device(args.device)
+  else:
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
   logging.info(f"Using device: {device}")
-  if torch.cuda.is_available():
+  if device.type == "cuda":
     logging.info(gpu_stats_str(device))
 
   # Seeded generator for DataLoader shuffling.

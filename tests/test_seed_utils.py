@@ -128,6 +128,34 @@ class TestTrainFlags:
     assert parser_actions.count("--grad_accum_steps") == 1
 
 
+class TestDeviceFlag:
+
+  def test_train_device_default_is_none(self):
+    from scdiag.train import parse_args
+
+    args = parse_args([])
+    assert args.device is None
+
+  def test_pretrain_device_default_is_none(self):
+    from scdiag.pretrain import parse_args
+
+    args = parse_args(["--method", "simmim", "--datasets", "dummy"])
+    assert args.device is None
+
+  def test_train_device_cpu(self):
+    from scdiag.train import parse_args
+
+    args = parse_args(["--device", "cpu"])
+    assert args.device == "cpu"
+
+  def test_pretrain_device_cuda_index(self):
+    from scdiag.pretrain import parse_args
+
+    args = parse_args(
+        ["--method", "simmim", "--datasets", "dummy", "--device", "cuda:1"])
+    assert args.device == "cuda:1"
+
+
 class TestBalancedSamplerSeed:
 
   def test_same_seed_same_batches(self):
