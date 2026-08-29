@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 from torchvision.transforms.functional import InterpolationMode
 
-from scdiag.attr_utils import MISSING, maybe_call
+from scdiag.attr_utils import MISSING, maybe_call, maybe_setattr
 from scdiag.checkpointing import format_count
 from scdiag.logging_utils import fatal
 from scdiag.models import load_model, load_processor
@@ -424,8 +424,6 @@ def enable_grad_checkpointing(model):
 
   Logs a warning if no known checkpointing mechanism is found.
   """
-  from scdiag.attr_utils import MISSING, maybe_call, maybe_setattr
-
   # --- timm native API (unwrapped or via wrapper) ---
   if maybe_call(model, 'set_grad_checkpointing', enable=True) is not MISSING:
     logging.info("Gradient checkpointing enabled (timm native API).")
