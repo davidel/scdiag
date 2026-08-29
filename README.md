@@ -6,6 +6,22 @@ A training and inference toolkit for skin-lesion image classification. Supports
 self-supervised pre-training, supervised fine-tuning, and XGBoost ensemble
 inference — all from the command line.
 
+## Contents
+
+- [Why scdiag?](#why-scdiag)
+- [How it works](#how-it-works)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Pre-Training Guide](#pre-training-guide)
+- [Fine-Tuning Guide](#fine-tuning-guide)
+- [Inference Guide](#inference-guide)
+- [Tips & Pitfalls](#tips--pitfalls)
+- [Gradient Monitor](#gradient-monitor)
+- [Custom Models](#custom-models)
+- [References and Further Reading](#references-and-further-reading)
+- [Development](#development)
+- [License](#license)
+
 ## Why scdiag?
 
 Medical imaging models face two practical problems: **labeled data is scarce**
@@ -99,6 +115,9 @@ pip install -e ".[gcs]"
 
 # With LoRA fine-tuning:
 pip install -e ".[lora]"
+
+# With UVito model support:
+pip install -e ".[uvito]"
 ```
 
 **Requirements:** Python ≥ 3.9, PyTorch, torchvision, transformers, datasets,
@@ -115,8 +134,13 @@ scdiag-train --model google/vit-base-patch16-224 \
              --epochs 5 \
              --batch_size 32 \
              --lr 3e-5 \
-             --image_size 448
+             --image_size 224
 ```
+
+HuggingFace ViT backbones use fixed 224x224 position embeddings and do not
+interpolate them, so they require `--image_size 224`.  The toolkit default of
+448 targets size-flexible backbones such as ConvNeXt, timm EVA, or ConvViT,
+which pool or interpolate the token sequence to the input size.
 
 This downloads the model and dataset from HuggingFace, trains for 5 epochs,
 and saves `scdiag_latest.pt` and `scdiag_best.pt`. See
@@ -655,7 +679,7 @@ resume point.
 | `--save_every` | `500` | Save checkpoint every N steps. |
 | `--num_workers` | `2` | DataLoader worker processes. |
 | `--log_level` | `INFO` | Logging level. |
-| `--log_dir` | `None` | TensorBoard log directory (default: `<checkpoint_dir>/logs`). |
+| `--log_dir` | `None` | TensorBoard log directory (default: `<checkpoint_dir>/logs`). Requires the `tensorboard` package (installed by the `dev` extra). |
 | `--cache_dir` | `None` | HuggingFace cache directory. |
 | `--remote_checkpoint` | `None` | Remote URI for checkpoint sync (`gs://BUCKET/PREFIX` or `r2://BUCKET/PREFIX`). |
 | `--source_checkpoint` | `None` | Path to source checkpoint to absorb parameters from. |
@@ -1022,8 +1046,12 @@ pip install -e ".[timm]"   # optional: timm model support
 pytest
 ```
 
-Code is formatted with [yapf](https://github.com/google/yapf) using the
-project's `.style.yapf` (Google style, 2-space indent).
+Tests run with warnings-as-errors (`filterwarnings = ["error"]` in
+`pyproject.toml`), so a new dependency deprecation warning fails the suite
+instead of scrolling past.  Code is formatted with
+[yapf](https://github.com/google/yapf) using the project's `.style.yapf`
+(Google style, 2-space indent) and linted with
+[Ruff](https://docs.astral.sh/ruff/) (`ruff check .`).
 
 ## License
 
