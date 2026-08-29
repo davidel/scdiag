@@ -2,6 +2,7 @@
 
 import re
 
+import pytest
 import torch
 import torch.nn as nn
 from peft import LoraConfig, PeftModel, get_peft_model
@@ -61,11 +62,8 @@ class TestSerializeDeserialize:
 
   def test_serialize_non_peftmodel_raises(self):
     model = nn.Linear(10, 5)
-    try:
+    with pytest.raises(TypeError, match="Expected a PeftModel"):
       serialize_lora_state(model)
-      assert False, "Expected TypeError"
-    except TypeError as e:
-      assert "Expected a PeftModel" in str(e)
 
 
 class TestApplyLora:

@@ -205,7 +205,7 @@ def build_param_groups_llrd(named_params, lr, weight_decay, decay_factor=0.85):
 
     wdecay_params = []
     ndecay_params = []
-    for name, param in params:
+    for _, param in params:
       if param.ndim > 1:
         wdecay_params.append(param)
       else:

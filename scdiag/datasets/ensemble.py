@@ -223,7 +223,9 @@ class DatasetEnsemble:
       for ds in self._datasets:
         all_names.update(ds.label_names)
       self._global_label_names = sorted(all_names)
-      self._global_label2id = {name: i for i, name in enumerate(self._global_label_names)}
+      self._global_label2id = {
+          name: i for i, name in enumerate(self._global_label_names)
+      }
 
   def ensure_label_space(self):
     """Validate per-dataset labels and build the global label space.
@@ -268,7 +270,7 @@ class DatasetEnsemble:
         continue
       local = ds.labels_array()
       global_ids = np.array(
-          [self._global_label2id[ds.label_names[int(l)]] for l in local],
+          [self._global_label2id[ds.label_names[int(lbl)]] for lbl in local],
           dtype=np.int64,
       )
       parts.append(global_ids)

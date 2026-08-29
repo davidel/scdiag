@@ -1,5 +1,6 @@
 """Tests for the classifier registry and ClsModelWrapper."""
 
+import pytest
 import torch
 import torch.nn as nn
 
@@ -130,6 +131,3 @@ class TestRegisterClassifier:
       @register_classifier("mlp")
       class _Dummy(nn.Module):
         pass
-
-
-import pytest

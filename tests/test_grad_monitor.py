@@ -515,5 +515,5 @@ def test_trend_disambiguates_duplicate_suffixes(caplog):
       if "head_a" in r.message or "head_b" in r.message
   ]
   # Should see both head_a and head_b in the trend table.
-  assert any("head_a" in l for l in param_lines)
-  assert any("head_b" in l for l in param_lines)
+  assert any("head_a" in msg for msg in param_lines)
+  assert any("head_b" in msg for msg in param_lines)

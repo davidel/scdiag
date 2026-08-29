@@ -34,5 +34,9 @@ scdiag-infer = "scdiag.infer:main"
 [tool.setuptools.packages.find]
 include = ["scdiag*"]
 
+[tool.ruff]
+target-version = "py39"
+
 [tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "SIM", "UP"]
 ignore = ["LOG015", "PLC0415", "RUF012", "PLR0402"]

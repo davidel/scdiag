@@ -9,7 +9,10 @@ class TestGetitemRetry:
 
   def test_returns_on_first_try(self):
     """No retry needed — fn succeeds immediately."""
-    fn = lambda i: f"item_{i}"
+
+    def fn(i):
+      return f"item_{i}"
+
     item, idx = getitem_retry(3, fn, size=10)
     assert item == "item_3"
     assert idx == 3

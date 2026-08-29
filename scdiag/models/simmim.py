@@ -16,7 +16,7 @@ def patchify(images, patch_size, channels=None):
       fatal("SimMIM currently requires square patches", ValueError)
     patch_size = patch_size[0]
   B, C, H, W = images.shape
-  if channels is not None and C != channels:
+  if channels is not None and channels != C:
     fatal(f"Expected {channels} channels, got {C}", ValueError)
   if H % patch_size or W % patch_size:
     fatal("Image dimensions must be divisible by patch_size", ValueError)
@@ -38,10 +38,10 @@ def unpatchify(patches, patch_size, img_size, channels=3):
     img_size = img_size[0]
   B, N, D = patches.shape
   expected = patch_size * patch_size * channels
-  if D != expected:
+  if expected != D:
     fatal(f"Expected patch dimension {expected}, got {D}", ValueError)
   grid = img_size // patch_size
-  if grid * patch_size != img_size or N != grid * grid:
+  if grid * patch_size != img_size or grid * grid != N:
     fatal("Patch count and image size do not match", ValueError)
   x = patches.reshape(B, grid, grid, patch_size, patch_size, channels)
   x = x.permute(0, 5, 1, 3, 2, 4)

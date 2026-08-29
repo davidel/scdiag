@@ -10,7 +10,8 @@ Output is an ImageFolder structure compatible with:
 
 Usage:
     python scripts/prepare_isic2019_cls.py --output_dir ./isic2019_grouped
-    python scripts/prepare_isic2019_cls.py --output_dir ./isic2019_grouped --group_by patient_id
+    python scripts/prepare_isic2019_cls.py --output_dir ./isic2019_grouped \
+        --group_by patient_id
 
 Data source: https://challenge.isic-archive.com/data/
 """
@@ -203,7 +204,7 @@ def load_ground_truth(csv_path):
       Dict mapping image_id to class index
   """
   labels = {}
-  with open(csv_path, "r") as f:
+  with open(csv_path) as f:
     reader = csv.DictReader(f)
     for row in reader:
       image_id = row["image"]
@@ -236,7 +237,7 @@ def load_metadata(csv_path):
       Dict mapping image_id to metadata dict
   """
   metadata = {}
-  with open(csv_path, "r") as f:
+  with open(csv_path) as f:
     reader = csv.DictReader(f)
     for row in reader:
       image_id = row["image"]
@@ -336,12 +337,10 @@ def group_split_by_attribute(
       train_examples.append(item)
 
   print("  Split by grouping:")
-  print(
-      f"    Groups: {len(train_groups)} train, {len(val_groups)} val, {len(test_groups)} test"
-  )
-  print(
-      f"    Images: {len(train_examples)} train, {len(val_examples)} val, {len(test_examples)} test"
-  )
+  print(f"    Groups: {len(train_groups)} train, "
+        f"{len(val_groups)} val, {len(test_groups)} test")
+  print(f"    Images: {len(train_examples)} train, "
+        f"{len(val_examples)} val, {len(test_examples)} test")
 
   return {
       "train": train_examples,

@@ -226,8 +226,8 @@ class TestCombinedFocalLoss:
         f"Higher melanoma weight ({loss_high:.4f}) should produce "
         f"higher loss than lower weight ({loss_low:.4f})")
 
-  def test_monotonicity_increasing_melanoma_multiplier_other_class_unaffected(self):
-    """Increasing the melanoma multiplier should NOT increase loss for non-melanoma labels."""
+  def test_monotonicity_other_class_unaffected(self):
+    """Melanoma multiplier must not increase loss for non-melanoma labels."""
     logits, targets = _make_batch(batch_size=32, seed=456)
     # Set all targets to class 1 (basal_cell_carcinoma)
     targets = torch.full((32,), 1)

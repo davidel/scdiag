@@ -152,9 +152,8 @@ def main():
 
     if zip_path.exists():
       if args.skip_download:
-        print(
-            f"  {zip_name} exists, skipping (use without --skip_download to re-download)"
-        )
+        print(f"  {zip_name} exists, skipping "
+              f"(use without --skip_download to re-download)")
         continue
       else:
         print(f"  {zip_name} exists, overwriting")

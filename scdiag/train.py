@@ -1215,12 +1215,26 @@ def main():
     if args.xgboost_model:
       # Access raw HF datasets (before proxy wrapping) for XGBoost.
       train_xgboost_on_backbone(
-          args,
           train_proxy.dataset,
           val_proxy.dataset,
           device,
-          num_labels=num_labels,
+          num_labels,
+          checkpoint_dir=args.checkpoint,
+          model_spec=args.model,
+          cache_dir=args.cache_dir,
+          proc_kwargs=args.proc_arg,
+          image_size=args.image_size,
+          output_path=args.xgboost_model,
           batch_size=args.batch_size,
+          use_gpu=args.xgb_use_gpu,
+          max_depth=args.xgb_max_depth,
+          n_estimators=args.xgb_n_estimators,
+          learning_rate=args.xgb_learning_rate,
+          subsample=args.xgb_subsample,
+          colsample_bytree=args.xgb_colsample_bytree,
+          min_child_weight=args.xgb_min_child_weight,
+          gamma=args.xgb_gamma,
+          reg_alpha=args.xgb_reg_alpha,
       )
 
 

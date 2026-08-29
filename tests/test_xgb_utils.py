@@ -67,7 +67,7 @@ class TestEvalXGBoost:
   """Tests for eval_xgboost()."""
 
   def test_returns_accuracy_and_per_class(self):
-    """Should return accuracy, per_class_accuracy, classification_report, confusion_matrix."""
+    """Should return accuracy, per_class_accuracy, report and confusion matrix."""
     rng = np.random.RandomState(42)
     features = rng.randn(40, 16).astype(np.float32)
     labels = rng.randint(0, 3, size=40)

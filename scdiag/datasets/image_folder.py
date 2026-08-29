@@ -51,10 +51,7 @@ def _is_split_dir(root):
   """Return True if *root* contains split sub-directories."""
   if (root / ".splits").exists():
     return True
-  for child in root.iterdir():
-    if child.is_dir() and child.name in _SPLIT_NAMES:
-      return True
-  return False
+  return any(child.is_dir() and child.name in _SPLIT_NAMES for child in root.iterdir())
 
 
 class ImageFolderDataset:

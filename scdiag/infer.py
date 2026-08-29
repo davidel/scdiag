@@ -114,10 +114,7 @@ def main(argv=None):
   args = parse_args(argv)
   setup_logging(args.log_level)
 
-  if args.device:
-    device = args.device
-  else:
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+  device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
   logging.info(f"Using device: {device}")
 
   model, processor = load_model_for_inference(

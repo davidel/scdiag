@@ -69,11 +69,11 @@ class TestMultiCropTransform:
     from PIL import Image
     pil = Image.fromarray(image.permute(1, 2, 0).numpy())
     crops = tf(pil)
-    g, l = tf.split_crops(crops)
+    g, local = tf.split_crops(crops)
     assert g.shape[0] == 2
     assert g.shape[2:] == (64, 64)
-    assert l.shape[0] == 4
-    assert l.shape[2:] == (32, 32)
+    assert local.shape[0] == 4
+    assert local.shape[2:] == (32, 32)
 
 
 class TestDINOModule:
@@ -85,23 +85,23 @@ class TestDINOModule:
   def test_forward_returns_loss(self):
     model = self._make_dino()
     g = torch.randn(2, 3, 32, 32)
-    l = torch.randn(4, 3, 32, 32)
-    loss, info = model(g, l)
+    local = torch.randn(4, 3, 32, 32)
+    loss, info = model(g, local)
     assert loss.ndim == 0
     assert "loss" in info
 
   def test_no_nan(self):
     model = self._make_dino()
     g = torch.randn(2, 3, 32, 32)
-    l = torch.randn(4, 3, 32, 32)
-    loss, _ = model(g, l)
+    local = torch.randn(4, 3, 32, 32)
+    loss, _ = model(g, local)
     assert not torch.isnan(loss)
 
   def test_backward(self):
     model = self._make_dino()
     g = torch.randn(2, 3, 32, 32)
-    l = torch.randn(4, 3, 32, 32)
-    loss, _ = model(g, l)
+    local = torch.randn(4, 3, 32, 32)
+    loss, _ = model(g, local)
     loss.backward()
     for p in model.student.parameters():
       if p.requires_grad:

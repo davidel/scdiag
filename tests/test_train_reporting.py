@@ -174,7 +174,7 @@ def test_log_metrics_are_correct(caplog):
     r.step(1, 4, 2.0, logits, targets, 1)
 
   # Window: loss=6.0/8=0.75, top1=100%, samples=8
-  lines = [l for l in caplog.text.splitlines() if "loss=0.7500" in l]
+  lines = [ln for ln in caplog.text.splitlines() if "loss=0.7500" in ln]
   assert len(lines) >= 1
   # Cumulative also 0.75 so (0.7500) should appear.
   assert "0.7500" in caplog.text

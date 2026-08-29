@@ -157,7 +157,8 @@ def test_sorted_by_probability():
   cm = _cm([[50, 30, 10, 5], [0, 100, 0, 0], [0, 0, 100, 0], [0, 0, 0, 100]])
   lines = confusion_row_strings(cm, top_n=10, min_prob=0.0)
   # Extract the confused class names in order of appearance.
-  part = lines[0].split("|")[1]  # " confused with: Class 1 (30.0%), Class 2 (10.0%), Class 3 (5.0%)"
+  part = lines[0].split("|")[1]
+  # " confused with: Class 1 (30.0%), Class 2 (10.0%), Class 3 (5.0%)"
   entries = part.strip().removeprefix("confused with: ").split(", ")
   names = [e.rsplit(" (", 1)[0] for e in entries]
   assert names == ["Class 1", "Class 2", "Class 3"]

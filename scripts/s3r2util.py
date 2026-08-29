@@ -570,10 +570,10 @@ def sync_local_to_r2(s3_client, local_dir, r2_bucket, r2_prefix, args):
               unit_scale=True,
               desc="Upload",
               disable=args.quiet) as pbar:
-      for local_path, r2_key, size in to_upload:
+      for local_path, r2_key, _size in to_upload:
         s3_client.upload_file(local_path, r2_bucket, r2_key, Callback=pbar.update)
   else:
-    for local_path, r2_key, size in to_upload:
+    for local_path, r2_key, _size in to_upload:
       s3_client.upload_file(local_path, r2_bucket, r2_key)
 
   # Delete.
@@ -637,7 +637,9 @@ def sync_r2_to_local(s3_client, r2_bucket, r2_prefix, local_dir, args):
 
   if args.dry_run:
     for r2_key, rel_path, size in to_download:
-      log(f"  download: r2://{r2_bucket}/{r2_key} -> {os.path.join(local_dir, rel_path)}  ({format_size(size)})",
+      log(
+          f"  download: r2://{r2_bucket}/{r2_key} -> "
+          f"{os.path.join(local_dir, rel_path)}  ({format_size(size)})",
           quiet=args.quiet)
     for rel_path in to_delete:
       log(f"  delete: {os.path.join(local_dir, rel_path)}", quiet=args.quiet)
@@ -659,7 +661,7 @@ def sync_r2_to_local(s3_client, r2_bucket, r2_prefix, local_dir, args):
               unit_scale=True,
               desc="Download",
               disable=args.quiet) as pbar:
-      for r2_key, rel_path, size in to_download:
+      for r2_key, rel_path, _size in to_download:
         local_path = os.path.join(local_dir, rel_path)
         local_dir_path = os.path.dirname(local_path)
         if local_dir_path:
@@ -669,7 +671,7 @@ def sync_r2_to_local(s3_client, r2_bucket, r2_prefix, local_dir, args):
         remote_mtime = remote[r2_key][1]
         os.utime(local_path, (remote_mtime, remote_mtime))
   else:
-    for r2_key, rel_path, size in to_download:
+    for r2_key, rel_path, _size in to_download:
       local_path = os.path.join(local_dir, rel_path)
       local_dir_path = os.path.dirname(local_path)
       if local_dir_path:
@@ -910,11 +912,7 @@ def handle_mv(args, s3_client):
     # --- Single source ------------------------------------------------
     _, dst_prefix = parse_r2_path(destination)
     src_basename = os.path.basename(src_key)
-
-    if is_dir:
-      dest_key = dst_prefix + src_basename
-    else:
-      dest_key = dst_prefix
+    dest_key = dst_prefix + src_basename if is_dir else dst_prefix
 
     log(f"Moving r2://{src_bucket}/{src_key} -> r2://{dst_bucket}/{dest_key}",
         quiet=args.quiet)

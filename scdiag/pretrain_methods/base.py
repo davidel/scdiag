@@ -79,16 +79,22 @@ class PretrainMethod(ABC):
     from scdiag.pretrain import build_pretrain_transform
     return build_pretrain_transform(image_size)
 
-  def validate(self, model, images, num_samples):
+  def validate(self, model, images, num_samples):  # noqa: B027
     """Generate validation visualizations.
 
         Called during validation and image logging.  Return a tensor of
         images ``(N, C, H, W)`` suitable for ``save_image``, or ``None``
         if the method does not produce pixel-space visualizations.
+
+        Intentionally an optional hook (no abstract): the default no-op
+        is correct for methods without pixel-space visualizations.
         """
 
-  def on_epoch_end(self, model, epoch, writer):
+  def on_epoch_end(self, model, epoch, writer):  # noqa: B027
     """Hook called at the end of each training epoch.
 
         Default is a no-op.  Override for e.g. teacher-momentum ramping.
+
+        Intentionally an optional hook (no abstract): not every method
+        needs end-of-epoch behavior.
         """

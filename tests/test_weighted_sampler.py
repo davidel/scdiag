@@ -1,4 +1,5 @@
 """Tests for scdiag.datasets.weighted_sampler."""
+import pytest
 import torch
 from torch.utils.data import WeightedRandomSampler
 
@@ -9,7 +10,7 @@ class _FakeDataset:
   """Minimal dataset backed by a list of label dicts."""
 
   def __init__(self, labels):
-    self._data = [{"label": int(l)} for l in labels]
+    self._data = [{"label": int(lbl)} for lbl in labels]
 
   def __len__(self):
     return len(self._data)
@@ -95,25 +96,19 @@ class TestBuildWeightedSampler:
 
   def test_missing_multipliers_raises(self):
     ds = _FakeDataset([0, 1])
-    try:
+    with pytest.raises(ValueError):
       build_weighted_sampler(ds,
                              num_labels=2,
                              label_column="label",
                              weight_mode="combined")
-      assert False, "Expected ValueError"
-    except ValueError:
-      pass
 
   def test_invalid_weight_mode_raises(self):
     ds = _FakeDataset([0, 1])
-    try:
+    with pytest.raises(ValueError):
       build_weighted_sampler(ds,
                              num_labels=2,
                              label_column="label",
                              weight_mode="bogus")
-      assert False, "Expected ValueError"
-    except ValueError:
-      pass
 
   def test_single_class(self):
     labels = [0] * 100

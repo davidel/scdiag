@@ -10,8 +10,10 @@ Output is an ImageFolder structure compatible with:
 
 Usage:
     python scripts/prepare_ham10000.py --output_dir ./ham10000_grouped
-    python scripts/prepare_ham10000.py --output_dir ./ham10000_grouped --test_size 0.15 --val_size 0
-    python scripts/prepare_ham10000.py --output_dir ./ham10000_grouped --min_resolution 224
+    python scripts/prepare_ham10000.py --output_dir ./ham10000_grouped \
+        --test_size 0.15 --val_size 0
+    python scripts/prepare_ham10000.py --output_dir ./ham10000_grouped \
+        --min_resolution 224
 """
 
 import argparse
@@ -89,17 +91,15 @@ def group_split_by_lesion_id(
 
   print("\nSplit by lesion_id:")
   if n_val > 0:
-    print(
-        f"  Lesion IDs: {len(train_lesion_ids)} train, {len(val_lesion_ids)} val, {len(test_lesion_ids)} test"
-    )
-    print(
-        f"  Images: {len(train_examples)} train, {len(val_examples)} val, {len(test_examples)} test"
-    )
+    print(f"  Lesion IDs: {len(train_lesion_ids)} train, "
+          f"{len(val_lesion_ids)} val, {len(test_lesion_ids)} test")
+    print(f"  Images: {len(train_examples)} train, "
+          f"{len(val_examples)} val, {len(test_examples)} test")
   else:
-    print(
-        f"  Lesion IDs: {len(train_lesion_ids)} train, {len(test_lesion_ids)} test (no val)"
-    )
-    print(f"  Images: {len(train_examples)} train, {len(test_examples)} test (no val)")
+    print(f"  Lesion IDs: {len(train_lesion_ids)} train, "
+          f"{len(test_lesion_ids)} test (no val)")
+    print(f"  Images: {len(train_examples)} train, "
+          f"{len(test_examples)} test (no val)")
 
   return {
       "train": train_examples,
@@ -117,10 +117,13 @@ def save_as_imagefolder(
   """Save splits as ImageFolder structure.
 
     Args:
-        splits: Dict with 'train', 'val', 'test' keys containing lists of (image, label) tuples
-        output_dir: Output directory path
-        label_names: Optional dict mapping label_id -> class_name. If None, uses numeric names.
-        min_resolution: If set, skip images whose width or height is smaller than this value.
+        splits: Dict with 'train', 'val', 'test' keys holding (image, label)
+            tuples.
+        output_dir: Output directory path.
+        label_names: Optional dict mapping label_id -> class_name.
+            If None, uses numeric names.
+        min_resolution: If set, skip images whose width or height is
+            smaller than this value.
     """
   output_path = Path(output_dir)
 
@@ -139,10 +142,7 @@ def save_as_imagefolder(
 
     # Save images
     for label, images in sorted(label_to_images.items()):
-      if label_names:
-        class_name = label_names[label]
-      else:
-        class_name = str(label)
+      class_name = label_names[label] if label_names else str(label)
 
       class_dir = output_path / split_name / class_name
       class_dir.mkdir(parents=True, exist_ok=True)
