@@ -520,9 +520,9 @@ def test_trend_disambiguates_duplicate_suffixes(caplog):
   assert any("head_b" in msg for msg in param_lines)
 
 
-def test_zero_element_parameter_is_skipped():
-  """Regression: zero-element params (e.g. unused head with num_labels=0
-  during self-supervised pre-training) must not crash RMS computation."""
+def test_zero_element_parameter_reports_zero_stats():
+  """Regression: zero-element params (e.g. a headless model) must not
+  crash RMS computation; they report zero norm statistics."""
   model = nn.Sequential()
   model.fc = nn.Linear(10, 5)
   with warnings.catch_warnings():
