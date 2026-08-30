@@ -37,6 +37,7 @@ def _make_patched_init(hf_ds, label_column=None):
     self._label_names = []
     self._label2id = {}
     self._label_col = None
+    self._column_map = {}
     self._ds = hf_ds
     if _label_col is not None:
       self._detect_labels(label_column=_label_col)
@@ -91,7 +92,7 @@ class TestImageFolderDictReturns:
         for i in range(3):
           Image.new("RGB", (8, 8)).save(os.path.join(d, f"{i}.jpg"))
       ds = ImageFolderDataset(root)
-      arr = ds.labels_array()
+      arr = ds.labels_array
       assert isinstance(arr, np.ndarray)
       assert arr.dtype == np.int64
       assert len(arr) == 6
@@ -120,6 +121,7 @@ class TestHFDatasetDictReturns:
     ds = _HFDataset.__new__(_HFDataset)
     ds.name = "test"
     ds._image_column = "image"
+    ds._column_map = {"image": "image", "label": "label"}
     ds._ds = hf_ds
     ds._detect_labels(label_column="label")
     item = ds[0]
@@ -134,6 +136,7 @@ class TestHFDatasetDictReturns:
     ds = _HFDataset.__new__(_HFDataset)
     ds.name = "test"
     ds._image_column = "image"
+    ds._column_map = {"image": "image"}
     ds._ds = hf_ds
     ds._label_col = None
     ds._label_names = []
@@ -150,7 +153,7 @@ class TestHFDatasetDictReturns:
     ds._image_column = "image"
     ds._ds = hf_ds
     ds._detect_labels(label_column="label")
-    arr = ds.labels_array()
+    arr = ds.labels_array
     assert isinstance(arr, np.ndarray)
     assert arr.dtype == np.int64
     assert len(arr) == 12

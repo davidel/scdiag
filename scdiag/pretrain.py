@@ -64,7 +64,12 @@ from scdiag.storage_utils import save_checkpoint
 
 
 def build_pretrain_transform(image_size=448):
-  """Augmentations for SimMIM pre-training."""
+  """Default augmentations for pre-training.
+
+    Resize to *image_size* (shortest side), center crop, then horizontal
+    and vertical flips.  Used by any method without a ``build_transform``
+    override (e.g. I-JEPA).
+    """
   return v2.Compose([
       v2.Resize(image_size, interpolation=InterpolationMode.BICUBIC),
       v2.CenterCrop(image_size),
@@ -129,6 +134,12 @@ def build_pretrain_dataset(args, needs_labels=False, transform=None):
   )
   if needs_labels:
     ensemble.ensure_label_space()
+    if ensemble.unlabeled_datasets:
+      fatal(
+          "These datasets provide no labels, but this pre-training method "
+          f"requires them: {', '.join(ensemble.unlabeled_datasets)}.  Pass "
+          f"only labeled datasets (or drop the unlabeled ones), or switch "
+          f"to a label-free method (e.g. --method simmim).", ValueError)
   if transform is None:
     transform = build_pretrain_transform(args.image_size)
   dataset = _TransformWrapper(ensemble, transform, image_field=ensemble.image_column)
@@ -136,8 +147,8 @@ def build_pretrain_dataset(args, needs_labels=False, transform=None):
     # Methods that ignore labels get image-only items: a mixed ensemble
     # (some sources labeled, some not) would otherwise produce batches
     # with inconsistent keys that default_collate cannot handle.
-    dataset = FieldSectorDataset(
-        dataset, fields={ensemble.image_column: ensemble.image_column})
+    dataset = FieldSectorDataset(dataset,
+                                 fields={ensemble.image_column: ensemble.image_column})
   logging.info(ensemble.summary())
   return dataset, ensemble
 

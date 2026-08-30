@@ -6,6 +6,7 @@ indexing.  All ``__getitem__`` calls return ``dict[str, Any]`` with named
 fields (e.g. ``"image"``, ``"label"``).
 """
 
+import bisect
 import logging
 
 import numpy as np
@@ -32,6 +33,7 @@ class _HFDataset:
     self._label_col = None
     self._label_names = []
     self._label2id = {}
+    self._column_map = {}
     from datasets import load_dataset
     logging.info(f"Loading HF dataset '{name}' (split={split}) ...")
     ds = load_dataset(name, split=split, cache_dir=cache_dir, token=hf_token)
@@ -58,6 +60,7 @@ class _HFDataset:
     self._label_col = label_column
     if self._label_col is None:
       self._label_col = HFDatasetProxy.detect_label_column(self._ds)
+    self._build_column_map()
     if self._label_col is None:
       return
     if self._label_col not in self._ds.column_names:
@@ -88,11 +91,46 @@ class _HFDataset:
   def label_names(self):
     return list(self._label_names)
 
+  @property
+  def column_map(self):
+    """``{SOURCE_COL: ENSEMBLE_COL}`` mapping applied by ``__getitem__``."""
+    return dict(self._column_map)
+
+  def _build_column_map(self):
+    """Build the source-to-ensemble output column mapping.
+
+        The ensemble unilaterally names its outputs ``"image"`` and
+        ``"label"``; sub-datasets remap their own column names onto
+        those keys.
+        """
+    column_map = {self._image_column: "image"}
+    if self._label_col is not None:
+      column_map[self._label_col] = "label"
+    self._column_map = column_map
+
+  @property
   def labels_array(self):
-    """Return a numpy array of integer labels for all samples."""
-    raw = np.array(self._ds[self._label_col])
-    mapped = np.array([self._label2id.get(v, v) for v in raw])
-    return mapped.astype(np.int64)
+    """Numpy array of dataset-local integer labels for all samples."""
+    if self._label_col is None:
+      return np.array([], dtype=np.int64)
+    raw = np.asarray(self._ds[self._label_col])
+    mapped = []
+    for value in raw:
+      if isinstance(value, str):
+        if value not in self._label2id:
+          fatal(
+              f"Dataset '{self.name}': unknown label value {value!r} in "
+              f"column '{self._label_col}'.  Known labels: "
+              f"{sorted(self._label2id)}", ValueError)
+        mapped.append(self._label2id[value])
+      else:
+        label_id = int(value)
+        if label_id < 0 or label_id >= len(self._label_names):
+          fatal(
+              f"Dataset '{self.name}': local label id {label_id} is out "
+              f"of range for {len(self._label_names)} classes", ValueError)
+        mapped.append(label_id)
+    return np.array(mapped, dtype=np.int64)
 
   def __len__(self):
     return len(self._ds)
@@ -105,14 +143,14 @@ class _HFDataset:
       if not isinstance(image, Image.Image):
         image = Image.open(image)
       image = image.convert("RGB")
-      result = {"image": image}
+      result = {self._image_column: image}
       if self._label_col is not None:
         raw_label = row[self._label_col]
-        result["label"] = self._label2id.get(raw_label, raw_label)
+        result[self._label_col] = self._label2id.get(raw_label, raw_label)
       return result
 
     row, _ = getitem_retry(idx, load, len(self._ds))
-    return row
+    return {self._column_map[k]: v for k, v in row.items()}
 
 
 class DatasetEnsemble:
@@ -128,8 +166,6 @@ class DatasetEnsemble:
     self._offsets = None
     self._global_label_names = []
     self._global_label2id = {}
-    self._image_column = None
-    self._label_column = None
 
     for cfg in dataset_configs:
       name = cfg["name"]
@@ -168,7 +204,6 @@ class DatasetEnsemble:
       fatal("No datasets loaded successfully", RuntimeError)
 
     self._build_offsets()
-    self._resolve_columns()
 
     if self.has_labels:
       self._build_global_label_space()
@@ -180,38 +215,20 @@ class DatasetEnsemble:
       offsets.append(offsets[-1] + len(ds))
     self._offsets = offsets
 
-  def _resolve_columns(self):
-    """Determine image/label column names from the first dataset."""
-    if not self._datasets:
-      return
-    ds0 = self._datasets[0]
-    if isinstance(ds0, _HFDataset):
-      self._image_column = ds0._image_column
-      self._label_column = ds0._label_col
-    else:
-      self._image_column = "image"
-      self._label_column = "label" if ds0.has_labels else None
-
   @property
   def image_column(self):
-    return self._image_column
+    """Canonical image key emitted by every sub-dataset."""
+    return "image"
 
   @property
   def label_column(self):
-    return self._label_column
+    """Canonical label key, or ``None`` when nothing is labeled."""
+    return "label" if self.has_labels else None
 
-  def _validate_labels(self):
-    """Raise ValueError if any dataset cannot provide labels."""
-    for ds in self._datasets:
-      if not ds.has_labels:
-        fatal(
-            f"Dataset '{ds.name}' ({type(ds).__name__}) does not "
-            f"provide labels, but the selected pre-training method "
-            f"requires them.  Use a HuggingFace dataset with a "
-            f"label column, or switch to a label-free method "
-            f"(e.g. --method simmim).",
-            ValueError,
-        )
+  @property
+  def unlabeled_datasets(self):
+    """Names of sub-datasets that provide no labels."""
+    return [ds.name for ds in self._datasets if not ds.has_labels]
 
   def _build_global_label_space(self):
     """Map per-dataset label names to a shared integer space.
@@ -221,27 +238,42 @@ class DatasetEnsemble:
     if not self._global_label_names:
       all_names = set()
       for ds in self._datasets:
-        all_names.update(ds.label_names)
+        if ds.has_labels:
+          all_names.update(ds.label_names)
       self._global_label_names = sorted(all_names)
       self._global_label2id = {
           name: i for i, name in enumerate(self._global_label_names)
       }
 
   def ensure_label_space(self):
-    """Validate per-dataset labels and build the global label space.
+    """Build the global label space across labeled sub-datasets.
 
-        Public entry point for callers that iterate a label-requiring
-        dataset outside :meth:`__init__`.  Idempotent, so it is cheap to
-        call defensively.
+        Mixed ensembles (some sources labeled, some not) are supported:
+        unlabeled datasets are skipped with a warning.  Public entry
+        point for callers that iterate a label-requiring dataset outside
+        :meth:`__init__`.  Idempotent, so it is cheap to call
+        defensively.
         """
-    if self.has_labels:
-      self._validate_labels()
-      self._build_global_label_space()
+    unlabeled = self.unlabeled_datasets
+    if unlabeled:
+      logging.warning(
+          "ensure_label_space: %d of %d datasets provide no labels and "
+          "will be skipped for label-based sampling: %s", len(unlabeled),
+          len(self._datasets), ", ".join(unlabeled))
+    self._build_global_label_space()
 
   def _remap_label(self, ds, local_label):
-    """Convert a dataset-local label to the global integer id."""
-    name = ds.label_names[local_label]
-    return self._global_label2id[name]
+    """Convert a dataset-local label id to the global integer id."""
+    if isinstance(local_label, bool) or not isinstance(local_label, (int, np.integer)):
+      fatal(
+          f"Dataset '{ds.name}': expected an integer label id, got "
+          f"{local_label!r} ({type(local_label).__name__})", ValueError)
+    label_id = int(local_label)
+    if label_id < 0 or label_id >= len(ds.label_names):
+      fatal(
+          f"Dataset '{ds.name}': local label id {label_id} is out of "
+          f"range for {len(ds.label_names)} classes", ValueError)
+    return self._global_label2id[ds.label_names[label_id]]
 
   @property
   def has_labels(self):
@@ -261,27 +293,31 @@ class DatasetEnsemble:
 
   @property
   def labels_array(self):
-    """Flat numpy array of global integer labels for every sample."""
-    if not self.has_labels:
-      return None
+    """Global integer labels aligned with ``__getitem__`` positions.
+
+        Requires every sub-dataset to provide labels; fatals otherwise
+        (use :attr:`unlabeled_datasets` to inspect mixed ensembles).
+        """
+    unlabeled = self.unlabeled_datasets
+    if unlabeled:
+      fatal(
+          "DatasetEnsemble.labels_array requires every dataset to provide "
+          f"labels; these do not: {', '.join(unlabeled)}", ValueError)
     parts = []
     for ds in self._datasets:
-      if not ds.has_labels:
-        continue
-      local = ds.labels_array()
+      local = ds.labels_array
       global_ids = np.array(
           [self._global_label2id[ds.label_names[int(lbl)]] for lbl in local],
           dtype=np.int64,
       )
       parts.append(global_ids)
-    return np.concatenate(parts) if parts else None
+    return np.concatenate(parts) if parts else np.array([], dtype=np.int64)
 
   def __len__(self):
     return self._offsets[-1] if self._offsets else 0
 
   def _get_item(self, idx):
     """Resolve a valid global index and load its image (and label)."""
-    import bisect
     ds_idx = bisect.bisect_right(self._offsets, idx) - 1
     local_idx = idx - self._offsets[ds_idx]
     ds = self._datasets[ds_idx]

@@ -23,6 +23,7 @@ def _make_patched_init(hf_ds, label_column=None):
     self._label_names = []
     self._label2id = {}
     self._label_col = None
+    self._column_map = {}
     self._ds = hf_ds
     if forced_label_column is not None:
       self._detect_labels(label_column=forced_label_column)

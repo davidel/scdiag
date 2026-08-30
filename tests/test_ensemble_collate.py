@@ -127,9 +127,14 @@ class TestFieldSectorOnMixedEnsemble:
                           image_column=ensemble.image_column)
     assert model.training
 
-  def test_label_requiring_method_still_fails_on_mixed(self, tmp_path):
-    """Methods needing labels must refuse mixed ensembles (unchanged)."""
-    with pytest.raises(ValueError, match="does not.*provide labels"):
+  def test_label_requiring_method_rejects_mixed(self, tmp_path):
+    """Methods needing labels refuse mixed ensembles.
+
+      BalancedBatchSampler requires every sample to carry a label, so
+      ``build_pretrain_dataset`` fails fast when any source is unlabeled,
+      naming the offending datasets.
+      """
+    with pytest.raises(ValueError, match="provide no labels"):
       build_pretrain_dataset(_pretrain_args(tmp_path),
                              needs_labels=True,
                              transform=_to_tensor_transform())

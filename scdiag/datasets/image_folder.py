@@ -178,6 +178,15 @@ class ImageFolderDataset:
   def label_names(self):
     return list(self._label_names)
 
+  @property
+  def column_map(self):
+    """``{SOURCE_COL: ENSEMBLE_COL}`` mapping applied by ``__getitem__``."""
+    column_map = {"image": "image"}
+    if self.has_labels:
+      column_map["label"] = "label"
+    return column_map
+
+  @property
   def labels_array(self):
     return self._labels
 
