@@ -7,7 +7,7 @@ other training scripts.
 import torch
 from sklearn.metrics import confusion_matrix, f1_score, precision_recall_fscore_support
 
-from scdiag.model_utils import set_train_mode
+from scdiag.model_utils import model_mode
 
 
 def _compute_classification_metrics(all_labels, all_preds, num_labels, id2label):
@@ -77,13 +77,12 @@ def evaluate_performance(model,
   (including the original) while the loss is always computed on the
   original image only.
   """
-  set_train_mode(model, "eval")
   amp_enabled = (amp_dtype is not None and device.type == "cuda")
   eval_loss, correct_top1, total_samples = 0.0, 0, 0
   all_preds = []
   all_orig_preds = []
   all_labels = []
-  with torch.no_grad():
+  with model_mode(model, "eval"), torch.no_grad():
     for images, targets in dataloader:
       images, targets = images.to(device), targets.to(device)
       with torch.amp.autocast("cuda", dtype=amp_dtype, enabled=amp_enabled):

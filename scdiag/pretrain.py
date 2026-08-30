@@ -48,7 +48,7 @@ from scdiag.datasets.ensemble import DatasetEnsemble
 from scdiag.gpu_utils import gpu_stats_str
 from scdiag.grad_monitor import GradMonitor
 from scdiag.logging_utils import fatal, setup_logging
-from scdiag.model_utils import enable_grad_checkpointing, set_train_mode
+from scdiag.model_utils import enable_grad_checkpointing, model_mode, set_train_mode
 from scdiag.models.registry import load_model
 from scdiag.optim_factory import (
     build_param_groups,
@@ -141,27 +141,33 @@ def log_validation_images(method,
                           writer,
                           global_step,
                           device,
+                          image_column,
                           num_samples=8):
   """Log method-specific validation images to TensorBoard.
 
-  Calls ``method.validate()`` which returns optional reconstruction
-  images.  If the method returns ``None`` (e.g. DINOv2), nothing is
-  logged.
+  Pulls a single batch from *loader*, extracts the images stored under
+  ``batch[image_column]`` (the loader yields dicts), slices the first
+  *num_samples* and hands them to ``method.validate()``, which returns
+  optional reconstruction images.  If the method returns ``None``
+  (methods without pixel-space visualisations, e.g. I-JEPA), nothing
+  is logged.
+
+  The model is restored to train mode even when nothing is logged.
   """
-  model.eval()
-  raw = next(iter(loader))
-  if isinstance(raw, (tuple, list)):
-    images = type(raw)(v[:num_samples].to(device) for v in raw)
-  else:
-    images = raw[:num_samples].to(device)
-  with torch.no_grad():
-    recon = method.validate(model, images, num_samples)
-  if recon is None:
-    return
-  # recon is (N, C, H, W) — log first sample.
-  writer.add_image("recon/original", images[0], global_step)
-  writer.add_image("recon/reconstructed", recon[0].clamp(0, 1), global_step)
-  set_train_mode(model, 'train')
+  with model_mode(model, "eval"):
+    batch = next(iter(loader))
+    raw = batch[image_column]
+    if isinstance(raw, (tuple, list)):
+      images = type(raw)(v[:num_samples].to(device) for v in raw)
+    else:
+      images = raw[:num_samples].to(device)
+    with torch.no_grad():
+      recon = method.validate(model, images, num_samples)
+    if recon is None:
+      return
+    # recon is (N, C, H, W) — log first sample.
+    writer.add_image("recon/original", images[0], global_step)
+    writer.add_image("recon/reconstructed", recon[0].clamp(0, 1), global_step)
 
 
 def train_one_epoch(
@@ -293,7 +299,13 @@ def train_one_epoch(
       window_loss = 0.0
 
     if (vis_every > 0 and global_step % vis_every == 0 and writer is not None):
-      log_validation_images(method, model, loader, writer, global_step, device)
+      log_validation_images(method,
+                            model,
+                            loader,
+                            writer,
+                            global_step,
+                            device,
+                            image_column=ensemble.image_column)
 
   avg_loss = total_loss / max(total_samples, 1)
   elapsed = time.time() - start_time

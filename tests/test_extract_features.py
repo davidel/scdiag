@@ -144,12 +144,30 @@ class TestCollectFeatures:
     np.testing.assert_allclose(feat_a, feat_b, atol=1e-6)
     np.testing.assert_allclose(feat_a, feat_c, atol=1e-6)
 
-  def test_model_in_eval_mode(self):
-    """Model should be in eval mode after collect_features."""
+  def test_mode_restored(self):
+    """collect_features must not leave the model in a different mode."""
     model = _TinyClassifier(hidden_size=64)
     dataset = _SimpleDataset(n=8, channels=3, height=32, width=32)
     device = torch.device("cpu")
 
     model.train()
     collect_features(model, dataset, device, batch_size=4)
+    assert model.training
+
+    model.eval()
+    collect_features(model, dataset, device, batch_size=4)
     assert not model.training
+
+  def test_eval_during_extraction(self):
+    """Model must be in eval mode while features are extracted."""
+    model = _TinyClassifier(hidden_size=64)
+    dataset = _SimpleDataset(n=8, channels=3, height=32, width=32)
+    device = torch.device("cpu")
+
+    seen = []
+    handle = model.classifier.register_forward_hook(
+        lambda m, i, o: seen.append(model.training))
+    collect_features(model, dataset, device, batch_size=4)
+    handle.remove()
+
+    assert seen and not any(seen)

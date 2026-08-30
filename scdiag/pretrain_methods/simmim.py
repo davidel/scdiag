@@ -1,6 +1,7 @@
 """SimMIM masked-image modeling pre-training method."""
 import torch
 
+from scdiag.model_utils import model_mode
 from scdiag.models.convvit.masked_encoder import ConvViTMaskedImageEncoder
 from scdiag.models.simmim import SimMIM, simmim_loss, unpatchify
 from scdiag.pretrain_methods.base import PretrainMethod
@@ -124,14 +125,14 @@ class SimMIMMethod(PretrainMethod):
 
   def validate(self, model, images, num_samples):
     """Return reconstructed images for validation logging."""
-    model.eval()
-    samples = images[:num_samples].to(next(model.parameters()).device)
-    mask = make_mask(samples, model.patch_size, model.mask_ratio)
-    output, _target = model(samples, mask)
-    recon = unpatchify(
-        output,
-        patch_size=model.patch_size,
-        img_size=samples.shape[2],
-        channels=model.in_channels,
-    )
-    return recon
+    with model_mode(model, "eval"):
+      samples = images[:num_samples].to(next(model.parameters()).device)
+      mask = make_mask(samples, model.patch_size, model.mask_ratio)
+      output, _target = model(samples, mask)
+      recon = unpatchify(
+          output,
+          patch_size=model.patch_size,
+          img_size=samples.shape[2],
+          channels=model.in_channels,
+      )
+      return recon

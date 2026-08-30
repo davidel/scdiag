@@ -390,20 +390,20 @@ def collect_features(model, dataset, device, batch_size=128):
         features: np.ndarray of shape [N, hidden_size], dtype float32.
         labels: np.ndarray of shape [N], dtype int64.
     """
-  model.eval()
-  loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+  with model_mode(model, "eval"):
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
-  features_list = []
-  labels_list = []
+    features_list = []
+    labels_list = []
 
-  with torch.no_grad():
-    for pixel_values, batch_labels in loader:
-      pixel_values = pixel_values.to(device)
-      features = extract_backbone_features(model, pixel_values)
-      features_list.append(features.cpu().numpy())
-      labels_list.append(batch_labels.numpy())
+    with torch.no_grad():
+      for pixel_values, batch_labels in loader:
+        pixel_values = pixel_values.to(device)
+        features = extract_backbone_features(model, pixel_values)
+        features_list.append(features.cpu().numpy())
+        labels_list.append(batch_labels.numpy())
 
-  return np.concatenate(features_list), np.concatenate(labels_list)
+    return np.concatenate(features_list), np.concatenate(labels_list)
 
 
 def enable_grad_checkpointing(model):
