@@ -48,15 +48,15 @@ class TestUVitoForward:
 class TestUVitoExtractFeatures:
 
   def test_extract_via_wrapper(self):
-    """UVitoForClassification.extract_backbone_features returns the
+    """UVitoAdapter.extract_backbone_features returns the
     CLS-flattened tensor, same as _backbone_features."""
     from types import SimpleNamespace
 
-    from scdiag.models.uvito.loader import UVitoForClassification
+    from scdiag.models.uvito.loader import UVitoAdapter
 
     raw = _make_uvito(num_classes=3, img_size=64)
     config = SimpleNamespace(num_labels=3, id2label={}, label2id={}, image_size=64)
-    wrapped = UVitoForClassification(raw, config)
+    wrapped = UVitoAdapter(raw, config)
 
     x = torch.randn(2, 3, 64, 64)
     feat = wrapped.extract_backbone_features(x)

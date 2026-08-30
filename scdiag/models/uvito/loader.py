@@ -16,8 +16,8 @@ from scdiag.models.registry import ModelOutput, register_model, register_process
 from scdiag.models.uvito.model import UVito
 
 
-class UVitoForClassification(nn.Module):
-  """Thin wrapper that makes UVito match the scdiag / HF interface.
+class UVitoAdapter(nn.Module):
+  """Thin adapter that makes UVito match the scdiag / HF interface.
 
   * ``forward(pixel_values=)`` → ``ModelOutput`` with ``.logits``
   * ``config.id2label`` / ``config.label2id`` accessible
@@ -68,19 +68,23 @@ def load_uvito(
   device : str or torch.device
   checkpoint_path : str or None
   """
-  config = SimpleNamespace(**{
-      "num_labels": num_labels,
-      "id2label": id2label,
-      "label2id": label2id,
-      "image_size": image_size,
-      **kwargs,
-  })
+  config = SimpleNamespace(
+      **{
+          "num_labels": num_labels,
+          "id2label": id2label,
+          "label2id": label2id,
+          "image_size": image_size,
+          **kwargs,
+      })
 
   model = UVito(
       num_classes=num_labels,
       img_size=image_size,
-      **{k: v for k, v in kwargs.items()
-         if k not in ("num_labels", "id2label", "label2id", "image_size")},
+      **{
+          k: v
+          for k, v in kwargs.items()
+          if k not in ("num_labels", "id2label", "label2id", "image_size")
+      },
   )
 
   if checkpoint_path and os.path.isfile(checkpoint_path):
@@ -94,7 +98,7 @@ def load_uvito(
   else:
     logging.info("UVito: training from random init (no checkpoint)")
 
-  wrapped = UVitoForClassification(model, config)
+  wrapped = UVitoAdapter(model, config)
   wrapped.to(device)
 
   logging.info(

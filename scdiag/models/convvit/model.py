@@ -116,7 +116,8 @@ class CustomPatchTransformer(nn.Module):
         num_heads=min(num_heads, 8),
         dropout=dropout,
     )
-    self.head = nn.Linear(embed_dim, num_classes)
+    self.head = (nn.Linear(embed_dim, num_classes) if num_classes > 0 else None
+                )  # timm convention: 0 = no head
     self.apply(self._init_weights)
 
   def _init_weights(self, m):
@@ -170,7 +171,8 @@ class CustomPatchTransformer(nn.Module):
     embeddings = self.patch_embed(x)  # [B, N, D]
     cls_out, spatial_out = self._run_transformer(embeddings)
     pooled = self.cls_guided_pool(cls_out, spatial_out)  # [B, D]
-    return self.head(pooled)
+    # Headless mode (timm convention): pooled backbone features.
+    return pooled if self.head is None else self.head(pooled)
 
   def encoder_forward(self, patch_embeddings):
     """Run the transformer encoder on pre-computed patch embeddings.

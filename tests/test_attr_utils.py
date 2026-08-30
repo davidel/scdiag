@@ -116,7 +116,7 @@ class TestEnableGradCheckpointing:
 
   def test_custom_model_wrapped(self):
     from scdiag.model_utils import enable_grad_checkpointing
-    from scdiag.models.convvit.loader import ConvViTForClassification
+    from scdiag.models.convvit.loader import ConvViTAdapter
     from scdiag.models.convvit.model import CustomPatchTransformer
 
     inner = CustomPatchTransformer(num_classes=2, img_size=32)
@@ -125,7 +125,7 @@ class TestEnableGradCheckpointing:
       id2label = {0: 'a', 1: 'b'}
       label2id = {'a': 0, 'b': 1}
 
-    wrapped = ConvViTForClassification(inner, FakeConfig())
+    wrapped = ConvViTAdapter(inner, FakeConfig())
     assert wrapped.model.use_grad_checkpoint is False
     enable_grad_checkpointing(wrapped)
     assert wrapped.model.use_grad_checkpoint is True

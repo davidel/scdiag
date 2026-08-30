@@ -140,14 +140,15 @@ def load_model(
 
     Custom models are dispatched to the function registered via
     ``@register_model``.  HuggingFace models are loaded via
-    ``AutoModelForImageClassification``.
+    ``AutoModelForImageClassification``; ``num_labels == 0`` follows the
+    timm convention and loads the headless backbone via ``AutoModel``.
 
     Returns:
         ``torch.nn.Module``
     """
   # Keep this import local so importing the registry does not eagerly load
   # the Transformers dependency.
-  from transformers import AutoModelForImageClassification
+  from transformers import AutoModel, AutoModelForImageClassification
 
   parsed = parse_model_name(model_name)
 
@@ -165,15 +166,22 @@ def load_model(
         **kwargs,
     )
 
-  logging.info("Loading HuggingFace model '%s'.", parsed.model)
-  model = AutoModelForImageClassification.from_pretrained(
-      parsed.model,
-      num_labels=num_labels,
-      id2label=id2label,
-      label2id=label2id,
-      cache_dir=cache_dir,
-      ignore_mismatched_sizes=True,
-  )
+  if num_labels == 0:
+    # timm convention: num_labels == 0 -> load the headless backbone
+    # (e.g. ViTModel instead of ViTForImageClassification); used by the
+    # self-supervised pre-training paths.
+    logging.info("Loading headless HuggingFace model '%s'.", parsed.model)
+    model = AutoModel.from_pretrained(parsed.model, cache_dir=cache_dir)
+  else:
+    logging.info("Loading HuggingFace model '%s'.", parsed.model)
+    model = AutoModelForImageClassification.from_pretrained(
+        parsed.model,
+        num_labels=num_labels,
+        id2label=id2label,
+        label2id=label2id,
+        cache_dir=cache_dir,
+        ignore_mismatched_sizes=True,
+    )
   model.to(device)
   return model
 

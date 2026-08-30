@@ -239,14 +239,14 @@ class TestConvViTForward:
       assert f.ndim == 4
 
 
-class TestConvViTForClassification:
-  """Tests for the protocol wrapper."""
+class TestConvViTAdapter:
+  """Tests for the protocol adapter."""
 
   @pytest.fixture
   def wrapped_model(self):
     from types import SimpleNamespace
 
-    from scdiag.models.convvit.loader import ConvViTForClassification
+    from scdiag.models.convvit.loader import ConvViTAdapter
 
     model = CustomPatchTransformer(
         num_classes=5,
@@ -274,7 +274,7 @@ class TestConvViTForClassification:
             "vasc": 4
         },
     )
-    return ConvViTForClassification(model, config)
+    return ConvViTAdapter(model, config)
 
   def test_forward_returns_model_output(self, wrapped_model):
     x = torch.randn(2, 3, 224, 224)

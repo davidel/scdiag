@@ -11,6 +11,7 @@ The text after the ``:`` is the HF model name/path (``backbone``).
 
 import logging
 
+from scdiag.logging_utils import fatal
 from scdiag.models.cls_model_wrapper.model import ClsModelWrapper
 from scdiag.models.registry import register_model
 
@@ -27,6 +28,12 @@ def load_cls_model_wrapper(*,
                            device="cpu",
                            **kwargs):
   """Instantiate :class:`ClsModelWrapper` and move to *device*."""
+  if num_labels == 0:
+    fatal(
+        "cls_model_wrapper always requires a classification head "
+        "(num_labels > 0). For headless encoders use the backbone model "
+        "directly (e.g. --model timm:... or the HF name).", ValueError)
+
   model = ClsModelWrapper(
       backbone_name=backbone,
       num_labels=num_labels,

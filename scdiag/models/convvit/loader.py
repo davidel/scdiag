@@ -16,8 +16,8 @@ from scdiag.models.convvit.processor import ConvViTProcessor
 from scdiag.models.registry import ModelOutput, register_model, register_processor
 
 
-class ConvViTForClassification(nn.Module):
-  """Thin wrapper that makes ConvViT match the scdiag / HF interface.
+class ConvViTAdapter(nn.Module):
+  """Thin adapter that makes ConvViT match the scdiag / HF interface.
 
     * ``forward(pixel_values=)`` → ``ModelOutput`` with ``.logits``
     * ``config.id2label`` / ``config.label2id`` accessible
@@ -93,19 +93,20 @@ def load_convvit(
         command line.
     """
   # Allow CLI / caller overrides via --model_arg (e.g. depth=6 num_heads=8).
-  config = SimpleNamespace(**{
-      "image_size": image_size,
-      "embed_dim": 768,
-      "num_heads": 12,
-      "depth": 12,
-      "dropout": 0.0,
-      "drop_path_rate": 0.1,
-      "num_conv_layers": 4,
-      "num_labels": num_labels,
-      "id2label": id2label,
-      "label2id": label2id,
-      **kwargs,
-  })
+  config = SimpleNamespace(
+      **{
+          "image_size": image_size,
+          "embed_dim": 768,
+          "num_heads": 12,
+          "depth": 12,
+          "dropout": 0.0,
+          "drop_path_rate": 0.1,
+          "num_conv_layers": 4,
+          "num_labels": num_labels,
+          "id2label": id2label,
+          "label2id": label2id,
+          **kwargs,
+      })
 
   logging.info(
       "Building ConvViT  (image_size=%d, num_labels=%d, depth=%d, "
@@ -141,7 +142,7 @@ def load_convvit(
   else:
     logging.info("ConvViT: training from random init (no checkpoint)")
 
-  wrapped = ConvViTForClassification(model, config)
+  wrapped = ConvViTAdapter(model, config)
   wrapped.to(device)
 
   logging.info(

@@ -80,10 +80,14 @@ class UVito(nn.Module):
     # Step 7: Dropout and final head
     self.pos_drop = nn.Dropout(p=dropout)
     self.head_norm = nn.LayerNorm(transformer_dim)
-    # Xavier-init classification head (DINOv2 convention: trunc_normal 0.02)
-    self.mlp_head = nn.Linear(transformer_dim * num_cls_tokens, num_classes)
-    nn.init.trunc_normal_(self.mlp_head.weight, std=0.02)
-    nn.init.zeros_(self.mlp_head.bias)
+    if num_classes == 0:
+      # timm convention: no classification head (self-supervised mode).
+      self.mlp_head = None
+    else:
+      # Xavier-init classification head (DINOv2 convention: trunc_normal 0.02)
+      self.mlp_head = nn.Linear(transformer_dim * num_cls_tokens, num_classes)
+      nn.init.trunc_normal_(self.mlp_head.weight, std=0.02)
+      nn.init.zeros_(self.mlp_head.bias)
 
   def _backbone_features(self, x):
     """Run everything up to the CLS-flattened representation.
@@ -130,8 +134,9 @@ class UVito(nn.Module):
     return final_cls_states.reshape(batch_size, -1)
 
   def _head(self, cls_features):
-    """Classification head: LayerNorm → Linear."""
-    return self.mlp_head(self.head_norm(cls_features))
+    """Classification head: LayerNorm → Linear (passthrough if headless)."""
+    return (cls_features if self.mlp_head is None else self.mlp_head(
+        self.head_norm(cls_features)))
 
   def forward(self, x):
     return self._head(self._backbone_features(x))
