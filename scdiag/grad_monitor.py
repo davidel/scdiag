@@ -164,8 +164,13 @@ class GradMonitor:
 
     for name, p in self._model.named_parameters():
       if p.requires_grad:
-        entry = {}
         numel = p.numel()
+        if numel == 0:
+          # Zero-element parameters (e.g. an unused classification head
+          # with num_labels=0 during self-supervised pre-training) have
+          # no meaningful norm statistics; RMS would divide by zero.
+          continue
+        entry = {}
         rms_scale = numel**0.5
 
         param_rms = float(p.data.norm()) / rms_scale

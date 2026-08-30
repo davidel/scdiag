@@ -1,6 +1,7 @@
 """Tests for scdiag.grad_monitor.GradMonitor."""
 
 import logging
+import warnings
 
 import torch
 import torch.nn as nn
@@ -517,3 +518,35 @@ def test_trend_disambiguates_duplicate_suffixes(caplog):
   # Should see both head_a and head_b in the trend table.
   assert any("head_a" in msg for msg in param_lines)
   assert any("head_b" in msg for msg in param_lines)
+
+
+def test_zero_element_parameter_is_skipped():
+  """Regression: zero-element params (e.g. unused head with num_labels=0
+  during self-supervised pre-training) must not crash RMS computation."""
+  model = nn.Sequential()
+  model.fc = nn.Linear(10, 5)
+  with warnings.catch_warnings():
+    warnings.simplefilter("ignore", UserWarning)  # nn.Linear warns on out=0
+    model.unused_head = nn.Linear(5, 0)  # zero-element weight and bias
+
+  mon = GradMonitor(model, log_every=1)
+  x = torch.randn(4, 10)
+  target = torch.randn(4, 5)
+
+  # Step through the real sub-network only (unused_head outputs nothing).
+  loss = nn.functional.mse_loss(model.fc(x), target)
+  loss.backward()  # would raise ZeroDivisionError inside monitor below
+
+  with caplog_disabled():
+    mon.step(1)  # must not raise
+
+
+class caplog_disabled:
+  """Context manager suppressing log noise for one-off assertions."""
+
+  def __enter__(self):
+    logging.disable(logging.CRITICAL)
+    return self
+
+  def __exit__(self, *exc):
+    logging.disable(logging.NOTSET)
