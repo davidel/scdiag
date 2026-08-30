@@ -320,7 +320,7 @@ def test_gpr_no_flag_when_below_ceiling(caplog):
   assert "GPR" not in caplog.text
 
 
-# ---- norm_history tests ----
+# norm_history tests
 
 
 def test_no_trend_when_norm_history_disabled(caplog):

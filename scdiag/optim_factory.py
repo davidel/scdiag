@@ -93,11 +93,6 @@ def build_param_groups(named_params, lr, weight_decay, lr_groups=None):
   return groups
 
 
-# ---------------------------------------------------------------------------
-# Layer-wise learning-rate decay (LLRD)
-# ---------------------------------------------------------------------------
-
-
 def _infer_depth(names):
   """Build a trie from dotted parameter names.
 

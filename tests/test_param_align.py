@@ -387,7 +387,7 @@ class TestEdgeCases:
     old_sd = {}
     new_sd = {}
 
-    # --- Pretrain checkpoint (SimMIM wrapping ConvViTForClassification) ---
+    # Pretrain checkpoint (SimMIM wrapping ConvViTForClassification)
     # ConvPatchEmbedding stem.
     for i in range(4):
       old_sd[f"encoder.model.patch_embed.blocks.{i}.conv1.weight"] = (torch.zeros(
@@ -415,7 +415,7 @@ class TestEdgeCases:
     old_sd["decoder.weight"] = torch.zeros(D, D, 1, 1)
     old_sd["decoder.bias"] = torch.zeros(D)
 
-    # --- Fine-tune target (standalone ConvViTForClassification) ---
+    # Fine-tune target (standalone ConvViTForClassification)
     # ConvPatchEmbedding stem (same architecture).
     for i in range(4):
       new_sd[f"model.patch_embed.blocks.{i}.conv1.weight"] = (torch.zeros(D, D, 3, 3))

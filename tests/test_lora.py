@@ -572,9 +572,6 @@ class TestCheckpointDictFreezeCombinations:
     trainable = {n for n, p in model.named_parameters() if p.requires_grad}
     return sum(1 for k in model.state_dict() if k in trainable and "lora_" not in k)
 
-  # ------------------------------------------------------------------ #
-  #  Case 1: no --lora, no --freeze (everything trainable)
-  # ------------------------------------------------------------------ #
   def test_no_lora_no_freeze_save_frozen_false(self):
     """Plain model, save_frozen=False → all params saved (all are trainable)."""
     model = _TinyModel()
@@ -605,9 +602,6 @@ class TestCheckpointDictFreezeCombinations:
     )
     assert len(sd["model_state_dict"]) == len(model.state_dict())
 
-  # ------------------------------------------------------------------ #
-  #  Case 2: no --lora, --freeze (backbone frozen, head trainable)
-  # ------------------------------------------------------------------ #
   def test_no_lora_with_freeze_save_frozen_false(self):
     """Freeze backbone, save_frozen=False → only head weights saved."""
     model = _TinyModel()
@@ -645,9 +639,6 @@ class TestCheckpointDictFreezeCombinations:
     )
     assert len(sd["model_state_dict"]) == len(model.state_dict())
 
-  # ------------------------------------------------------------------ #
-  #  Case 3: --lora, no --freeze (only LoRA adapters trainable)
-  # ------------------------------------------------------------------ #
   def test_lora_no_freeze_save_frozen_false(self):
     """LoRA without --freeze, save_frozen=False → no non-lora weights saved.
 
@@ -698,9 +689,6 @@ class TestCheckpointDictFreezeCombinations:
     assert len(ckpt_sd) == len(full_non_lora)
     assert sd["lora_state_blob"] == blob
 
-  # ------------------------------------------------------------------ #
-  #  Case 4: --lora + --freeze (LoRA adapters + head trainable)
-  # ------------------------------------------------------------------ #
   def test_lora_with_freeze_save_frozen_false(self):
     """LoRA + freeze, save_frozen=False → only head weights saved (no backbone).
 
@@ -761,9 +749,6 @@ class TestCheckpointDictFreezeCombinations:
     assert len(ckpt_sd) == len(full_non_lora)
     assert sd["lora_state_blob"] == blob
 
-  # ------------------------------------------------------------------ #
-  #  Sanity: lora_ keys never appear in model_state_dict
-  # ------------------------------------------------------------------ #
   def test_lora_keys_never_in_model_state_dict(self):
     """lora_ keys must never leak into model_state_dict."""
     model = _TinyModel()

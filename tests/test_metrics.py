@@ -10,11 +10,6 @@ def _cm(rows):
   return np.array(rows, dtype=np.int64)
 
 
-# ------------------------------------------------------------------
-# Basic behaviour
-# ------------------------------------------------------------------
-
-
 def test_perfect_classification():
   cm = _cm([[10, 0, 0], [0, 10, 0], [0, 0, 10]])
   lines = confusion_row_strings(cm)
@@ -43,11 +38,6 @@ def test_three_classes():
   assert "confused with" in lines[0]
 
 
-# ------------------------------------------------------------------
-# id2label
-# ------------------------------------------------------------------
-
-
 def test_id2label_used():
   cm = _cm([[80, 20], [10, 90]])
   id2label = {"0": "cat", "1": "dog"}
@@ -71,11 +61,6 @@ def test_id2label_missing_key_falls_back():
   lines = confusion_row_strings(cm, id2label={"0": "cat"}, min_prob=0.0)
   # Class 1 has no label -> falls back to "Class 1".
   assert "Class 1 (20.0%)" in lines[0]
-
-
-# ------------------------------------------------------------------
-# top_n
-# ------------------------------------------------------------------
 
 
 def test_top_n_limits_output():
@@ -102,11 +87,6 @@ def test_top_n_three():
   assert confused_part.count("(") == 3
 
 
-# ------------------------------------------------------------------
-# min_prob
-# ------------------------------------------------------------------
-
-
 def test_min_prob_filters_small_confusions():
   # Class 0: 95 correct, 4 confused with Class 1, 1 confused with Class 2.
   cm = _cm([[95, 4, 1], [0, 100, 0], [0, 0, 100]])
@@ -125,11 +105,6 @@ def test_min_prob_zero_shows_all():
   assert "Class 1 (5.0%)" in lines[0]
   assert "Class 2 (3.0%)" in lines[0]
   assert "Class 3 (2.0%)" in lines[0]
-
-
-# ------------------------------------------------------------------
-# Edge cases
-# ------------------------------------------------------------------
 
 
 def test_zero_row_skipped():
@@ -162,11 +137,6 @@ def test_sorted_by_probability():
   entries = part.strip().removeprefix("confused with: ").split(", ")
   names = [e.rsplit(" (", 1)[0] for e in entries]
   assert names == ["Class 1", "Class 2", "Class 3"]
-
-
-# ------------------------------------------------------------------
-# Format string tests
-# ------------------------------------------------------------------
 
 
 def test_no_confusions_format():

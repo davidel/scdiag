@@ -197,7 +197,7 @@ def handle_cp(args, s3_client):
           "directory or trailing '/').")
 
   for source in sources:
-    # --- Wildcard R2 source ------------------------------------------
+    # Wildcard R2 source
     if has_wildcard(source):
       src_bucket, src_prefix = parse_r2_path(source)
       if not src_bucket:
@@ -268,7 +268,7 @@ def handle_cp(args, s3_client):
         log(f"Copied {len(matches)} object(s).", quiet=args.quiet)
       continue
 
-    # --- Single source ------------------------------------------------
+    # Single source
     src_bucket, src_key = parse_r2_path(source)
 
     if is_dir:
@@ -867,7 +867,7 @@ def handle_mv(args, s3_client):
     # creating double-slash R2 URLs.
     src_key = source.split("/", 3)[3].lstrip("/")
 
-    # --- Wildcard source ---------------------------------------------
+    # Wildcard source
     if has_wildcard(source):
       src_prefix = src_key  # already normalized
       matches = expand_wildcard(s3_client, source)
@@ -909,7 +909,7 @@ def handle_mv(args, s3_client):
         fatal(f"mv failed: {e}")
       continue
 
-    # --- Single source ------------------------------------------------
+    # Single source
     _, dst_prefix = parse_r2_path(destination)
     src_basename = os.path.basename(src_key)
     dest_key = dst_prefix + src_basename if is_dir else dst_prefix

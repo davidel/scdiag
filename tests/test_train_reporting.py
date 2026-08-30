@@ -263,11 +263,6 @@ def test_no_tensorboard_calls_when_writer_none():
   r.step(0, 4, 1.0, logits, targets, 0)
 
 
-# ------------------------------------------------------------------
-# Edge cases
-# ------------------------------------------------------------------
-
-
 def test_single_batch_epoch():
   """Epoch with exactly 1 batch and log_every=1."""
   r = _make_reporter(total_batches=1, log_every=1)

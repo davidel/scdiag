@@ -5,10 +5,6 @@ import torch.nn as nn
 
 from scdiag.attr_utils import MISSING, get_attribute, maybe_call, maybe_setattr
 
-# ---------------------------------------------------------------------------
-# _getattr / get_attribute
-# ---------------------------------------------------------------------------
-
 
 class TestGetAttribute:
 
@@ -33,11 +29,6 @@ class TestGetAttribute:
       x = None
 
     assert get_attribute(Pseudo(), 'x') is MISSING
-
-
-# ---------------------------------------------------------------------------
-# maybe_call
-# ---------------------------------------------------------------------------
 
 
 class TestMaybeCall:
@@ -68,11 +59,6 @@ class TestMaybeCall:
   def test_non_callable_returns_missing(self):
     t = torch.tensor([1.0])
     assert maybe_call(t, 'shape') is MISSING
-
-
-# ---------------------------------------------------------------------------
-# maybe_setattr
-# ---------------------------------------------------------------------------
 
 
 class TestMaybeSetattr:
@@ -115,11 +101,6 @@ class TestMaybeSetattr:
     model = nn.Linear(4, 2)
     maybe_setattr(model, 'brand.new.attr', True)
     assert not hasattr(model, 'brand')
-
-
-# ---------------------------------------------------------------------------
-# Integration: maybe_call / maybe_setattr with enable_grad_checkpointing
-# ---------------------------------------------------------------------------
 
 
 class TestEnableGradCheckpointing:

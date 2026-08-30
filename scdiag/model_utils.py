@@ -224,7 +224,7 @@ def load_model_for_inference(
     """
   ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
 
-  # --- Resolve num_labels (priority: explicit > checkpoint metadata) ---
+  # Resolve num_labels (priority: explicit > checkpoint metadata)
   if num_labels is None:
     num_labels = ckpt.get("num_labels")
   if num_labels is None and "id2label" in ckpt:
@@ -424,7 +424,7 @@ def enable_grad_checkpointing(model):
 
   Logs a warning if no known checkpointing mechanism is found.
   """
-  # --- timm native API (unwrapped or via wrapper) ---
+  # timm native API (unwrapped or via wrapper)
   if maybe_call(model, 'set_grad_checkpointing', enable=True) is not MISSING:
     logging.info("Gradient checkpointing enabled (timm native API).")
     return
@@ -432,7 +432,7 @@ def enable_grad_checkpointing(model):
     logging.info("Gradient checkpointing enabled (timm native API via wrapper).")
     return
 
-  # --- HuggingFace native API (via wrapper or unwrapped) ---
+  # HuggingFace native API (via wrapper or unwrapped)
   if maybe_call(model, 'backbone.gradient_checkpointing_enable') is not MISSING:
     logging.info("Gradient checkpointing enabled (HuggingFace API via wrapper).")
     return
@@ -440,7 +440,7 @@ def enable_grad_checkpointing(model):
     logging.info("Gradient checkpointing enabled (HuggingFace native API).")
     return
 
-  # --- Custom model per-block flag (unwrapped or via wrapper) ---
+  # Custom model per-block flag (unwrapped or via wrapper)
   if maybe_setattr(model, 'use_grad_checkpoint', True) is not MISSING:
     logging.info("Gradient checkpointing enabled (per-block, transformer loop).")
     return

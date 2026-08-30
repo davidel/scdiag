@@ -208,7 +208,7 @@ class GradMonitor:
         if (v["grad_norm"] > 0 and v["grad_norm"] > median * self._imbalance_factor):
           anomalies.append(f"IMBALANCED({name})")
 
-    # ---- accumulate history ----
+    # Accumulate history
     if self._norm_history > 0:
       for name, s in stats.items():
         self._norm_buf[name].append((global_step, s["grad_norm"], s["param_norm"]))
@@ -280,7 +280,7 @@ class GradMonitor:
         ])
       lines.extend(format_table(headers, table_rows, align=aligns, prefix="  "))
 
-    # ---- norm trend summary ----
+    # Norm trend summary
     if self._norm_history > 0 and self._norm_buf:
       lines.extend(self._log_trends(global_step))
 
@@ -303,7 +303,7 @@ class GradMonitor:
       if span <= 0:
         continue
 
-      # --- grad norm trend ---
+      # Grad norm trend
       if first_gn > 0:
         gn_change = (last_gn - first_gn) / first_gn * 100
         gn_vals = [e[1] for e in buf]
@@ -314,7 +314,7 @@ class GradMonitor:
         gn_vals = [e[1] for e in buf]
         gn_direction = "---"
 
-      # --- param norm trend ---
+      # Param norm trend
       if first_pn > 0:
         pn_change = (last_pn - first_pn) / first_pn * 100
         pn_vals = [e[2] for e in buf]
