@@ -5,6 +5,7 @@ import torch.nn as nn
 from scdiag.classifiers import register_classifier
 from scdiag.classifiers.base import BaseClassifier
 from scdiag.models.attention_pooling import CLSGuidedAttentionPooling
+from scdiag.transformer_utils import build_transformer_encoder
 
 
 @register_classifier("cls_attention")
@@ -67,7 +68,7 @@ class Classifier(BaseClassifier):
           dropout=encoder_dropout,
           batch_first=True,
       )
-      self.encoder = nn.TransformerEncoder(
+      self.encoder = build_transformer_encoder(
           encoder_layer,
           num_layers=num_encoder_layers,
       )

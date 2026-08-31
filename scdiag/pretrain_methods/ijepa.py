@@ -13,6 +13,7 @@ import torch.nn.functional as F
 from scdiag.model_utils import set_train_mode
 from scdiag.pretrain_methods.base import PretrainMethod
 from scdiag.pretrain_methods.registry import register_method
+from scdiag.transformer_utils import build_transformer_encoder
 
 
 class _PatchEmbedder(nn.Module):
@@ -64,7 +65,13 @@ class _Predictor(nn.Module):
         batch_first=True,
         norm_first=True,
     )
-    self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=depth)
+    # The nested-tensor fast path is post-norm only and unused here (no
+    # padding mask), so disable it to avoid the construction-time warning.
+    self.transformer = build_transformer_encoder(
+        encoder_layer,
+        num_layers=depth,
+        enable_nested_tensor=False,
+    )
     self.output_proj = nn.Linear(predictor_dim, embed_dim)
 
   def forward(self, context, mask_indices):
