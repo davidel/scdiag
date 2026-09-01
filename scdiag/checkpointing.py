@@ -16,6 +16,7 @@ import torch
 from scdiag.attr_utils import MISSING, get_attribute
 from scdiag.logging_utils import fatal
 from scdiag.param_align import AlignConfig, align_state_dicts, report_to_str
+from scdiag.storage_utils import save_checkpoint
 
 
 def rename_keys(state_dict, patterns):
@@ -330,6 +331,50 @@ def filter_state_dict(ckpt_state, model_state):
     else:
       filtered[k] = v
   return filtered, skipped
+
+
+def should_save_periodic(global_step, save_every):
+  """Return True when *global_step* hits a positive *save_every* multiple.
+
+    Both training scripts increment *global_step* once per optimizer step
+    (gradient accumulation already folded in), so the trigger is
+    accumulation-agnostic. ``save_every <= 0`` disables periodic saving.
+  """
+  return save_every > 0 and global_step > 0 and global_step % save_every == 0
+
+
+def save_periodic_checkpoint(model,
+                             optimizer,
+                             scheduler,
+                             args,
+                             epoch,
+                             step,
+                             states_to_save=None,
+                             scaler=None,
+                             extra=None):
+  """Save a mid-epoch periodic checkpoint to ``args.checkpoint + "_latest.pt"``.
+
+    Records *epoch* verbatim so callers pass the last fully completed epoch
+    (``epoch - 1`` inside a training loop): on resume the interrupted epoch
+    restarts instead of being skipped.  *extra* is forwarded to
+    :func:`checkpoint_dict` (e.g. ``method_state`` or ``lora_state_blob``).
+  """
+  save_checkpoint(
+      checkpoint_dict(
+          model,
+          optimizer,
+          scheduler,
+          epoch,
+          states_to_save=states_to_save,
+          scaler=scaler,
+          global_step=step,
+          save_frozen=getattr(args, "save_frozen", True),
+          **(extra or {}),
+      ),
+      args.checkpoint + "_latest.pt",
+      remote_uri=args.remote_checkpoint,
+  )
+  logging.info("Periodic checkpoint saved at step %d.", step)
 
 
 def resume_checkpoint(ckpt_latest, ckpt_best, model, device):

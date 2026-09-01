@@ -8,6 +8,7 @@ from scdiag.checkpointing import (
     filter_state_dict,
     format_count,
     load_checkpoint_weights,
+    should_save_periodic,
 )
 from scdiag.storage_utils import save_checkpoint
 
@@ -25,6 +26,26 @@ class TestFormatCount:
 
   def test_gigabytes(self):
     assert format_count(3_221_225_472) == "3.00G"
+
+
+class TestShouldSavePeriodic:
+
+  def test_fires_at_multiple(self):
+    assert should_save_periodic(500, 500) is True
+    assert should_save_periodic(1000, 500) is True
+
+  def test_no_fire_off_multiple(self):
+    assert should_save_periodic(499, 500) is False
+    assert should_save_periodic(501, 500) is False
+    assert should_save_periodic(1, 500) is False
+
+  def test_disabled_for_zero_or_negative_interval(self):
+    assert should_save_periodic(500, 0) is False
+    assert should_save_periodic(500, -1) is False
+
+  def test_never_fires_at_step_zero(self):
+    assert should_save_periodic(0, 500) is False
+    assert should_save_periodic(0, 0) is False
 
 
 class TestFilterStateDict:

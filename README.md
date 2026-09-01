@@ -369,6 +369,7 @@ scdiag-pretrain --method supcon \
 | `--lr_group` | `None` | Per-parameter-group learning rates (repeatable). Format: `"REGEX=LR"`. |
 | `--llrd_decay` | `None` | Layer-wise learning rate decay factor. |
 | `--vis_every` | `0` | Log reconstruction visualisation every N steps (SimMIM only). |
+| `--save_every` | `500` | Save checkpoint every N optimizer steps. 0 disables. |
 | `--model_arg` | `{}` | Override model configuration (repeatable). |
 | `--proc_arg` | `{}` | Override processor configuration (repeatable). |
 | `--optimizer` | `AdamW` | `torch.optim` optimizer class name or `.py` script path. |
@@ -682,7 +683,7 @@ resume point.
 | `--norm_history` | `0` | Keep last N norm snapshots for trend analysis. |
 | `--trend_top_n` | `10` | Show top N params in trend table. `0` = show all. |
 | `--grad_clip` | `1.0` | Max gradient norm for clipping. `0` disables. |
-| `--save_every` | `500` | Save checkpoint every N steps. |
+| `--save_every` | `500` | Save checkpoint every N optimizer steps. 0 disables. |
 | `--num_workers` | `2` | DataLoader worker processes. |
 | `--log_level` | `INFO` | Logging level. |
 | `--log_dir` | `None` | TensorBoard log directory (default: `<checkpoint_dir>/logs`). Requires the `tensorboard` package (installed by the `dev` extra). |

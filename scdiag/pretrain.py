@@ -35,6 +35,8 @@ from scdiag.checkpointing import (
     parse_state_flags,
     restore_training_state,
     resume_checkpoint,
+    save_periodic_checkpoint,
+    should_save_periodic,
 )
 from scdiag.cli_args import (
     add_checkpoint_args,
@@ -204,6 +206,9 @@ def train_one_epoch(
     monitor=None,
     grad_accum_steps=1,
     scaler=None,
+    save_every=0,
+    args=None,
+    scheduler=None,
 ):
   """Run one epoch of self-supervised pre-training.
 
@@ -213,9 +218,14 @@ def train_one_epoch(
     When *scaler* is provided (float16 AMP), gradient scaling is applied
     to avoid underflow of small gradients.
 
+    When *save_every* > 0, a periodic checkpoint is written to
+    ``args.checkpoint + "_latest.pt"`` every *save_every* optimizer steps
+    (recording ``epoch - 1`` as the last fully completed epoch).
+
     Returns ``(avg_loss, global_step)``.
   """
   set_train_mode(model, 'train')
+  states_to_save = parse_state_flags(args.state_save)
   total_loss = 0.0
   total_samples = 0
   start_time = time.time()
@@ -274,6 +284,24 @@ def train_one_epoch(
       optimizer.zero_grad(set_to_none=True)
 
       global_step += 1
+
+      # Mid-epoch periodic checkpoint. Records *epoch - 1* (the last fully
+      # completed epoch): on resume the interrupted epoch restarts instead
+      # of being skipped. The running loss average is unavailable mid-epoch,
+      # and the resume path does not consume it.
+      if should_save_periodic(global_step, save_every):
+        save_periodic_checkpoint(
+            model,
+            optimizer,
+            scheduler,
+            args,
+            epoch - 1,
+            global_step,
+            states_to_save=states_to_save,
+            extra={
+                "method_state": method.get_checkpoint_state(model, args),
+            },
+        )
 
     bs = images.shape[0]
     total_loss += loss.item() * bs * grad_accum_steps
@@ -494,6 +522,12 @@ def parse_args(argv=None):
       default=0,
       help="Log reconstruction visualisation to TensorBoard "
       "every N steps. 0 (default) = disabled.",
+  )
+  parser.add_argument(
+      "--save_every",
+      type=int,
+      default=500,
+      help="Save checkpoint every N optimizer steps. 0 disables.",
   )
 
   parser.add_argument(
@@ -768,6 +802,7 @@ def main(argv=None):
       start_epoch * (len(loader) // args.grad_accum_steps),
   )
   del ckpt_extra
+
   grad_monitor = None
   if args.grad_monitor >= 0:
     grad_monitor = GradMonitor(
@@ -803,6 +838,9 @@ def main(argv=None):
           monitor=grad_monitor,
           grad_accum_steps=args.grad_accum_steps,
           scaler=scaler,
+          save_every=args.save_every,
+          args=args,
+          scheduler=scheduler,
       )
       writer.add_scalar("Train/loss_epoch", avg_loss, epoch)
       if scheduler is not None:

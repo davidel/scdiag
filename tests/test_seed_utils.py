@@ -106,6 +106,14 @@ class TestTrainFlags:
     assert args.seed == 42
     assert args.deterministic is False
     assert args.grad_accum_steps == 1
+    assert args.save_every == 500
+
+  def test_pretrain_save_every_override(self):
+    from scdiag.pretrain import parse_args
+
+    args = parse_args(
+        ["--method", "simmim", "--datasets", "dummy", "--save_every", "100"])
+    assert args.save_every == 100
 
   def test_pretrain_grad_accum_registered_once(self):
     """Regression guard: pretrain.py must not re-register shared flags.

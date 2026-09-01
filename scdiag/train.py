@@ -22,7 +22,9 @@ from scdiag.checkpointing import (
     parse_state_flags,
     restore_training_state,
     resume_checkpoint,
+    save_periodic_checkpoint,
     serialize_lora_state,
+    should_save_periodic,
 )
 from scdiag.cli_args import (
     add_checkpoint_args,
@@ -526,7 +528,7 @@ def parse_args(argv=None):
       "--save_every",
       type=int,
       default=500,
-      help="Save checkpoint every N steps.",
+      help="Save checkpoint every N optimizer steps. 0 disables.",
   )
   parser.add_argument(
       "--num_workers",
@@ -758,6 +760,8 @@ def train_one_epoch(
     writer=None,
     monitor=None,
     global_step=0,
+    save_every=0,
+    best_macro_f1=0.0,
 ):
   """Train for one epoch.
 
@@ -767,8 +771,13 @@ def train_one_epoch(
     *global_step* is the running count of actual optimizer steps across all
     epochs (used for the gradient monitor so it receives contiguous step
     numbers).  The updated value is returned.
+
+    When *save_every* > 0, a periodic checkpoint is written to
+    ``args.checkpoint + "_latest.pt"`` every *save_every* optimizer steps
+    (recording ``epoch - 1`` as the last fully completed epoch).
     """
   set_train_mode(model, "train")
+  states_to_save = parse_state_flags(args.state_save)
   total_batches = len(dataloader)
   reporter = TrainReporting(
       total_batches=total_batches,
@@ -826,6 +835,25 @@ def train_one_epoch(
         optimizer.step()
       optimizer.zero_grad(set_to_none=True)
       global_step += 1
+
+      # Mid-epoch periodic checkpoint. Records *epoch - 1* (the last fully
+      # completed epoch): on resume the interrupted epoch restarts instead
+      # of being skipped.
+      if should_save_periodic(global_step, save_every):
+        save_periodic_checkpoint(
+            model,
+            optimizer,
+            scheduler,
+            args,
+            epoch - 1,
+            global_step,
+            states_to_save=states_to_save,
+            scaler=scaler,
+            extra={
+                "best_macro_f1": best_macro_f1,
+                "lora_state_blob": serialize_lora_state(model) if args.lora else None,
+            },
+        )
 
     with torch.no_grad():
       orig_targets = (targets if not use_mixup else
@@ -1141,6 +1169,8 @@ def main():
           writer=writer,
           monitor=grad_monitor,
           global_step=optimizer_global_step,
+          save_every=args.save_every,
+          best_macro_f1=best_macro_f1,
       )
 
       if scheduler is not None:
