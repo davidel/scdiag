@@ -102,6 +102,7 @@ def load_convvit(
           "dropout": 0.0,
           "drop_path_rate": 0.1,
           "num_conv_layers": 4,
+          "num_cls_tokens": 1,
           "num_labels": num_labels,
           "id2label": id2label,
           "label2id": label2id,
@@ -109,10 +110,11 @@ def load_convvit(
       })
 
   logging.info(
-      "Building ConvViT  (image_size=%d, num_labels=%d, depth=%d, "
-      "num_heads=%d, embed_dim=%d)",
+      "Building ConvViT  (image_size=%d, num_labels=%d, num_cls_tokens=%d, "
+      "depth=%d, num_heads=%d, embed_dim=%d)",
       config.image_size,
       config.num_labels,
+      config.num_cls_tokens,
       config.depth,
       config.num_heads,
       config.embed_dim,
@@ -121,6 +123,7 @@ def load_convvit(
   model = CustomPatchTransformer(
       num_classes=config.num_labels,
       img_size=config.image_size,
+      num_cls_tokens=config.num_cls_tokens,
       embed_dim=config.embed_dim,
       num_heads=config.num_heads,
       depth=config.depth,

@@ -6,11 +6,11 @@ import torch
 from scdiag.models.convvit.loader import load_convvit
 from scdiag.models.convvit.masked_encoder import ConvViTMaskedImageEncoder
 from scdiag.models.simmim import (
-  SimMIM,
-  patchify,
-  random_mask,
-  simmim_loss,
-  unpatchify,
+    SimMIM,
+    patchify,
+    random_mask,
+    simmim_loss,
+    unpatchify,
 )
 
 
@@ -127,18 +127,14 @@ class TestSimMIM:
 
   @pytest.fixture
   def simmim_model(self):
-    """Build a small ConvViT encoder and wrap in SimMIM."""
-    id2label = {0: "akiec", 1: "bcc", 2: "bkl", 3: "df", 4: "mel", 5: "nv", 6: "vasc"}
-    label2id = {v: k for k, v in id2label.items()}
+    """Build a small headless ConvViT encoder and wrap in SimMIM."""
     encoder = load_convvit(
         image_size=224,
-        num_labels=7,
-        id2label=id2label,
-        label2id=label2id,
+        num_labels=0,
+        id2label={},
+        label2id={},
         device="cpu",
     )
-    encoder.head = torch.nn.Identity()
-    encoder.cls_guided_pool = torch.nn.Identity()
     model = SimMIM(
         ConvViTMaskedImageEncoder(encoder),
         decoder_dim=768,

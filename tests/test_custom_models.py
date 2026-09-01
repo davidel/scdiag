@@ -221,6 +221,26 @@ class TestConvViTForward:
         p.grad is not None and p.grad.abs().sum() > 0 for p in model.parameters())
     assert has_grad
 
+  def test_headless_multi_cls_tokens(self):
+    """num_cls_tokens > 1 flattens all CLS tokens in headless mode."""
+    model = CustomPatchTransformer(
+        num_classes=0,
+        img_size=224,
+        num_cls_tokens=2,
+        embed_dim=768,
+        num_heads=12,
+        depth=2,
+        dropout=0.0,
+        drop_path_rate=0.0,
+        num_conv_layers=2,
+    )
+    x = torch.randn(2, 3, 224, 224)
+    out = model(x)
+    assert out.shape == (2, 2 * 768)
+    # Headless mode must not build classifier-path parameters.
+    assert model.cls_guided_pool is None
+    assert model.head is None
+
   def test_conv_stem_features(self, model):
     """ConvViT's conv stem produces spatial feature maps."""
     x = torch.randn(1, 3, 224, 224)

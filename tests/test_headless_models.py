@@ -25,19 +25,58 @@ class TestConvViTHeadless:
     model = load_model("convvit", num_labels=0, image_size=64)
     _assert_no_zero_element_params(model)
     assert model.model.head is None  # adapter -> raw model under .model
+    # No classifier-specific pooling either: headless mode must leave no
+    # learnable parameters outside the pre-training forward path.
+    assert model.model.cls_guided_pool is None
+    assert model.model.num_cls_tokens == 1
 
-  def test_forward_returns_pooled_features(self):
-    """Headless: ModelOutput whose logits ARE the pooled features."""
+  def test_headless_no_inert_params(self):
+    """Every requires_grad param must sit on the pre-training forward path.
+
+    Regression guard for GradMonitor false ``STL`` reports: headless
+    encoders must expose no learnable parameters that only the
+    classification forward path would exercise.
+    """
+    model = load_model("convvit", num_labels=0, image_size=64)
+    inert = [
+        n for n, p in model.named_parameters()
+        if p.requires_grad and n.startswith("model.cls_guided_pool.")
+    ]
+    assert inert == [], f"inert classifier-path parameters found: {inert}"
+
+  def test_forward_returns_cls_features(self):
+    """Headless: ModelOutput whose logits ARE the CLS-token features."""
     model = load_model("convvit", num_labels=0, image_size=64)
     model.eval()
     with torch.no_grad():
       out = model(pixel_values=torch.randn(2, 3, 64, 64))
     assert isinstance(out, ModelOutput)
-    assert out.logits.shape == (2, 768)  # loader default embed_dim
+    assert out.logits.shape == (2, 768)  # 1 CLS token x loader embed_dim
 
   def test_labeled_path_unaffected(self):
     model = load_model("convvit", num_labels=7, image_size=64)
     assert model.model.head is not None
+    assert model.model.cls_guided_pool is not None
+    model.eval()
+    with torch.no_grad():
+      out = model(pixel_values=torch.randn(2, 3, 64, 64))
+    assert out.logits.shape == (2, 7)
+
+  def test_multi_cls_tokens_headless(self):
+    """num_cls_tokens flattens all CLS tokens (uvito convention)."""
+    model = load_model("convvit", num_labels=0, image_size=64, num_cls_tokens=3)
+    assert model.model.num_cls_tokens == 3
+    assert model.model.cls_token.shape == (1, 3, 768)
+    num_patches = model.model.patch_embed.num_patches
+    assert model.model.pos_embedding.shape == (1, num_patches + 3, 768)
+    model.eval()
+    with torch.no_grad():
+      out = model(pixel_values=torch.randn(2, 3, 64, 64))
+    assert out.logits.shape == (2, 3 * 768)
+
+  def test_multi_cls_tokens_labeled(self):
+    """Labeled path pools with the first CLS token, head maps to classes."""
+    model = load_model("convvit", num_labels=7, image_size=64, num_cls_tokens=2)
     model.eval()
     with torch.no_grad():
       out = model(pixel_values=torch.randn(2, 3, 64, 64))

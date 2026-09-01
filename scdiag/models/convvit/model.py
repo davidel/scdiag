@@ -82,6 +82,7 @@ class CustomPatchTransformer(nn.Module):
       self,
       num_classes,
       img_size=320,
+      num_cls_tokens=1,
       embed_dim=512,
       num_heads=8,
       depth=12,
@@ -96,10 +97,11 @@ class CustomPatchTransformer(nn.Module):
                                           embed_dim=embed_dim,
                                           num_blocks=num_conv_layers,
                                           img_size=img_size)
+    self.num_cls_tokens = num_cls_tokens
     self.num_tokens = self.patch_embed.num_patches
     self.pos_embedding = nn.Parameter(
-        torch.randn(1, self.num_tokens + 1, embed_dim) * 0.02)
-    self.cls_token = nn.Parameter(torch.randn(1, 1, embed_dim) * 0.02)
+        torch.randn(1, self.num_tokens + num_cls_tokens, embed_dim) * 0.02)
+    self.cls_token = nn.Parameter(torch.randn(1, num_cls_tokens, embed_dim) * 0.02)
     self.pos_drop = nn.Dropout(p=dropout)
     dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
     self.transformer_layers = nn.ModuleList([
@@ -111,13 +113,18 @@ class CustomPatchTransformer(nn.Module):
         ) for i in range(depth)
     ])
     self.ln_norm = nn.LayerNorm(embed_dim)
-    self.cls_guided_pool = CLSGuidedAttentionPooling(
-        embed_dim=embed_dim,
-        num_heads=min(num_heads, 8),
-        dropout=dropout,
-    )
-    self.head = (nn.Linear(embed_dim, num_classes) if num_classes > 0 else None
-                )  # timm convention: 0 = no head
+    if num_classes > 0:
+      self.cls_guided_pool = CLSGuidedAttentionPooling(
+          embed_dim=embed_dim,
+          num_heads=min(num_heads, 8),
+          dropout=dropout,
+      )
+      self.head = nn.Linear(embed_dim, num_classes)
+    else:
+      # timm convention: 0 = no head and no classifier-specific pooling
+      # (self-supervised mode). uvito-style CLS-token features instead.
+      self.cls_guided_pool = None
+      self.head = None
     self.apply(self._init_weights)
 
   def _init_weights(self, m):
@@ -132,9 +139,10 @@ class CustomPatchTransformer(nn.Module):
   def _run_transformer(self, patch_embeddings):
     """Run the shared transformer core on patch embeddings.
 
-        Applies CLS token prepend, positional embeddings, all transformer
-        layers, and layer norm.  Returns both CLS and spatial outputs so
-        that callers can decide how to use them.
+        Applies CLS token prepend (``num_cls_tokens`` tokens), positional
+        embeddings, all transformer layers, and layer norm.  Returns both
+        CLS and spatial outputs so that callers can decide how to use
+        them.
 
         Args:
             patch_embeddings: ``(B, N, D)`` output from the conv stem
@@ -165,14 +173,17 @@ class CustomPatchTransformer(nn.Module):
         x = layer(x)
     x = self.ln_norm(x)
 
-    return x[:, :1, :], x[:, 1:, :]  # CLS, spatial
+    return (x[:, :self.num_cls_tokens, :], x[:,
+                                             self.num_cls_tokens:, :])  # CLS, spatial
 
   def forward(self, x):
     embeddings = self.patch_embed(x)  # [B, N, D]
     cls_out, spatial_out = self._run_transformer(embeddings)
-    pooled = self.cls_guided_pool(cls_out, spatial_out)  # [B, D]
-    # Headless mode (timm convention): pooled backbone features.
-    return pooled if self.head is None else self.head(pooled)
+    if self.head is None:
+      # Headless mode: extract CLS tokens and flatten (uvito convention).
+      return cls_out.reshape(embeddings.shape[0], -1)
+    pooled = self.cls_guided_pool(cls_out[:, :1, :], spatial_out)  # [B, D]
+    return self.head(pooled)
 
   def encoder_forward(self, patch_embeddings):
     """Run the transformer encoder on pre-computed patch embeddings.
@@ -192,7 +203,7 @@ class CustomPatchTransformer(nn.Module):
             (or modified version with mask tokens injected).
 
         Returns:
-            ``(B, N, D)`` spatial transformer output (CLS token dropped).
+            ``(B, N, D)`` spatial transformer output (CLS tokens dropped).
         """
     _, spatial_out = self._run_transformer(patch_embeddings)
     return spatial_out
