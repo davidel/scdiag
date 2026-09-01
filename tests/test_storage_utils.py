@@ -10,6 +10,12 @@ from scdiag.storage_utils import (
     storage_upload,
 )
 
+try:
+  import boto3  # noqa: F401
+  _HAS_BOTO3 = True
+except ImportError:
+  _HAS_BOTO3 = False
+
 
 class TestParseStorageUri:
 
@@ -39,6 +45,7 @@ class _FakeS3Client:
     self.calls.append((local_path, bucket, key))
 
 
+@pytest.mark.skipif(not _HAS_BOTO3, reason="boto3 not installed (s3 extra)")
 class TestUploadS3:
 
   @pytest.fixture
