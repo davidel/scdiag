@@ -17,6 +17,8 @@ dependencies = [
     "datasets",
     "xgboost>=2.0",
     "scikit-learn>=1.3",
+    "pillow",
+    "tensorboard",
 ]
 
 [project.optional-dependencies]
@@ -25,7 +27,8 @@ s3 = ["boto3>=1.28"]
 lora = ["peft>=0.7.0"]
 timm = ["timm>=1.0"]
 uvito = ["segmentation_models_pytorch>=0.3.0"]
-dev = ["pytest", "ruff", "yapf", "tensorboard"]
+all = ["scdiag[gcs,s3,lora,timm,uvito]"]
+dev = ["pytest", "ruff", "yapf"]
 
 [project.scripts]
 scdiag-train = "scdiag.train:main"

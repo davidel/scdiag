@@ -121,10 +121,13 @@ pip install -e ".[lora]"
 
 # With UVito model support:
 pip install -e ".[uvito]"
+
+# Everything above in one shot (gcs, s3, lora, timm, uvito):
+pip install -e ".[all]"
 ```
 
 **Requirements:** Python ≥ 3.9, PyTorch, torchvision, transformers, datasets,
-NumPy, scikit-learn ≥ 1.3, XGBoost ≥ 2.0.
+NumPy, scikit-learn ≥ 1.3, XGBoost ≥ 2.0, Pillow, tensorboard.
 
 ## Quick Start
 
