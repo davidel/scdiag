@@ -30,13 +30,11 @@ from torchvision.transforms import v2
 from torchvision.transforms.functional import InterpolationMode
 
 from scdiag.checkpointing import (
-    checkpoint_dict,
+    CheckpointSaver,
     create_model_report,
     parse_state_flags,
     restore_training_state,
     resume_checkpoint,
-    save_periodic_checkpoint,
-    should_save_periodic,
 )
 from scdiag.cli_args import (
     add_checkpoint_args,
@@ -62,7 +60,6 @@ from scdiag.optim_factory import (
 )
 from scdiag.pretrain_methods import get_method, list_methods
 from scdiag.seed_utils import seed_everything, seed_worker
-from scdiag.storage_utils import save_checkpoint
 
 
 def build_pretrain_transform(image_size=448):
@@ -206,9 +203,8 @@ def train_one_epoch(
     monitor=None,
     grad_accum_steps=1,
     scaler=None,
-    save_every=0,
-    args=None,
-    scheduler=None,
+    *,
+    saver,
 ):
   """Run one epoch of self-supervised pre-training.
 
@@ -218,14 +214,13 @@ def train_one_epoch(
     When *scaler* is provided (float16 AMP), gradient scaling is applied
     to avoid underflow of small gradients.
 
-    When *save_every* > 0, a periodic checkpoint is written to
-    ``args.checkpoint + "_latest.pt"`` every *save_every* optimizer steps
-    (recording ``epoch - 1`` as the last fully completed epoch).
+    When *saver* has a positive ``save_every``, a periodic checkpoint is
+    written to ``<root>_latest.pt`` every N optimizer steps (recording
+    ``epoch - 1`` as the last fully completed epoch).
 
     Returns ``(avg_loss, global_step)``.
   """
   set_train_mode(model, 'train')
-  states_to_save = parse_state_flags(args.state_save)
   total_loss = 0.0
   total_samples = 0
   start_time = time.time()
@@ -289,19 +284,8 @@ def train_one_epoch(
       # completed epoch): on resume the interrupted epoch restarts instead
       # of being skipped. The running loss average is unavailable mid-epoch,
       # and the resume path does not consume it.
-      if should_save_periodic(global_step, save_every):
-        save_periodic_checkpoint(
-            model,
-            optimizer,
-            scheduler,
-            args,
-            epoch - 1,
-            global_step,
-            states_to_save=states_to_save,
-            extra={
-                "method_state": method.get_checkpoint_state(model, args),
-            },
-        )
+      if saver.should_save(global_step):
+        saver.save_latest(epoch - 1, global_step=global_step)
 
     bs = images.shape[0]
     total_loss += loss.item() * bs * grad_accum_steps
@@ -781,6 +765,21 @@ def main(argv=None):
   states_to_save = parse_state_flags(args.state_save)
   states_to_load = parse_state_flags(args.state_load)
 
+  # All checkpoint writes go through one saver: state sources bound once,
+  # per-save data (epoch, global_step, method state) passed per call.
+  # extra_fn computes the method-specific state at save time.
+  saver = CheckpointSaver(
+      model,
+      optimizer,
+      scheduler,
+      root=args.checkpoint,
+      states_to_save=states_to_save,
+      scaler=scaler,
+      remote_uri=args.remote_checkpoint,
+      save_every=args.save_every,
+      extra_fn=lambda: {"method_state": method.get_checkpoint_state(model, args)},
+  )
+
   restore_training_state(
       ckpt_extra,
       optimizer,
@@ -838,9 +837,7 @@ def main(argv=None):
           monitor=grad_monitor,
           grad_accum_steps=args.grad_accum_steps,
           scaler=scaler,
-          save_every=args.save_every,
-          args=args,
-          scheduler=scheduler,
+          saver=saver,
       )
       writer.add_scalar("Train/loss_epoch", avg_loss, epoch)
       if scheduler is not None:
@@ -848,40 +845,12 @@ def main(argv=None):
       completed_epoch = epoch
       method.on_epoch_end(model, epoch, writer)
 
-      method_state = method.get_checkpoint_state(model, args)
-      save_checkpoint(
-          checkpoint_dict(
-              model,
-              optimizer,
-              scheduler,
-              completed_epoch,
-              states_to_save=states_to_save,
-              loss=avg_loss,
-              global_step=global_step,
-              method_state=method_state,
-          ),
-          args.checkpoint + "_latest.pt",
-          remote_uri=args.remote_checkpoint,
-      )
+      saver.save_latest(completed_epoch, global_step=global_step, loss=avg_loss)
 
   except KeyboardInterrupt:
     logging.warning("Interrupt detected!")
   finally:
-    method_state = method.get_checkpoint_state(model, args)
-    save_checkpoint(
-        checkpoint_dict(
-            model,
-            optimizer,
-            scheduler,
-            completed_epoch,
-            states_to_save=states_to_save,
-            loss=avg_loss,
-            global_step=global_step,
-            method_state=method_state,
-        ),
-        args.checkpoint + "_latest.pt",
-        remote_uri=args.remote_checkpoint,
-    )
+    saver.save_latest(completed_epoch, global_step=global_step, loss=avg_loss)
     logging.info("Checkpoint saved on exit.")
     writer.close()
 

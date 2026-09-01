@@ -3,8 +3,10 @@
 import os
 
 import torch
+from torch import nn
 
 from scdiag.checkpointing import (
+    CheckpointSaver,
     filter_state_dict,
     format_count,
     load_checkpoint_weights,
@@ -46,6 +48,74 @@ class TestShouldSavePeriodic:
   def test_never_fires_at_step_zero(self):
     assert should_save_periodic(0, 500) is False
     assert should_save_periodic(0, 0) is False
+
+
+class _TinyModel(nn.Module):
+
+  def __init__(self):
+    super().__init__()
+    self.fc = nn.Linear(2, 3)
+
+
+class TestCheckpointSaver:
+
+  def _make_saver(self, tmp_path):
+    model = _TinyModel()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+    saver = CheckpointSaver(
+        model,
+        optimizer,
+        None,
+        root=str(tmp_path / "ckpt"),
+        save_every=500,
+    )
+    return saver, model, optimizer
+
+  def test_should_save_truth_table(self):
+    model = _TinyModel()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+    saver = CheckpointSaver(model, optimizer, None, root="/unused", save_every=500)
+    assert saver.should_save(500) is True
+    assert saver.should_save(1000) is True
+    assert saver.should_save(499) is False
+    assert saver.should_save(501) is False
+    assert saver.should_save(0) is False
+
+  def test_should_save_disabled_by_default(self):
+    model = _TinyModel()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+    saver = CheckpointSaver(model, optimizer, None, root="/unused")
+    assert saver.should_save(500) is False
+    assert saver.should_save(1000) is False
+
+  def test_save_latest_and_best_write_files(self, tmp_path):
+    saver, _, _ = self._make_saver(tmp_path)
+    path = saver.save_latest(2, global_step=500, best_macro_f1=90.0)
+    best = saver.save_best(3, global_step=600, best_macro_f1=91.5)
+    assert path.endswith("_latest.pt")
+    assert best.endswith("_best.pt")
+    assert os.path.exists(path)
+    assert os.path.exists(best)
+
+  def test_saved_dict_carries_extra_kv(self, tmp_path):
+    saver, _, _ = self._make_saver(tmp_path)
+    saver.save_latest(1, global_step=250, best_macro_f1=42.0, custom_kv="hello")
+    state = torch.load(str(tmp_path / "ckpt_latest.pt"), weights_only=False)
+    assert state["epoch"] == 1
+    assert state["global_step"] == 250
+    assert state["best_macro_f1"] == 42.0
+    assert state["custom_kv"] == "hello"
+    assert "fc.weight" in state["model_state_dict"]
+    assert "optimizer_state_dict" in state
+    assert state["scheduler_state_dict"] is None
+
+  def test_save_latest_is_idempotent_path(self, tmp_path):
+    saver, _, _ = self._make_saver(tmp_path)
+    first = saver.save_latest(1, global_step=10)
+    second = saver.save_latest(1, global_step=20)
+    assert first == second
+    state = torch.load(str(second), weights_only=False)
+    assert state["global_step"] == 20
 
 
 class TestFilterStateDict:

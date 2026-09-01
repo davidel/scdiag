@@ -17,14 +17,12 @@ from torchvision.transforms import v2
 from torchvision.transforms.v2 import InterpolationMode
 
 from scdiag.checkpointing import (
-    checkpoint_dict,
+    CheckpointSaver,
     create_model_report,
     parse_state_flags,
     restore_training_state,
     resume_checkpoint,
-    save_periodic_checkpoint,
     serialize_lora_state,
-    should_save_periodic,
 )
 from scdiag.cli_args import (
     add_checkpoint_args,
@@ -56,7 +54,6 @@ from scdiag.optim_factory import (
 )
 from scdiag.script_utils import load_extern
 from scdiag.seed_utils import seed_everything, seed_worker
-from scdiag.storage_utils import save_checkpoint
 from scdiag.train_reporting import TrainReporting
 from scdiag.tta import create_default_tta_transform, load_tta_transform
 from scdiag.xgb_pipeline import train_xgboost_on_backbone
@@ -760,7 +757,8 @@ def train_one_epoch(
     writer=None,
     monitor=None,
     global_step=0,
-    save_every=0,
+    *,
+    saver,
     best_macro_f1=0.0,
 ):
   """Train for one epoch.
@@ -772,12 +770,11 @@ def train_one_epoch(
     epochs (used for the gradient monitor so it receives contiguous step
     numbers).  The updated value is returned.
 
-    When *save_every* > 0, a periodic checkpoint is written to
-    ``args.checkpoint + "_latest.pt"`` every *save_every* optimizer steps
-    (recording ``epoch - 1`` as the last fully completed epoch).
+    When *saver* has a positive ``save_every``, a periodic checkpoint is
+    written to ``<root>_latest.pt`` every N optimizer steps (recording
+    ``epoch - 1`` as the last fully completed epoch).
     """
   set_train_mode(model, "train")
-  states_to_save = parse_state_flags(args.state_save)
   total_batches = len(dataloader)
   reporter = TrainReporting(
       total_batches=total_batches,
@@ -839,20 +836,12 @@ def train_one_epoch(
       # Mid-epoch periodic checkpoint. Records *epoch - 1* (the last fully
       # completed epoch): on resume the interrupted epoch restarts instead
       # of being skipped.
-      if should_save_periodic(global_step, save_every):
-        save_periodic_checkpoint(
-            model,
-            optimizer,
-            scheduler,
-            args,
+      if saver.should_save(global_step):
+        saver.save_latest(
             epoch - 1,
-            global_step,
-            states_to_save=states_to_save,
-            scaler=scaler,
-            extra={
-                "best_macro_f1": best_macro_f1,
-                "lora_state_blob": serialize_lora_state(model) if args.lora else None,
-            },
+            global_step=global_step,
+            best_macro_f1=best_macro_f1,
+            lora_state_blob=serialize_lora_state(model) if args.lora else None,
         )
 
     with torch.no_grad():
@@ -1149,6 +1138,20 @@ def main():
   # checkpoint restoration, immediately before training begins.
   logging.info(create_model_report(model))
 
+  # All checkpoint writes go through one saver: state sources bound once,
+  # per-save data (epoch, global_step, metrics) passed per call.
+  saver = CheckpointSaver(
+      model,
+      optimizer,
+      scheduler,
+      root=args.checkpoint,
+      states_to_save=states_to_save,
+      scaler=scaler,
+      save_frozen=args.save_frozen,
+      remote_uri=args.remote_checkpoint,
+      save_every=args.save_every,
+  )
+
   try:
     for epoch in range(start_epoch, args.epochs):
       effective_batch = args.batch_size * args.grad_accum_steps
@@ -1169,7 +1172,7 @@ def main():
           writer=writer,
           monitor=grad_monitor,
           global_step=optimizer_global_step,
-          save_every=args.save_every,
+          saver=saver,
           best_macro_f1=best_macro_f1,
       )
 
@@ -1228,21 +1231,11 @@ def main():
 
       if v_macro_f1 > best_macro_f1:
         best_macro_f1 = v_macro_f1
-        save_checkpoint(
-            checkpoint_dict(
-                model,
-                optimizer,
-                scheduler,
-                epoch,
-                states_to_save=states_to_save,
-                scaler=scaler,
-                best_macro_f1=best_macro_f1,
-                global_step=optimizer_global_step,
-                save_frozen=args.save_frozen,
-                lora_state_blob=(serialize_lora_state(model) if args.lora else None),
-            ),
-            args.checkpoint + "_best.pt",
-            remote_uri=args.remote_checkpoint,
+        saver.save_best(
+            epoch,
+            best_macro_f1=best_macro_f1,
+            global_step=optimizer_global_step,
+            lora_state_blob=serialize_lora_state(model) if args.lora else None,
         )
         logging.info(f"New best macro F1, checkpoint saved: {best_macro_f1:.2f}%")
 
@@ -1250,26 +1243,17 @@ def main():
   except KeyboardInterrupt:
     logging.warning("Interrupt detected!")
   finally:
-    save_checkpoint(
-        checkpoint_dict(
-            model,
-            optimizer,
-            scheduler,
-            completed_epoch,
-            states_to_save=states_to_save,
-            scaler=scaler,
-            best_macro_f1=best_macro_f1,
-            global_step=optimizer_global_step,
-            save_frozen=args.save_frozen,
-            lora_state_blob=serialize_lora_state(model) if args.lora else None,
-        ),
-        args.checkpoint + "_latest.pt",
-        remote_uri=args.remote_checkpoint,
+    saver.save_latest(
+        completed_epoch,
+        best_macro_f1=best_macro_f1,
+        global_step=optimizer_global_step,
+        lora_state_blob=serialize_lora_state(model) if args.lora else None,
     )
     logging.info("Checkpoint saved on exit.")
     writer.close()
 
     # Free training model VRAM before XGBoost block.
+    del saver
     del model
     del optimizer
     del scaler

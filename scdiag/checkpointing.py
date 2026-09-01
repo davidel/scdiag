@@ -304,7 +304,7 @@ def checkpoint_dict(model,
   if states_to_save is None or "sched" in states_to_save:
     d["scheduler_state_dict"] = scheduler.state_dict(
     ) if scheduler is not None else None
-  if "amp" in states_to_save:
+  if states_to_save is None or "amp" in states_to_save:
     d["scaler_state_dict"] = scaler.state_dict() if scaler is not None else None
   d.update(extra)
   return d
@@ -343,38 +343,79 @@ def should_save_periodic(global_step, save_every):
   return save_every > 0 and global_step > 0 and global_step % save_every == 0
 
 
-def save_periodic_checkpoint(model,
-                             optimizer,
-                             scheduler,
-                             args,
-                             epoch,
-                             step,
-                             states_to_save=None,
-                             scaler=None,
-                             extra=None):
-  """Save a mid-epoch periodic checkpoint to ``args.checkpoint + "_latest.pt"``.
+class CheckpointSaver:
+  """Binds checkpoint state sources once; per-save data passed per call.
 
-    Records *epoch* verbatim so callers pass the last fully completed epoch
-    (``epoch - 1`` inside a training loop): on resume the interrupted epoch
-    restarts instead of being skipped.  *extra* is forwarded to
-    :func:`checkpoint_dict` (e.g. ``method_state`` or ``lora_state_blob``).
+    The state-dict things (model, optimizer, scheduler, ``states_to_save``,
+    scaler, ``save_frozen``) and the destination (``root`` path plus remote
+    sync URI) are fixed at construction, as is the optional *extra_fn*
+    hook, which is called on every save to compute script-specific KV
+    extras (e.g. ``method_state``) at save time.  Per-save key/value data
+    -- ``epoch``, ``global_step`` and one-off extras -- are passed to the
+    ``save*`` methods, which delegate to :func:`checkpoint_dict` and
+    :func:`save_checkpoint`.  Keys from *extra_fn* are overridden by
+    same-named call-site keys.
   """
-  save_checkpoint(
-      checkpoint_dict(
-          model,
-          optimizer,
-          scheduler,
-          epoch,
-          states_to_save=states_to_save,
-          scaler=scaler,
-          global_step=step,
-          save_frozen=getattr(args, "save_frozen", True),
-          **(extra or {}),
-      ),
-      args.checkpoint + "_latest.pt",
-      remote_uri=args.remote_checkpoint,
-  )
-  logging.info("Periodic checkpoint saved at step %d.", step)
+
+  def __init__(self,
+               model,
+               optimizer,
+               scheduler,
+               root,
+               states_to_save=None,
+               scaler=None,
+               save_frozen=True,
+               remote_uri=None,
+               save_every=0,
+               extra_fn=None):
+    self.model = model
+    self.optimizer = optimizer
+    self.scheduler = scheduler
+    self.root = root
+    self.states_to_save = states_to_save
+    self.scaler = scaler
+    self.save_frozen = save_frozen
+    self.remote_uri = remote_uri
+    self.save_every = save_every
+    self.extra_fn = extra_fn
+
+  def should_save(self, global_step):
+    """Return True when *global_step* hits a ``save_every`` multiple.
+
+    ``save_every <= 0`` disables periodic saving; step 0 never triggers.
+    Callers pass ``epoch - 1`` (last fully completed epoch) when saving
+    mid-epoch so a resume restarts the interrupted epoch.
+    """
+    return should_save_periodic(global_step, self.save_every)
+
+  def save(self, suffix, epoch, **extra):
+    """Write ``root + suffix`` (e.g. ``"_latest.pt"``) with *extra* KV pairs."""
+    path = self.root + suffix
+    if self.extra_fn is not None:
+      extra = {**self.extra_fn(), **extra}
+    save_checkpoint(
+        checkpoint_dict(
+            self.model,
+            self.optimizer,
+            self.scheduler,
+            epoch,
+            states_to_save=self.states_to_save,
+            scaler=self.scaler,
+            save_frozen=self.save_frozen,
+            **extra,
+        ),
+        path,
+        remote_uri=self.remote_uri,
+    )
+    return path
+
+  def save_best(self, epoch, **extra):
+    """Save to ``<root>_best.pt``; *extra* forwarded to checkpoint_dict."""
+    return self.save("_best.pt", epoch, **extra)
+
+  def save_latest(self, epoch, **extra):
+    """Save to ``<root>_latest.pt``; *extra* forwarded to checkpoint_dict."""
+    return self.save("_latest.pt", epoch, **extra)
 
 
 def resume_checkpoint(ckpt_latest, ckpt_best, model, device):
