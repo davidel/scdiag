@@ -21,6 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 gcs = ["google-cloud-storage"]
+s3 = ["boto3>=1.28"]
 lora = ["peft>=0.7.0"]
 timm = ["timm>=1.0"]
 uvito = ["segmentation_models_pytorch>=0.3.0"]

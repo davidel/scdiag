@@ -113,6 +113,9 @@ pip install -e ".[timm]"
 # With GCS checkpoint sync:
 pip install -e ".[gcs]"
 
+# With AWS S3 / Cloudflare R2 checkpoint sync (both use boto3):
+pip install -e ".[s3]"
+
 # With LoRA fine-tuning:
 pip install -e ".[lora]"
 
@@ -681,7 +684,7 @@ resume point.
 | `--log_level` | `INFO` | Logging level. |
 | `--log_dir` | `None` | TensorBoard log directory (default: `<checkpoint_dir>/logs`). Requires the `tensorboard` package (installed by the `dev` extra). |
 | `--cache_dir` | `None` | HuggingFace cache directory. |
-| `--remote_checkpoint` | `None` | Remote URI for checkpoint sync (`gs://BUCKET/PREFIX` or `r2://BUCKET/PREFIX`). |
+| `--remote_checkpoint` | `None` | Remote URI for checkpoint sync (`gs://BUCKET/PREFIX`, `r2://BUCKET/PREFIX`, or `s3://BUCKET/PREFIX`). |
 | `--source_checkpoint` | `None` | Path to source checkpoint to absorb parameters from. |
 | `--param_rename` | `None` | Regex-based key rename patterns (`SEARCH;REPLACE`). |
 | `--classifier` | `None` | Classifier head spec: registered name (e.g. `mlp`) or `.py` path. |
@@ -708,6 +711,38 @@ resume point.
 
 Training automatically resumes from an existing `_latest.pt` or `_best.pt`
 checkpoint if one exists at the `--checkpoint` path.
+
+### Remote Checkpoint Sync (GCS / R2 / S3)
+
+`--remote_checkpoint` uploads each saved checkpoint to cloud storage.
+Requires `pip install "scdiag[s3]"` for `s3://` and `r2://` URIs (both
+use boto3), or `scdiag[gcs]` for `gs://`.
+
+**AWS S3** — credentials come from the standard environment variables:
+
+```bash
+%env AWS_ACCESS_KEY_ID=AKIA...
+%env AWS_SECRET_ACCESS_KEY=...
+%env AWS_SESSION_TOKEN=...        # only for temporary (STS/SSO) credentials
+%env AWS_DEFAULT_REGION=us-east-1
+
+--remote_checkpoint s3://my-bucket/scdiag/convvit_ijepa
+```
+
+Permanent IAM-user keys need only the access/secret pair; the session
+token is picked up automatically when present. When the key variables
+are unset, boto3's default credential chain applies (IAM instance role,
+`~/.aws/credentials`, SSO cache).
+
+**Cloudflare R2** — the S3-compatible API with R2 credentials:
+
+```bash
+%env R2_ENDPOINT_URL=https://<account_id>.r2.cloudflarestorage.com
+%env R2_ACCESS_KEY_ID=...
+%env R2_SECRET_ACCESS_KEY=...
+
+--remote_checkpoint r2://my-bucket/scdiag/convvit_ijepa
+```
 
 ### LoRA Details
 

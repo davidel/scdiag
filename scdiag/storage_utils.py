@@ -1,4 +1,4 @@
-"""Unified cloud storage helpers for GCS and Cloudflare R2."""
+"""Unified cloud storage helpers for GCS, Cloudflare R2, and AWS S3."""
 
 import contextlib
 import logging
@@ -10,15 +10,16 @@ from scdiag.logging_utils import fatal
 
 
 def parse_storage_uri(uri):
-  """Parse a ``gs://`` or ``r2://`` URI into ``(scheme, bucket, prefix)``.
+  """Parse a ``gs://``, ``r2://``, or ``s3://`` URI into ``(scheme, bucket,
+  prefix)``.
 
     Args:
         uri: A storage URI.  Must start with ``gs://`` (Google Cloud
-            Storage) or ``r2://`` (Cloudflare R2).
+            Storage), ``r2://`` (Cloudflare R2), or ``s3://`` (AWS S3).
 
     Returns:
-        A tuple ``(scheme, bucket, prefix)`` where *scheme* is ``"gs"``
-        or ``"r2"``.
+        A tuple ``(scheme, bucket, prefix)`` where *scheme* is ``"gs"``,
+        ``"r2"``, or ``"s3"``.
   """
   if uri.startswith("gs://"):
     scheme = "gs"
@@ -26,13 +27,45 @@ def parse_storage_uri(uri):
   elif uri.startswith("r2://"):
     scheme = "r2"
     without_scheme = uri[len("r2://"):]
+  elif uri.startswith("s3://"):
+    scheme = "s3"
+    without_scheme = uri[len("s3://"):]
   else:
-    fatal(f"URI must start with gs:// or r2://, got: {uri}", ValueError)
+    fatal(f"URI must start with gs://, r2://, or s3://, got: {uri}", ValueError)
 
   parts = without_scheme.split("/", 1)
   bucket = parts[0]
   prefix = parts[1] if len(parts) > 1 else ""
   return scheme, bucket, prefix
+
+
+def _upload_s3(bucket_name, local_path, prefix):
+  """Upload *local_path* to an AWS S3 bucket under *prefix*.
+
+    Credentials are taken from the standard AWS environment variables
+    (``AWS_ACCESS_KEY_ID``, ``AWS_SECRET_ACCESS_KEY``, and optionally
+    ``AWS_SESSION_TOKEN`` for temporary STS credentials).  When the key
+    variables are unset, boto3's default credential chain is used
+    instead (IAM instance role, ``~/.aws/credentials``, SSO cache).
+  """
+  import boto3
+
+  access_key = os.environ.get("AWS_ACCESS_KEY_ID")
+  secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
+  client_kwargs = {}
+  if access_key and secret_key:
+    client_kwargs = {
+        "aws_access_key_id": access_key,
+        "aws_secret_access_key": secret_key,
+        "aws_session_token": os.environ.get("AWS_SESSION_TOKEN"),
+    }
+  s3_client = boto3.client("s3", **client_kwargs)
+
+  blob_name = os.path.basename(local_path)
+  if prefix:
+    blob_name = f"{prefix}/{blob_name}"
+  s3_client.upload_file(local_path, bucket_name, blob_name)
+  return f"s3://{bucket_name}/{blob_name}"
 
 
 def _upload_gcs(bucket_name, local_path, prefix):
@@ -83,8 +116,8 @@ def storage_upload(bucket_name, local_path, prefix="", scheme="gs"):
         bucket_name: Target bucket name.
         local_path: Local file to upload.
         prefix: Optional key prefix inside the bucket.
-        scheme: ``"gs"`` for Google Cloud Storage or ``"r2"`` for
-            Cloudflare R2.
+        scheme: ``"gs"`` for Google Cloud Storage, ``"r2"`` for
+            Cloudflare R2, or ``"s3"`` for AWS S3.
 
     Returns:
         The full remote URI of the uploaded object.
@@ -93,6 +126,8 @@ def storage_upload(bucket_name, local_path, prefix="", scheme="gs"):
     return _upload_gcs(bucket_name, local_path, prefix)
   elif scheme == "r2":
     return _upload_r2(bucket_name, local_path, prefix)
+  elif scheme == "s3":
+    return _upload_s3(bucket_name, local_path, prefix)
   else:
     fatal(f"Unsupported storage scheme: {scheme!r}", ValueError)
 
@@ -103,7 +138,8 @@ def save_checkpoint(save_dict, path, remote_uri=None):
     Args:
         save_dict: Dictionary to pass to ``torch.save``.
         path: Local file path for the checkpoint.
-        remote_uri: Optional ``gs://`` or ``r2://`` URI to upload to.
+        remote_uri: Optional ``gs://``, ``r2://``, or ``s3://`` URI to
+            upload to.
     """
   dirname = os.path.dirname(path)
   if dirname:

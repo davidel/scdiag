@@ -33,7 +33,8 @@ def add_checkpoint_args(parser, checkpoint_default, resume_default=None):
       "--remote_checkpoint",
       type=str,
       help="Remote URI to sync checkpoints to "
-      "(format: gs://BUCKET/PREFIX or r2://BUCKET/PREFIX).",
+      "(format: gs://BUCKET/PREFIX, r2://BUCKET/PREFIX, or "
+      "s3://BUCKET/PREFIX).",
   )
   if resume_default is not None:
     parser.add_argument(
