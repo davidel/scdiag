@@ -31,7 +31,7 @@ class TestUVitoForward:
   def test_backbone_features_shape(self):
     model = _make_uvito(num_classes=5, img_size=64)
     x = torch.randn(2, 3, 64, 64)
-    feat = model._backbone_features(x)
+    feat = model.backbone_features(x)
     # num_cls_tokens=1, transformer_dim=32 → (2, 32)
     assert feat.shape == (2, 32)
 
@@ -39,7 +39,7 @@ class TestUVitoForward:
     """Backbone features are before head_norm/mlp_head."""
     model = _make_uvito(num_classes=5, img_size=64)
     x = torch.randn(2, 3, 64, 64)
-    feat = model._backbone_features(x)
+    feat = model.backbone_features(x)
     logits = model(x)
     # Different shapes (features ≠ logits)
     assert feat.shape[1] != logits.shape[1] or feat.shape != logits.shape
@@ -49,7 +49,7 @@ class TestUVitoExtractFeatures:
 
   def test_extract_via_wrapper(self):
     """UVitoAdapter.extract_backbone_features returns the
-    CLS-flattened tensor, same as _backbone_features."""
+    CLS-flattened tensor, same as backbone_features."""
     from types import SimpleNamespace
 
     from scdiag.models.uvito.loader import UVitoAdapter

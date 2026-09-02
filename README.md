@@ -1092,6 +1092,21 @@ instead of scrolling past.  Code is formatted with
 (Google style, 2-space indent) and linted with
 [Ruff](https://docs.astral.sh/ruff/) (`ruff check .`).
 
+### Naming conventions for class members
+
+- Anything that PyTorch registers — child `nn.Module`, `nn.Parameter`,
+  registered buffer — is **never** underscore-prefixed, regardless of
+  intended visibility.  A leading underscore would change `state_dict()`
+  keys, optimizer param groups, and DDP behavior.
+- Everything else that is not part of a class's public contract
+  (internal state, helper hooks invoked only by the class itself) gets a
+  leading underscore.  A member called from other classes, overridden as
+  an extension point, or documented as API stays public.
+- Extension-point methods that *callers* invoke (e.g.
+  `PretrainMethod.build_transform`) are public; same-named hooks the
+  base class *itself* dispatches (e.g. `BaseImageProcessor._build_transform`)
+  are private.
+
 ## License
 
 Apache-2.0

@@ -37,7 +37,7 @@ class Classifier(BaseClassifier):
                dropout=0.3,
                cls_slice=(0, 1)):
     super().__init__()
-    self.cls_slice = slice(*cls_slice)
+    self._cls_slice = slice(*cls_slice)
     feat_dim = (cls_slice[1] - cls_slice[0]) * hidden_size
     self.head = nn.Sequential(
         nn.Linear(feat_dim, hidden),
@@ -50,5 +50,5 @@ class Classifier(BaseClassifier):
     return self.head(self.extract_features(hidden_states))
 
   def extract_features(self, hidden_states):
-    cls_tokens = hidden_states[:, self.cls_slice, :]  # (B, K, D)
+    cls_tokens = hidden_states[:, self._cls_slice, :]  # (B, K, D)
     return cls_tokens.flatten(start_dim=1)  # (B, K*D)

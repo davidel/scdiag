@@ -232,16 +232,16 @@ class IJEPA(nn.Module):
     self.teacher = teacher
     self.predictor = predictor
     self.momentum = momentum
-    self.final_momentum = final_momentum
+    self._final_momentum = final_momentum
     self.weight = weight
     # Block masking defaults (matching common I-JEPA configuration).
-    self.n_mask_blocks = 4
-    self.block_size = 6
+    self._n_mask_blocks = 4
+    self._block_size = 6
 
   def update_momentum(self, epoch, total_epochs=200):
-    """Ramp momentum from ``self.momentum`` to ``self.final_momentum``."""
+    """Ramp momentum from ``self.momentum`` to ``self._final_momentum``."""
     t = min(epoch / total_epochs, 1.0)
-    m = self.momentum + (self.final_momentum - self.momentum) * t
+    m = self.momentum + (self._final_momentum - self.momentum) * t
     for ps, pt in zip(self.student.parameters(), self.teacher.parameters()):
       pt.data.mul_(m).add_(ps.data, alpha=1 - m)
 
@@ -281,8 +281,8 @@ class IJEPA(nn.Module):
     # -- Block mask on target space.
     t_h = target_view.shape[2] // patch_size
     t_w = target_view.shape[3] // patch_size
-    n_mask = self.n_mask_blocks
-    block_size = self.block_size
+    n_mask = self._n_mask_blocks
+    block_size = self._block_size
     mask = _make_block_mask(
         t_h,
         t_w,

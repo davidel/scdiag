@@ -42,7 +42,7 @@ class UVitoAdapter(nn.Module):
         Shape ``(B, num_cls_tokens * transformer_dim)``.
     """
     with torch.no_grad():
-      return self.model._backbone_features(pixel_values)
+      return self.model.backbone_features(pixel_values)
 
 
 @register_model("uvito")

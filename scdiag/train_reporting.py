@@ -54,9 +54,9 @@ class TrainReporting:
     self.correct_top1 = 0
     self.total_samples = 0
 
-    # Timing.
-    self.start_time = time.time()
-    self.last_log_time = time.time()
+    # Timing (internal).
+    self._start_time = time.time()
+    self._last_log_time = time.time()
 
     # Window buffers (reset every *log_every* steps).
     self.window_samples = 0
@@ -127,7 +127,7 @@ class TrainReporting:
     avg_loss = self.total_loss / self.total_samples if self.total_samples else 0.0
     top1 = (self.correct_top1 / self.total_samples *
             100.0 if self.total_samples else 0.0)
-    elapsed = time.time() - self.start_time
+    elapsed = time.time() - self._start_time
     logging.info(f"  Train stats -> loss: {avg_loss:.4f}"
                  f" | top1: {top1:.2f}%"
                  f" | time: {elapsed:.1f}s")
@@ -135,7 +135,7 @@ class TrainReporting:
 
   def _log_step(self, batch_idx, global_step):
     """Compute windowed & cumulative metrics and emit a log line."""
-    elapsed = time.time() - self.last_log_time
+    elapsed = time.time() - self._last_log_time
     w_samples = self.window_samples
     throughput = w_samples / elapsed if elapsed > 0 else 0.0
     w_loss = self.window_loss / w_samples if w_samples > 0 else 0.0
@@ -189,7 +189,7 @@ class TrainReporting:
           )
 
     # Reset window buffers and update timestamp.
-    self.last_log_time = time.time()
+    self._last_log_time = time.time()
     self.window_samples = 0
     self.window_correct = 0
     self.window_loss = 0.0

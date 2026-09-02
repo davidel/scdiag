@@ -56,8 +56,8 @@ class Classifier(BaseClassifier):
       encoder_dropout=0.1,
   ):
     super().__init__()
-    self.cls_slice = slice(*cls_slice)
-    self.spc_slice = slice(*spc_slice)
+    self._cls_slice = slice(*cls_slice)
+    self._spc_slice = slice(*spc_slice)
 
     self.encoder = None
     if num_encoder_layers > 0:
@@ -84,8 +84,8 @@ class Classifier(BaseClassifier):
     return self.head(self.extract_features(hidden_states))
 
   def extract_features(self, hidden_states):
-    cls_out = hidden_states[:, self.cls_slice, :]
-    spatial_out = hidden_states[:, self.spc_slice, :]
+    cls_out = hidden_states[:, self._cls_slice, :]
+    spatial_out = hidden_states[:, self._spc_slice, :]
     if self.encoder is not None:
       spatial_out = self.encoder(spatial_out)
     return self.pool(cls_out, spatial_out)  # (B, D)

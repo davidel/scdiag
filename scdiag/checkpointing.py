@@ -346,15 +346,19 @@ def should_save_periodic(global_step, save_every):
 class CheckpointSaver:
   """Binds checkpoint state sources once; per-save data passed per call.
 
-    The state-dict things (model, optimizer, scheduler, ``states_to_save``,
-    scaler, ``save_frozen``) and the destination (``root`` path plus remote
-    sync URI) are fixed at construction, as is the optional *extra_fn*
-    hook, which is called on every save to compute script-specific KV
-    extras (e.g. ``method_state``) at save time.  Per-save key/value data
-    -- ``epoch``, ``global_step`` and one-off extras -- are passed to the
-    ``save*`` methods, which delegate to :func:`checkpoint_dict` and
-    :func:`save_checkpoint`.  Keys from *extra_fn* are overridden by
-    same-named call-site keys.
+    The state-dict things (model, optimizer, scheduler, ``_states_to_save``,
+    scaler, ``_save_frozen``) and the destination (``_root`` path plus
+    remote sync URI) are fixed at construction, as is the optional
+    ``_extra_fn`` hook, which is called on every save to compute
+    script-specific KV extras (e.g. ``method_state``) at save time.
+    Per-save key/value data -- ``epoch``, ``global_step`` and one-off
+    extras -- are passed to the ``save*`` methods, which delegate to
+    :func:`checkpoint_dict` and :func:`save_checkpoint`.  Keys from
+    ``_extra_fn`` are overridden by same-named call-site keys.
+
+    All constructor-injected fields are internal (underscore-prefixed);
+    the public surface is exactly ``should_save`` / ``save`` /
+    ``save_best`` / ``save_latest``.
   """
 
   def __init__(self,
@@ -368,44 +372,44 @@ class CheckpointSaver:
                remote_uri=None,
                save_every=0,
                extra_fn=None):
-    self.model = model
-    self.optimizer = optimizer
-    self.scheduler = scheduler
-    self.root = root
-    self.states_to_save = states_to_save
-    self.scaler = scaler
-    self.save_frozen = save_frozen
-    self.remote_uri = remote_uri
-    self.save_every = save_every
-    self.extra_fn = extra_fn
+    self._model = model
+    self._optimizer = optimizer
+    self._scheduler = scheduler
+    self._root = root
+    self._states_to_save = states_to_save
+    self._scaler = scaler
+    self._save_frozen = save_frozen
+    self._remote_uri = remote_uri
+    self._save_every = save_every
+    self._extra_fn = extra_fn
 
   def should_save(self, global_step):
-    """Return True when *global_step* hits a ``save_every`` multiple.
+    """Return True when *global_step* hits a ``_save_every`` multiple.
 
-    ``save_every <= 0`` disables periodic saving; step 0 never triggers.
+    ``_save_every <= 0`` disables periodic saving; step 0 never triggers.
     Callers pass ``epoch - 1`` (last fully completed epoch) when saving
     mid-epoch so a resume restarts the interrupted epoch.
     """
-    return should_save_periodic(global_step, self.save_every)
+    return should_save_periodic(global_step, self._save_every)
 
   def save(self, suffix, epoch, **extra):
-    """Write ``root + suffix`` (e.g. ``"_latest.pt"``) with *extra* KV pairs."""
-    path = self.root + suffix
-    if self.extra_fn is not None:
-      extra = {**self.extra_fn(), **extra}
+    """Write ``_root + suffix`` (e.g. ``"_latest.pt"``) with *extra* KV pairs."""
+    path = self._root + suffix
+    if self._extra_fn is not None:
+      extra = {**self._extra_fn(), **extra}
     save_checkpoint(
         checkpoint_dict(
-            self.model,
-            self.optimizer,
-            self.scheduler,
+            self._model,
+            self._optimizer,
+            self._scheduler,
             epoch,
-            states_to_save=self.states_to_save,
-            scaler=self.scaler,
-            save_frozen=self.save_frozen,
+            states_to_save=self._states_to_save,
+            scaler=self._scaler,
+            save_frozen=self._save_frozen,
             **extra,
         ),
         path,
-        remote_uri=self.remote_uri,
+        remote_uri=self._remote_uri,
     )
     return path
 

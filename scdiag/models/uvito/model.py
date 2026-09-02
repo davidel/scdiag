@@ -89,7 +89,7 @@ class UVito(nn.Module):
       nn.init.trunc_normal_(self.mlp_head.weight, std=0.02)
       nn.init.zeros_(self.mlp_head.bias)
 
-  def _backbone_features(self, x):
+  def backbone_features(self, x):
     """Run everything up to the CLS-flattened representation.
 
     Returns
@@ -139,7 +139,7 @@ class UVito(nn.Module):
         self.head_norm(cls_features)))
 
   def forward(self, x):
-    return self._head(self._backbone_features(x))
+    return self._head(self.backbone_features(x))
 
   def train(self, mode=True):
     """Override train mode to ensure the frozen CNN backbone strictly

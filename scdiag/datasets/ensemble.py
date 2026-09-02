@@ -292,6 +292,11 @@ class DatasetEnsemble:
     return list(self._global_label_names)
 
   @property
+  def label2id(self):
+    """Mapping of global label name to global integer id."""
+    return dict(self._global_label2id)
+
+  @property
   def labels_array(self):
     """Global integer labels aligned with ``__getitem__`` positions.
 
