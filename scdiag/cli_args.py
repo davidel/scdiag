@@ -127,5 +127,30 @@ def add_source_checkpoint_args(parser):
       "Each pattern is 'SEARCH;REPLACE' where SEARCH is a Python regex "
       "and REPLACE may use $1, $2, \u2026 for capture groups. "
       "Applied before shape-based alignment. "
-      "Example: 'encoder\\\\.(.*);model\\\\.$1'.",
+      "Example: 'encoder\\\\\\\\.(.*);model\\\\\\\\.$1'.",
+  )
+
+
+def add_logging_args(parser):
+  """Add the shared ``--log_level`` / ``--log_targets`` flags.
+
+  ``--log_targets`` is a comma-separated list of log destinations.  The
+  special token ``STDERR`` selects standard error (the default); every
+  other entry is a file path appended to.  Multiple destinations receive
+  the same log records simultaneously, e.g. ``STDERR,/tmp/train.log``.
+  """
+  parser.add_argument(
+      "--log_level",
+      type=str,
+      default="INFO",
+      choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+      help="Minimum logging level.",
+  )
+  parser.add_argument(
+      "--log_targets",
+      type=str,
+      default="STDERR",
+      help="Comma-separated list of log destinations. 'STDERR' logs to "
+      "standard error (default); any other entry is a log file path "
+      "appended to. Example: 'STDERR,/tmp/train.log' logs to both.",
   )

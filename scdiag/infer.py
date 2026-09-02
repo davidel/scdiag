@@ -8,6 +8,7 @@ import numpy as np
 import torch
 from PIL import Image
 
+from scdiag.cli_args import add_logging_args
 from scdiag.cli_utils import KVPairAction
 from scdiag.label_utils import get_label
 from scdiag.logging_utils import fatal, setup_logging
@@ -55,12 +56,7 @@ def parse_args(argv=None):
       type=str,
       help="HuggingFace cache directory.",
   )
-  parser.add_argument(
-      "--log_level",
-      default="INFO",
-      choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-      help="Logging level.",
-  )
+  add_logging_args(parser)
   parser.add_argument(
       "--xgboost_model",
       type=str,
@@ -147,7 +143,7 @@ def check_xgb_label_alignment(xgb_model, id2label):
 
 def main(argv=None):
   args = parse_args(argv)
-  setup_logging(args.log_level)
+  setup_logging(args.log_level, args.log_targets)
 
   device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
   logging.info(f"Using device: {device}")

@@ -362,6 +362,7 @@ scdiag-pretrain --method supcon \
 | `--state_load` | `opt,sched` | States to restore on resume: `opt`, `sched`, `amp`, `none`. |
 | `--checkpoint` | (required) | Checkpoint path prefix (saves `_latest.pt` and `_best.pt`). |
 | `--log_level` | `INFO` | Minimum logging level. |
+| `--log_targets` | `STDERR` | Comma-separated log destinations. `STDERR` logs to standard error; any other entry is a log file path (appended). Example: `STDERR,/tmp/train.log` logs to both. |
 | `--grad_monitor` | `-1` | Log gradient statistics every N steps; `-1` disables. See [Gradient Monitor](#gradient-monitor). |
 | `--norm_history` | `0` | Keep last N norm snapshots per parameter for trend analysis. |
 | `--trend_top_n` | `10` | Show top N params in trend table by abs change %. `0` = show all. |
@@ -686,6 +687,7 @@ resume point.
 | `--save_every` | `500` | Save checkpoint every N optimizer steps. 0 disables. |
 | `--num_workers` | `2` | DataLoader worker processes. |
 | `--log_level` | `INFO` | Logging level. |
+| `--log_targets` | `STDERR` | Comma-separated log destinations. `STDERR` logs to standard error; any other entry is a log file path (appended). Example: `STDERR,/tmp/train.log` logs to both. |
 | `--log_dir` | `None` | TensorBoard log directory (default: `<checkpoint_dir>/logs`). Requires the `tensorboard` package (installed by the `dev` extra). |
 | `--cache_dir` | `None` | HuggingFace cache directory. |
 | `--remote_checkpoint` | `None` | Remote URI for checkpoint sync (`gs://BUCKET/PREFIX`, `r2://BUCKET/PREFIX`, or `s3://BUCKET/PREFIX`). |

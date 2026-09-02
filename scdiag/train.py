@@ -26,6 +26,7 @@ from scdiag.checkpointing import (
 )
 from scdiag.cli_args import (
     add_checkpoint_args,
+    add_logging_args,
     add_optimization_args,
     add_source_checkpoint_args,
     add_training_state_args,
@@ -533,13 +534,7 @@ def parse_args(argv=None):
       default=2,
       help="DataLoader worker processes.",
   )
-  parser.add_argument(
-      "--log_level",
-      type=str,
-      default="INFO",
-      choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-      help="Minimum logging level.",
-  )
+  add_logging_args(parser)
 
   add_training_state_args(parser,
                           state_save="opt,sched,amp",
@@ -866,7 +861,7 @@ def train_one_epoch(
 
 def main():
   args = parse_args()
-  setup_logging(args.log_level)
+  setup_logging(args.log_level, args.log_targets)
   seed_everything(args.seed, args.deterministic)
 
   # Convert string amp_dtype to torch.dtype.

@@ -38,6 +38,7 @@ from scdiag.checkpointing import (
 )
 from scdiag.cli_args import (
     add_checkpoint_args,
+    add_logging_args,
     add_optimization_args,
     add_source_checkpoint_args,
     add_training_state_args,
@@ -460,13 +461,7 @@ def parse_args(argv=None):
                       resume_default=True)
   add_training_state_args(parser, state_save="opt,sched", state_load="opt,sched")
 
-  parser.add_argument(
-      "--log_level",
-      type=str,
-      default="INFO",
-      choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-      help="Minimum logging level.",
-  )
+  add_logging_args(parser)
   parser.add_argument(
       "--log_dir",
       type=str,
@@ -615,7 +610,7 @@ def parse_args(argv=None):
 
 def main(argv=None):
   args = parse_args(argv)
-  setup_logging(args.log_level)
+  setup_logging(args.log_level, args.log_targets)
   seed_everything(args.seed, args.deterministic)
 
   args.amp_dtype = getattr(torch, args.amp_dtype, None) if args.amp_dtype else None
