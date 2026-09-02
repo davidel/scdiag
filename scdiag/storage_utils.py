@@ -3,10 +3,17 @@
 import contextlib
 import logging
 import os
+import tempfile
 
 import torch
 
 from scdiag.logging_utils import fatal
+
+# Umask captured once at import time so that files created through
+# ``tempfile.mkstemp`` (which forces 0600) can be given the same mode a
+# plain ``open()`` would have produced.
+_UMASK = os.umask(0)
+os.umask(_UMASK)
 
 
 def parse_storage_uri(uri):
@@ -135,6 +142,10 @@ def storage_upload(bucket_name, local_path, prefix="", scheme="gs"):
 def save_checkpoint(save_dict, path, remote_uri=None):
   """Save a checkpoint dict to disk and optionally sync to cloud storage.
 
+    Safe to call concurrently from multiple processes: the write goes to
+    a process-exclusive temp file that is atomically renamed into place,
+    so *path* only ever contains a fully written checkpoint.
+
     Args:
         save_dict: Dictionary to pass to ``torch.save``.
         path: Local file path for the checkpoint.
@@ -144,19 +155,47 @@ def save_checkpoint(save_dict, path, remote_uri=None):
   dirname = os.path.dirname(path)
   if dirname:
     os.makedirs(dirname, exist_ok=True)
-  # Write to a temporary file first, then atomically rename so a crash
-  # mid-write can never leave a truncated checkpoint at *path* (which is
-  # also the resume source for ``_latest.pt``).
-  tmp_path = path + ".tmp"
+  # Write to a unique, process-exclusive temporary file first, then
+  # atomically rename so a crash mid-write can never leave a truncated
+  # checkpoint at *path* (which is also the resume source for
+  # ``_latest.pt``).  ``mkstemp`` hands out a distinct name per call and
+  # creates the file with ``O_EXCL``, so concurrent processes saving to
+  # the same *path* cannot clobber each other's temp file, publish a
+  # partially written one, or delete a file another writer is still
+  # using.  The temp file must live in the destination directory so the
+  # rename stays on a single filesystem.
+  fd, tmp_path = tempfile.mkstemp(dir=dirname or ".",
+                                  prefix=f".{os.path.basename(path)}.",
+                                  suffix=".tmp")
+  tmp_file = None
   try:
-    torch.save(save_dict, tmp_path)
+    # ``mkstemp`` creates the file 0600; restore the mode a plain
+    # ``open()`` would have produced so the published checkpoint keeps
+    # its usual permissions.
+    os.chmod(tmp_path, 0o666 & ~_UMASK)
+    tmp_file = os.fdopen(fd, "wb")
+    with tmp_file:
+      torch.save(save_dict, tmp_file)
+      # Flush and fsync before the rename so that after a crash or power
+      # loss the file visible at *path* is always fully written, never
+      # truncated or empty.
+      tmp_file.flush()
+      os.fsync(tmp_file.fileno())
     os.replace(tmp_path, path)
   except BaseException:
-    # Best-effort cleanup of the partial temp file; the original
-    # exception propagates.
+    # Best-effort cleanup: close the descriptor if the write failed (or
+    # if anything raised before ``fdopen`` took ownership of it), then
+    # unlink the partial temp file.  The original exception propagates.
+    with contextlib.suppress(OSError):
+      if tmp_file is not None:
+        tmp_file.close()
+      else:
+        os.close(fd)
     with contextlib.suppress(OSError):
       os.remove(tmp_path)
     raise
+  # The local commit is durable at this point; the remote sync is
+  # best-effort and must stay after the rename.
   if remote_uri:
     scheme, bucket, prefix = parse_storage_uri(remote_uri)
     remote = storage_upload(bucket, path, prefix, scheme=scheme)

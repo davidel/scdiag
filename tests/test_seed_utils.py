@@ -1,7 +1,10 @@
 """Tests for scdiag.seed_utils reproducibility helpers."""
 
 import argparse
+import concurrent.futures
+import os
 import random
+import threading
 from unittest import mock
 
 import numpy as np
@@ -211,7 +214,7 @@ def test_checkpoint_save_atomic_on_failure(tmp_path, monkeypatch):
     save_checkpoint({"epoch": 1}, str(dest))
   # Previous checkpoint untouched, no .tmp residue.
   assert dest.read_text() == "PREVIOUS_GOOD_CHECKPOINT"
-  assert not (tmp_path / "model_latest.pt.tmp").exists()
+  assert list(tmp_path.glob("*.tmp")) == []
 
 
 def test_checkpoint_save_success(tmp_path):
@@ -220,4 +223,55 @@ def test_checkpoint_save_success(tmp_path):
   dest = tmp_path / "nested" / "model_latest.pt"
   save_checkpoint({"epoch": 3}, str(dest))
   assert torch.load(dest, weights_only=False) == {"epoch": 3}
-  assert not (tmp_path / "nested" / "model_latest.pt.tmp").exists()
+  assert list((tmp_path / "nested").glob("*.tmp")) == []
+
+
+def test_checkpoint_save_tmp_name_is_unique(tmp_path, monkeypatch):
+  """The temp file must not be the static ``path + '.tmp'`` name."""
+  from scdiag import storage_utils
+
+  # What torch.save was handed, and what the save dir looked like at
+  # that moment (the temp file must exist there while torch.save runs).
+  seen_targets = []
+  seen_tmp_files = []
+  real_save = torch.save
+
+  def spy_save(obj, f, *args, **kwargs):
+    # An int means torch.save got the exclusive fd-backed file object
+    # from ``mkstemp`` instead of a path string.
+    seen_targets.append(f if isinstance(f, (str, int)) else f.name)
+    seen_tmp_files.append([p for p in os.listdir(tmp_path) if p.endswith(".tmp")])
+    real_save(obj, f, *args, **kwargs)
+
+  monkeypatch.setattr(storage_utils.torch, "save", spy_save)
+  dest = tmp_path / "model_latest.pt"
+  storage_utils.save_checkpoint({"epoch": 1}, str(dest))
+  assert torch.load(dest, weights_only=False) == {"epoch": 1}
+  assert len(seen_targets) == 1
+  assert seen_targets[0] != str(dest) + ".tmp"
+  assert len(seen_tmp_files[0]) == 1
+  assert seen_tmp_files[0][0] != "model_latest.pt.tmp"
+  assert seen_tmp_files[0][0].startswith(".model_latest.pt.")
+
+
+def test_checkpoint_save_concurrent_writers(tmp_path):
+  """Concurrent saves to the same path never publish a partial file."""
+  from scdiag.storage_utils import save_checkpoint
+
+  num_writers = 8
+  dest = tmp_path / "model_latest.pt"
+  barrier = threading.Barrier(num_writers)
+
+  def writer(rank):
+    barrier.wait()
+    save_checkpoint({"rank": rank, "data": list(range(1000))}, str(dest))
+
+  with concurrent.futures.ThreadPoolExecutor(max_workers=num_writers) as pool:
+    futures = [pool.submit(writer, rank) for rank in range(num_writers)]
+    for future in futures:
+      future.result()
+
+  committed = torch.load(dest, weights_only=False)
+  assert 0 <= committed["rank"] < num_writers
+  assert committed["data"] == list(range(1000))
+  assert list(tmp_path.glob("*.tmp")) == []
