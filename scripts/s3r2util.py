@@ -130,11 +130,14 @@ def compute_dest_key(src_key, src_prefix, dst_prefix):
     src_prefix: the static (non-wildcard) prefix of the source pattern.
     dst_prefix: the destination prefix (bucket/key/path).
   """
-  relative = src_key[len(src_prefix):]
+  relative = src_key[len(src_prefix):].lstrip("/")
   if not relative:
     return dst_prefix
+  if not dst_prefix:
+    # Bucket-root destination: never emit a leading '/' in the key.
+    return relative
   # Ensure exactly one '/' between prefix and relative.
-  return dst_prefix.rstrip("/") + "/" + relative.lstrip("/")
+  return dst_prefix.rstrip("/") + "/" + relative
 
 
 def format_size(num_bytes):
@@ -185,6 +188,17 @@ def is_dir_destination(destination):
   Returns True if it ends with '/' or is an existing local directory.
   """
   return destination.endswith("/") or os.path.isdir(destination)
+
+
+def join_dir_destination(destination, name):
+  """Join a directory destination with a file name, Unix ``cp``-style.
+
+  ``cp file dir/`` places the file's basename inside the directory:
+  ``dir/name``.  ``mv`` behaves the same way.
+  """
+  if destination.endswith("/"):
+    return destination + name
+  return destination + "/" + name
 
 
 def handle_cp(args, s3_client):
@@ -272,17 +286,12 @@ def handle_cp(args, s3_client):
     src_bucket, src_key = parse_r2_path(source)
 
     if is_dir:
+      # Unix cp semantics: a directory destination receives the source's
+      # basename (cp aaaa/bbbb dest/ -> dest/bbbb, same for r2 keys).
       if src_bucket:
-        # R2 -> R2 dir: preserve full key structure
-        dest_path = (destination +
-                     src_key if destination.endswith("/") else destination + "/" +
-                     src_key)
+        dest_path = join_dir_destination(destination, os.path.basename(src_key))
       else:
-        # Local -> R2 dir: key is relative path from cwd (no leading '/')
-        rel_key = os.path.relpath(source).lstrip("/")
-        dest_path = (destination +
-                     rel_key if destination.endswith("/") else destination + "/" +
-                     rel_key)
+        dest_path = join_dir_destination(destination, os.path.basename(source))
     else:
       dest_path = destination
 
