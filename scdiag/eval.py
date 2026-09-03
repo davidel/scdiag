@@ -7,6 +7,7 @@ other training scripts.
 import torch
 from sklearn.metrics import confusion_matrix, f1_score, precision_recall_fscore_support
 
+from scdiag.attr_utils import MISSING, get_attribute
 from scdiag.model_utils import model_mode
 
 
@@ -109,8 +110,8 @@ def evaluate_performance(model,
   avg_loss = eval_loss / total_samples
   top1 = (correct_top1 / total_samples) * 100.0
 
-  num_labels = getattr(getattr(model, "config", None), "num_labels", None)
-  if num_labels is None:
+  num_labels = get_attribute(model, "config.num_labels")
+  if num_labels is MISSING:
     num_labels = max(all_labels + all_preds) + 1
 
   metrics = _compute_classification_metrics(all_labels, all_preds, num_labels, id2label)
