@@ -1,4 +1,9 @@
-"""Tests for scdiag.train_reporting.TrainReporting."""
+"""Tests for scdiag.train_reporting.TrainReporting.
+
+These are white-box tests: they deliberately assert on the private
+(underscore-prefixed) attributes of ``TrainReporting`` to verify its
+internal state transitions.
+"""
 
 import logging
 from unittest.mock import MagicMock
@@ -43,14 +48,14 @@ def _dummy_batch(batch_size=4, num_classes=3, num_correct=4):
 
 def test_init_counters_are_zero():
   r = _make_reporter()
-  assert r.total_loss == 0.0
-  assert r.correct_top1 == 0
-  assert r.total_samples == 0
-  assert r.window_samples == 0
-  assert r.window_loss == 0.0
-  assert r.window_correct == 0
-  assert r.window_preds == []
-  assert r.window_labels == []
+  assert r._total_loss == 0.0
+  assert r._correct_top1 == 0
+  assert r._total_samples == 0
+  assert r._window_samples == 0
+  assert r._window_loss == 0.0
+  assert r._window_correct == 0
+  assert r._window_preds == []
+  assert r._window_labels == []
 
 
 def test_init_stores_references():
@@ -58,42 +63,42 @@ def test_init_stores_references():
   writer = MagicMock()
   opt = MagicMock()
   r = _make_reporter(writer=writer, device=device, optimizer=opt)
-  assert r.writer is writer
-  assert r.device is device
-  assert r.optimizer is opt
-  assert r.total_batches == 10
-  assert r.log_every == 5
+  assert r._writer is writer
+  assert r._device is device
+  assert r._optimizer is opt
+  assert r._total_batches == 10
+  assert r._log_every == 5
 
 
 def test_step_accumulates_loss():
   r = _make_reporter(log_every=100)  # large log_every to suppress logging
   logits, targets = _dummy_batch(batch_size=4)
   r.step(0, 4, 2.5, logits, targets, 0)
-  assert r.total_loss == 2.5
-  assert r.total_samples == 4
+  assert r._total_loss == 2.5
+  assert r._total_samples == 4
   r.step(1, 4, 1.0, logits, targets, 1)
-  assert r.total_loss == 3.5
-  assert r.total_samples == 8
+  assert r._total_loss == 3.5
+  assert r._total_samples == 8
 
 
 def test_step_accumulates_top1():
   r = _make_reporter(log_every=100)
   logits, targets = _dummy_batch(batch_size=4, num_classes=3, num_correct=3)
   r.step(0, 4, 1.0, logits, targets, 0)
-  assert r.correct_top1 == 3
-  assert r.total_samples == 4
+  assert r._correct_top1 == 3
+  assert r._total_samples == 4
 
 
 def test_step_accumulates_window():
   r = _make_reporter(log_every=100)
   logits, targets = _dummy_batch(batch_size=4, num_correct=2)
   r.step(0, 4, 2.0, logits, targets, 0)
-  assert r.window_samples == 4
-  assert r.window_loss == 2.0
-  assert r.window_correct == 2
-  assert len(r.window_preds) == 4
-  assert len(r.window_labels) == 4
-  assert r.window_labels == targets.tolist()
+  assert r._window_samples == 4
+  assert r._window_loss == 2.0
+  assert r._window_correct == 2
+  assert len(r._window_preds) == 4
+  assert len(r._window_labels) == 4
+  assert r._window_labels == targets.tolist()
 
 
 def test_log_triggered_on_log_every_boundary(caplog):
@@ -130,15 +135,15 @@ def test_window_resets_after_log():
   logits, targets = _dummy_batch(batch_size=4, num_correct=2)
   r.step(0, 4, 3.0, logits, targets, 0)
   # After the log, window buffers should be reset.
-  assert r.window_samples == 0
-  assert r.window_loss == 0.0
-  assert r.window_correct == 0
-  assert r.window_preds == []
-  assert r.window_labels == []
+  assert r._window_samples == 0
+  assert r._window_loss == 0.0
+  assert r._window_correct == 0
+  assert r._window_preds == []
+  assert r._window_labels == []
   # But cumulative counters should still hold.
-  assert r.total_samples == 4
-  assert r.total_loss == 3.0
-  assert r.correct_top1 == 2
+  assert r._total_samples == 4
+  assert r._total_loss == 3.0
+  assert r._correct_top1 == 2
 
 
 def test_window_accumulates_between_logs():
@@ -147,10 +152,10 @@ def test_window_accumulates_between_logs():
   r.step(0, 4, 1.0, logits, targets, 0)
   r.step(1, 4, 1.0, logits, targets, 1)
   # No log yet — window should have accumulated 8 samples.
-  assert r.window_samples == 8
-  assert r.window_loss == 2.0
+  assert r._window_samples == 8
+  assert r._window_loss == 2.0
   r.step(2, 4, 1.0, logits, targets, 2)  # triggers log
-  assert r.window_samples == 0  # reset
+  assert r._window_samples == 0  # reset
 
 
 def test_log_contains_key_fields(caplog):
@@ -279,6 +284,6 @@ def test_report_now_false_on_boundary_still_logs():
   logits, targets = _dummy_batch()
   # (batch_idx=1, (1+1)%2==0) triggers log even without report_now.
   r.step(0, 4, 1.0, logits, targets, 0)
-  assert r.window_samples == 4  # no log yet
+  assert r._window_samples == 4  # no log yet
   r.step(1, 4, 1.0, logits, targets, 1)
-  assert r.window_samples == 0  # log happened, window reset
+  assert r._window_samples == 0  # log happened, window reset

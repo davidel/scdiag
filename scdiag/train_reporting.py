@@ -43,27 +43,27 @@ class TrainReporting:
       device=None,
       optimizer=None,
   ):
-    self.total_batches = total_batches
-    self.log_every = log_every
-    self.writer = writer
-    self.device = device
-    self.optimizer = optimizer
+    self._total_batches = total_batches
+    self._log_every = log_every
+    self._writer = writer
+    self._device = device
+    self._optimizer = optimizer
 
     # Cumulative epoch-level counters.
-    self.total_loss = 0.0
-    self.correct_top1 = 0
-    self.total_samples = 0
+    self._total_loss = 0.0
+    self._correct_top1 = 0
+    self._total_samples = 0
 
     # Timing (internal).
     self._start_time = time.time()
     self._last_log_time = time.time()
 
     # Window buffers (reset every *log_every* steps).
-    self.window_samples = 0
-    self.window_correct = 0
-    self.window_loss = 0.0
-    self.window_preds = []
-    self.window_labels = []
+    self._window_samples = 0
+    self._window_correct = 0
+    self._window_loss = 0.0
+    self._window_preds = []
+    self._window_labels = []
 
   def step(
       self,
@@ -100,19 +100,19 @@ class TrainReporting:
     preds = logits.argmax(dim=1)
 
     # Cumulative epoch-level counters.
-    self.total_loss += loss_value
-    self.correct_top1 += (preds == targets).sum().item()
-    self.total_samples += batch_size
+    self._total_loss += loss_value
+    self._correct_top1 += (preds == targets).sum().item()
+    self._total_samples += batch_size
 
     # Window buffers.
-    self.window_samples += batch_size
-    self.window_loss += loss_value
-    self.window_correct += (preds == targets).sum().item()
-    self.window_preds.extend(preds.cpu().tolist())
-    self.window_labels.extend(targets.cpu().tolist())
+    self._window_samples += batch_size
+    self._window_loss += loss_value
+    self._window_correct += (preds == targets).sum().item()
+    self._window_preds.extend(preds.cpu().tolist())
+    self._window_labels.extend(targets.cpu().tolist())
 
     # Decide whether to emit a report.
-    if report_now or (batch_idx + 1) % self.log_every == 0:
+    if report_now or (batch_idx + 1) % self._log_every == 0:
       self._log_step(batch_idx, global_step)
 
   def summary(self):
@@ -124,9 +124,9 @@ class TrainReporting:
         ``(avg_loss, top1)`` — the epoch-level average cross-entropy loss
         and top-1 accuracy (percentage).
     """
-    avg_loss = self.total_loss / self.total_samples if self.total_samples else 0.0
-    top1 = (self.correct_top1 / self.total_samples *
-            100.0 if self.total_samples else 0.0)
+    avg_loss = self._total_loss / self._total_samples if self._total_samples else 0.0
+    top1 = (self._correct_top1 / self._total_samples *
+            100.0 if self._total_samples else 0.0)
     elapsed = time.time() - self._start_time
     logging.info(f"  Train stats -> loss: {avg_loss:.4f}"
                  f" | top1: {top1:.2f}%"
@@ -136,28 +136,28 @@ class TrainReporting:
   def _log_step(self, batch_idx, global_step):
     """Compute windowed & cumulative metrics and emit a log line."""
     elapsed = time.time() - self._last_log_time
-    w_samples = self.window_samples
+    w_samples = self._window_samples
     throughput = w_samples / elapsed if elapsed > 0 else 0.0
-    w_loss = self.window_loss / w_samples if w_samples > 0 else 0.0
-    w_top1 = (self.window_correct / w_samples * 100.0 if w_samples > 0 else 0.0)
+    w_loss = self._window_loss / w_samples if w_samples > 0 else 0.0
+    w_top1 = (self._window_correct / w_samples * 100.0 if w_samples > 0 else 0.0)
 
     # Window macro F1.
     w_macro_f1 = 0.0
-    if self.window_preds:
+    if self._window_preds:
       w_macro_f1 = (f1_score(
-          self.window_labels, self.window_preds, average="macro", zero_division=0) *
+          self._window_labels, self._window_preds, average="macro", zero_division=0) *
                     100.0)
 
     # Cumulative metrics.
-    avg_loss = self.total_loss / self.total_samples
-    top1 = (self.correct_top1 / self.total_samples) * 100.0
+    avg_loss = self._total_loss / self._total_samples
+    top1 = (self._correct_top1 / self._total_samples) * 100.0
 
     # Hardware / optimizer info.
-    gpu = gpu_stats_str(self.device)
-    lr_str = report_lr(self.optimizer, writer=self.writer, step=global_step)
+    gpu = gpu_stats_str(self._device)
+    lr_str = report_lr(self._optimizer, writer=self._writer, step=global_step)
 
     # Console log.
-    msg = (f"  [Step {batch_idx + 1}/{self.total_batches}]"
+    msg = (f"  [Step {batch_idx + 1}/{self._total_batches}]"
            f" loss={w_loss:.4f} ({avg_loss:.4f})"
            f" top1={w_top1:.2f}% ({top1:.2f}%)"
            f" macro_f1={w_macro_f1:.2f}%"
@@ -165,33 +165,33 @@ class TrainReporting:
            f" img/s={throughput:.0f}")
     logging.info(msg)
     if gpu:
-      logging.info(f"  [Step {batch_idx + 1}/{self.total_batches}] {gpu}")
+      logging.info(f"  [Step {batch_idx + 1}/{self._total_batches}] {gpu}")
 
     # TensorBoard scalars.
-    if self.writer is not None:
-      self.writer.add_scalar("Train/loss", w_loss, global_step)
-      self.writer.add_scalar("Train/top1", w_top1, global_step)
-      self.writer.add_scalar("Train/macro_f1", w_macro_f1, global_step)
-      self.writer.add_scalar("Train/loss_avg", avg_loss, global_step)
-      self.writer.add_scalar("Train/top1_avg", top1, global_step)
-      self.writer.add_scalar("Train/throughput", throughput, global_step)
-      if self.device is not None and self.device.type == "cuda":
-        self.writer.add_scalar(
+    if self._writer is not None:
+      self._writer.add_scalar("Train/loss", w_loss, global_step)
+      self._writer.add_scalar("Train/top1", w_top1, global_step)
+      self._writer.add_scalar("Train/macro_f1", w_macro_f1, global_step)
+      self._writer.add_scalar("Train/loss_avg", avg_loss, global_step)
+      self._writer.add_scalar("Train/top1_avg", top1, global_step)
+      self._writer.add_scalar("Train/throughput", throughput, global_step)
+      if self._device is not None and self._device.type == "cuda":
+        self._writer.add_scalar(
             "GPU/memory_MB",
-            torch.cuda.memory_allocated(self.device) / 1024**2,
+            torch.cuda.memory_allocated(self._device) / 1024**2,
             global_step,
         )
         if hasattr(torch.cuda, "utilization"):
-          self.writer.add_scalar(
+          self._writer.add_scalar(
               "GPU/utilization_pct",
-              torch.cuda.utilization(self.device),
+              torch.cuda.utilization(self._device),
               global_step,
           )
 
     # Reset window buffers and update timestamp.
     self._last_log_time = time.time()
-    self.window_samples = 0
-    self.window_correct = 0
-    self.window_loss = 0.0
-    self.window_preds = []
-    self.window_labels = []
+    self._window_samples = 0
+    self._window_correct = 0
+    self._window_loss = 0.0
+    self._window_preds = []
+    self._window_labels = []
