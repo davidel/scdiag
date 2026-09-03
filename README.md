@@ -1068,6 +1068,8 @@ training on backbone features.
   The SimMIM paper.
 - Assran et al., [Self-Supervised Learning from Images with a Joint-Embedding Predictive Architecture](https://arxiv.org/abs/2301.08243).
   The I-JEPA paper.
+- Caron et al., [Emerging Properties in Self-Supervised Vision Transformers](https://arxiv.org/abs/2104.14294).
+  The DINO paper — self-distillation with an EMA teacher and multi-crop.
 - Khosla et al., [Supervised Contrastive Learning](https://arxiv.org/abs/2004.11362).
   The SupCon objective and experiments.
 - Hu et al., [LoRA: Low-Rank Adaptation of Large Language Models](https://arxiv.org/abs/2106.09685).

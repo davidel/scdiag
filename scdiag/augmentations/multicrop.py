@@ -2,6 +2,13 @@
 
 Produces 2 global crops (large) and N local crops (small) from a single
 image, with separate augmentation pipelines for each.
+
+The split follows the DINO recipe (Caron et al., ICCV 2021 —
+https://arxiv.org/abs/2104.14294): global crops cover a large fraction
+of the original image area (default 0.4–1.0), local crops a small one
+(default 0.05–0.4).  The contrast between large and small resolutions is
+what teaches the student that local views must match the global
+representation.
 """
 
 import torch
@@ -10,6 +17,14 @@ from torchvision.transforms import v2
 
 class MultiCropTransform:
   """Generate global + local crops with distinct augmentation strengths.
+
+  Calling the transform on a PIL image returns a list of
+  ``2 + local_num`` tensors: index 0 and 1 are the global crops
+  (``global_size`` px, `global_transform` pipeline), indices 2.. are the
+  local crops (``local_size`` px, `local_transform` pipeline).  Use
+  :meth:`split_crops` to convert the list into the
+  ``(global_crops, local_crops)`` stacked tensors expected by
+  :meth:`scdiag.models.dino.DINO.forward`.
 
   Args:
       global_size: Spatial size of global crops.
@@ -60,6 +75,7 @@ class MultiCropTransform:
 
 
 def _default_global_transform(image_size):
+  """Standard DINO global-view pipeline: flip, jitter, blur, normalise."""
   return v2.Compose([
       v2.RandomHorizontalFlip(p=0.5),
       v2.RandomApply([
@@ -75,6 +91,7 @@ def _default_global_transform(image_size):
 
 
 def _default_local_transform():
+  """Standard DINO local-view pipeline: same recipe as the global one."""
   return v2.Compose([
       v2.RandomHorizontalFlip(p=0.5),
       v2.RandomApply([

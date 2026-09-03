@@ -1,4 +1,11 @@
-"""DINO: Self-Distillation with No Labels (Caron et al., ICCV 2021)."""
+"""DINO: Self-Distillation with No Labels (Caron et al., ICCV 2021).
+
+Pre-training method wiring the :class:`~scdiag.models.dino.DINO`
+student/teacher module to the multi-crop data pipeline.
+
+Reference: Caron et al., *"Emerging Properties in Self-Supervised Vision
+Transformers"*, ICCV 2021 — https://arxiv.org/abs/2104.14294
+"""
 
 import torch
 
@@ -11,7 +18,30 @@ from scdiag.pretrain_methods.registry import register_method
 
 @register_method
 class DINOMethod(PretrainMethod):
-  """Self-distillation pre-training via DINO with multi-crop."""
+  """Self-distillation pre-training via DINO with multi-crop.
+
+  Responsibilities per training step (see :meth:`PretrainMethod` hooks):
+
+  1. **Data**: :meth:`build_transform` returns a
+     :class:`~scdiag.augmentations.multicrop.MultiCropTransform`
+     producing 2 global crops and ``--dino_local_num`` local crops per
+     image; the training loop stacks them and
+     :meth:`~scdiag.augmentations.multicrop.MultiCropTransform.split_crops`
+     splits the list into the ``(global_crops, local_crops)`` tensors
+     expected by ``DINO.forward``.
+  2. **Model step**: ``model(global_crops, local_crops)`` computes the
+     DINO loss (student vs. teacher, see
+     :class:`~scdiag.losses.dino.DINOLoss`).
+  3. **Teacher update**: the EMA momentum is linearly scheduled from
+     ``--dino_momentum`` to ``--dino_final_momentum`` over the total
+     number of optimiser steps (:meth:`_current_momentum`), then applied
+     with ``model.update_momentum(momentum)``.  Scheduling the momentum
+     toward 1.0 progressively freezes the teacher.
+
+  Checkpointing: :meth:`get_checkpoint_state` persists the loss center
+  and the momentum schedule endpoints so resumed runs continue with an
+  identical teacher state.
+  """
 
   NAME = "dino"
   needs_labels = False
@@ -106,6 +136,12 @@ class DINOMethod(PretrainMethod):
     return loss, info
 
   def _current_momentum(self, global_step, model):
+    """Compute the teacher EMA momentum for this optimiser step.
+
+    Linearly interpolates from ``--dino_momentum`` (at step 0) to
+    ``--dino_final_momentum`` (at the last step).  If the model does not
+    expose a total step count, the final momentum is used.
+    """
     total = getattr(model, "_total_steps", 0)
     if total <= 0:
       return self._momentum_end()
