@@ -40,27 +40,25 @@ class ImageDump(v2.Transform):
       ``{prefix}_{counter:06d}.jpg``.
   """
 
-  _counter = 0
-  _lock = threading.Lock()
+  _COUNTER = 0
+  _LOCK = threading.Lock()
 
   def __init__(self, save_dir, p=0.1, prefix="dump"):
     super().__init__()
-    self.save_dir = save_dir
-    self.p = p
-    self.prefix = prefix
+    self._save_dir = save_dir
+    self._p = p
+    self._prefix = prefix
 
   def _save(self, img):
     """Save a PIL image (or convert to one) and increment the counter."""
-    if not os.path.isdir(self.save_dir):
-      os.makedirs(self.save_dir, exist_ok=True)
+    if not os.path.isdir(self._save_dir):
+      os.makedirs(self._save_dir, exist_ok=True)
 
-    with ImageDump._lock:
-      seq = ImageDump._counter
-      ImageDump._counter += 1
+    with ImageDump._LOCK:
+      seq = ImageDump._COUNTER
+      ImageDump._COUNTER += 1
 
-    path = os.path.join(
-        self.save_dir,
-        f"{self.prefix}_{os.getpid()}_{seq:06d}.jpg")
+    path = os.path.join(self._save_dir, f"{self._prefix}_{os.getpid()}_{seq:06d}.jpg")
 
     if isinstance(img, Image.Image):
       img.save(path)
@@ -100,13 +98,13 @@ class ImageDump(v2.Transform):
     img.save(path)
 
   def forward(self, *inputs):
-    # Apply probability check.  self.p is evaluated once per call; if
+    # Apply probability check.  self._p is evaluated once per call; if
     # the random draw misses, we skip saving entirely.
-    if torch.rand(1).item() < self.p:
+    if torch.rand(1).item() < self._p:
       # Extract the image from the (possibly nested) input.
       img = inputs[0] if len(inputs) == 1 else inputs
       self._save(img)
     return inputs[0] if len(inputs) == 1 else inputs
 
   def extra_repr(self):
-    return f"save_dir={self.save_dir!r}, p={self.p}, prefix={self.prefix!r}"
+    return f"save_dir={self._save_dir!r}, p={self._p}, prefix={self._prefix!r}"

@@ -56,7 +56,7 @@ class TestImageDump:
 
   def test_counter_is_sequential(self, tmp_path):
     # Reset class-level counter so test is deterministic.
-    ImageDump._counter = 0
+    ImageDump._COUNTER = 0
     pid = os.getpid()
     dump1 = ImageDump(save_dir=str(tmp_path), p=1.0, prefix="seq")
     dump2 = ImageDump(save_dir=str(tmp_path), p=1.0, prefix="seq")
