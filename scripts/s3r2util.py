@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 """CloudFlare R2 CLI utility (S3-compatible).
 
-Provides ls/cp/rm/mv commands for R2 buckets via the boto3 S3 API.
+Provides ls/cp/rm/mv/cat and other commands for R2 buckets via the
+boto3 S3 API.
+
+Output conventions:
+  - stdout carries data only: object bytes for `cat`, the URL for
+    `presign`.
+  - stderr carries everything else (status/progress/log lines, tqdm
+    bars, errors), so piped data is never polluted.
 
 NOTE: This script could in theory be simplified by setting the standard
 AWS environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
@@ -31,10 +38,39 @@ def fatal(msg, code=1):
   sys.exit(code)
 
 
+def getenv(name, vtype=str, default=None):
+  """Fetch an environment variable and convert it to `vtype`.
+
+  Blank or unset variables yield `default`. Fatal with a stderr
+  message when the raw value cannot be converted, so misconfiguration
+  fails fast instead of mid-run.
+  """
+  raw = (os.getenv(name) or "").strip()
+  if not raw:
+    return default
+  try:
+    return vtype(raw)
+  except ValueError:
+    fatal(f"Environment variable {name} must be of type "
+          f"{vtype.__name__}, got: {raw!r}")
+
+
+# Chunk size for streaming object bytes through `cat`. Keeps memory
+# flat for multi-GB objects; never read a whole body into RAM.
+DEFAULT_STREAM_CHUNK_SIZE = 1024 * 1024
+STREAM_CHUNK_SIZE = getenv("R2_STREAM_CHUNK_SIZE",
+                           vtype=int,
+                           default=DEFAULT_STREAM_CHUNK_SIZE)
+
+
 def log(msg, quiet=False):
-  """Print a message unless --quiet is active."""
+  """Print a status message to stderr unless --quiet is active.
+
+  Always targets stderr (never stdout) so that stdout stays reserved
+  for data output (`cat`, `presign`).
+  """
   if not quiet:
-    print(msg)
+    print(msg, file=sys.stderr)
 
 
 def create_s3_client():
@@ -152,6 +188,81 @@ def format_size(num_bytes):
 def format_date(d):
   """Format a datetime to local time string (YYYY-MM-DD HH:MM:SS tz)."""
   return d.astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
+
+
+def _cat_source(s3_client, source):
+  """Return an iterator of byte chunks for one `cat` source.
+
+  The caller owns draining (and thereby closing) the iterator.
+  Raises FileNotFoundError for missing local files and ClientError /
+  BotoCoreError for bad remote objects so the caller can report them.
+  """
+  bucket, key = parse_r2_path(source)
+  if bucket is None:
+    path = os.path.expanduser(source)
+    if not os.path.isfile(path):
+      raise FileNotFoundError(f"No such file: {source}")
+    return _stream_local_file(path)
+  if not key:
+    fatal("'cat' requires an object key: r2://bucket/key "
+          "(cannot cat a whole bucket or prefix)")
+  if has_wildcard(key):
+    return _stream_remote_matches(s3_client, expand_wildcard(s3_client, source))
+  response = s3_client.get_object(Bucket=bucket, Key=key)
+  return response["Body"].iter_chunks(STREAM_CHUNK_SIZE)
+
+
+def _stream_remote_matches(s3_client, matches):
+  """Yield byte chunks from each matched object, in listing order."""
+  for bucket, key, _size in matches:
+    response = s3_client.get_object(Bucket=bucket, Key=key)
+    yield from response["Body"].iter_chunks(STREAM_CHUNK_SIZE)
+
+
+def _read_chunks(fh):
+  """Read a binary file object in STREAM_CHUNK_SIZE pieces."""
+  return iter(lambda: fh.read(STREAM_CHUNK_SIZE), b"")
+
+
+def _stream_local_file(path):
+  """Yield byte chunks from a local file, closing it when consumed."""
+  with open(path, "rb") as fh:
+    yield from _read_chunks(fh)
+
+
+def handle_cat(args, s3_client):
+  """Stream R2 objects and/or local files to stdout.
+
+  Always quiet: no status lines, no progress bar (`--quiet` is accepted
+  by the global parser but irrelevant here). Streams in fixed-size
+  chunks so multi-GB objects never load fully into memory, making it
+  suitable for piping into e.g. `tar -xf -` without staging the file.
+  """
+  sources = args.sources
+  out = sys.stdout.buffer
+  for source in sources:
+    try:
+      chunks = _cat_source(s3_client, source)
+      for chunk in chunks:
+        out.write(chunk)
+    except (ClientError, BotoCoreError) as e:
+      fatal(f"cat failed for {source}: {e}")
+    except FileNotFoundError as e:
+      fatal(f"cat failed: {e}")
+    except BrokenPipeError:
+      _handle_broken_pipe()
+  try:
+    out.flush()
+  except BrokenPipeError:
+    _handle_broken_pipe()
+
+
+def _handle_broken_pipe():
+  """Exit cleanly when the stdout consumer goes away (e.g. `| head`)."""
+  devnull = os.open(os.devnull, os.O_WRONLY)
+  os.dup2(devnull, sys.stdout.fileno())
+  os.close(devnull)
+  sys.exit(0)
 
 
 def handle_ls(args, s3_client):
@@ -955,6 +1066,15 @@ def main():
       "ls", help="List objects in a bucket prefix (Format: r2://bucket-name/prefix)")
   parser_ls.add_argument("path", help="Target bucket path starting with r2://")
   parser_ls.set_defaults(func=handle_ls)
+
+  parser_cat = subparsers.add_parser(
+      "cat", help="Stream R2 objects and/or local files to stdout")
+  parser_cat.add_argument(
+      "sources",
+      nargs="+",
+      help="Files to concatenate: local paths and/or r2://bucket/key. "
+      "Wildcards (*, ?) are supported for R2 sources.")
+  parser_cat.set_defaults(func=handle_cat)
 
   parser_cp = subparsers.add_parser("cp", help="Copy files locally or remotely")
   parser_cp.add_argument("sources",
